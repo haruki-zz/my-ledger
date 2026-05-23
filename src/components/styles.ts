@@ -72,6 +72,68 @@ export const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10
   },
+  dropdown: {
+    gap: 8
+  },
+  dropdownTrigger: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 48,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  dropdownTriggerActive: {
+    borderColor: colors.primary
+  },
+  dropdownValue: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 23
+  },
+  dropdownPlaceholder: {
+    color: colors.muted,
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 23
+  },
+  dropdownIndicator: {
+    color: colors.muted,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 23,
+    marginLeft: 10
+  },
+  dropdownMenu: {
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    overflow: 'hidden'
+  },
+  dropdownOption: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  dropdownOptionActive: {
+    backgroundColor: colors.tint
+  },
+  dropdownOptionText: {
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 23
+  },
+  dropdownOptionTextActive: {
+    color: colors.primaryDark,
+    fontWeight: '800'
+  },
   label: {
     color: colors.ink,
     fontSize: 14,
