@@ -244,6 +244,42 @@ export async function getExpenses(ledgerId: string): Promise<Expense[]> {
   return attachSplits(rows || []);
 }
 
+export async function getExpensesByMonth(
+  ledgerId: string,
+  startDate: string,
+  endDate: string
+): Promise<Expense[]> {
+  const { data: rows, error: rowsError } = await supabase
+    .from('expenses')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .gte('spent_on', startDate)
+    .lte('spent_on', endDate)
+    .order('spent_on', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (rowsError) {
+    throw rowsError;
+  }
+
+  return attachSplits(rows || []);
+}
+
+export async function getFirstExpenseSpentOn(ledgerId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('spent_on')
+    .eq('ledger_id', ledgerId)
+    .order('spent_on', { ascending: true })
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.[0]?.spent_on || null;
+}
+
 export async function getExpense(expenseId: string): Promise<Expense> {
   const { data, error } = await supabase
     .from('expenses')

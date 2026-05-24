@@ -1,158 +1,230 @@
-import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { DailyChart, type DailyChartMode } from '@/src/components/DailyChart';
+import { PieChart } from '@/src/components/PieChart';
 import { colors, styles } from '@/src/components/styles';
-import { currentMonthPrefix, displayName, formatYen } from '@/src/lib/format';
-import { getExpenses, getMyLedger, getProfiles } from '@/src/lib/ledger';
-import { supabase } from '@/src/lib/supabase';
-import type { Expense, Ledger, Profile } from '@/src/types/database';
+import { useDashboardData } from '@/src/hooks/useDashboardData';
+import { displayName, formatYen } from '@/src/lib/format';
+import {
+  addMonths,
+  compareMonthKeys,
+  currentMonthKey,
+  formatMonthLabel,
+  type DashboardRange
+} from '@/src/lib/stats';
 
-let realtimeSubscriptionSequence = 0;
+type RangeOption = {
+  label: string;
+  value: DashboardRange;
+};
+
+const CHART_MODES: { label: string; value: DailyChartMode }[] = [
+  { label: '曲线', value: 'curve' },
+  { label: '柱状', value: 'bar' }
+];
 
 export default function DashboardScreen() {
-  const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, Profile>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [monthKey, setMonthKey] = useState(currentMonthKey());
+  const [range, setRange] = useState<DashboardRange>('all');
+  const [rangeMenuOpen, setRangeMenuOpen] = useState(false);
+  const [chartMode, setChartMode] = useState<DailyChartMode>('curve');
+  const {
+    ledger,
+    members,
+    currentUserId,
+    otherUserId,
+    minimumMonthKey,
+    loadedMonthKey,
+    stats,
+    loading,
+    refreshing,
+    error,
+    reload
+  } = useDashboardData(monthKey, range);
 
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-
-    try {
-      const currentLedger = await getMyLedger();
-      if (!currentLedger) {
-        router.replace('/ledger');
-        return;
-      }
-
-      const nextExpenses = await getExpenses(currentLedger.id);
-      const profileIds = nextExpenses.flatMap((expense) => [expense.paid_by, expense.recorded_by]);
-
-      setLedger(currentLedger);
-      setExpenses(nextExpenses);
-      setProfiles(await getProfiles(profileIds));
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '读取首页失败');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const ledgerId = ledger?.id;
+  const currentUserName = displayName(members.find((member) => member.user_id === currentUserId)?.profile.display_name);
+  const otherUserName = displayName(members.find((member) => member.user_id === otherUserId)?.profile.display_name);
+  const rangeOptions: RangeOption[] = [
+    { label: '双方', value: 'all' },
+    { label: currentUserName, value: 'current' },
+    { label: otherUserId ? otherUserName : '对方', value: 'other' }
+  ];
+  const selectedRangeLabel = rangeOptions.find((option) => option.value === range)?.label || '双方';
+  const atCurrentMonth = compareMonthKeys(monthKey, currentMonthKey()) >= 0;
+  const atMinimumMonth = minimumMonthKey ? compareMonthKeys(monthKey, minimumMonthKey) <= 0 : false;
+  const isSwitchingMonth = refreshing && Boolean(loadedMonthKey && loadedMonthKey !== monthKey);
 
   useEffect(() => {
-    if (!ledgerId) {
-      return undefined;
+    if (range === 'other' && !otherUserId) {
+      setRange('all');
     }
+  }, [otherUserId, range]);
 
-    const subscriptionId = ++realtimeSubscriptionSequence;
-    const channel = supabase
-      .channel(`ledger-dashboard-${ledgerId}-${subscriptionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expenses',
-          filter: `ledger_id=eq.${ledgerId}`
-        },
-        () => {
-          load();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expense_splits'
-        },
-        () => {
-          load();
-        }
-      )
-      .subscribe();
+  function moveMonth(amount: number) {
+    setMonthKey((current) => addMonths(current, amount));
+  }
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [ledgerId, load]);
-
-  const monthlyExpenses = useMemo(() => {
-    const monthPrefix = currentMonthPrefix();
-    return expenses.filter((expense) => expense.spent_on.startsWith(monthPrefix));
-  }, [expenses]);
-
-  const monthlyTotal = useMemo(
-    () => monthlyExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0),
-    [monthlyExpenses]
-  );
-
-  const recentExpenses = useMemo(() => expenses.slice(0, 5), [expenses]);
+  function selectRange(nextRange: DashboardRange) {
+    setRange(nextRange);
+    setRangeMenuOpen(false);
+  }
 
   return (
     <ScrollView
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
+      refreshControl={<RefreshControl refreshing={(loading && !ledger) || refreshing} onRefresh={reload} />}
       style={styles.page}
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>首页</Text>
+        <Text style={styles.title}>Dashboard</Text>
         <Text style={styles.muted}>{ledger ? ledger.name : '共享账本'}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <View style={styles.section}>
-        <Text style={styles.label}>本月支出</Text>
-        <Text style={{ color: colors.ink, fontSize: 34, fontWeight: '900' }}>
-          {formatYen(monthlyTotal)}
-        </Text>
-        <Text style={styles.muted}>本月 {monthlyExpenses.length} 笔</Text>
-      </View>
-
-      <View style={{ gap: 12 }}>
         <View style={styles.between}>
-          <Text style={styles.h2}>最近支出</Text>
-          <Pressable onPress={() => router.push('/(tabs)/history')}>
-            <Text style={{ color: colors.primaryDark, fontSize: 14, fontWeight: '800' }}>查看全部</Text>
+          <Pressable
+            disabled={atMinimumMonth}
+            onPress={() => moveMonth(-1)}
+            style={({ pressed }) => [
+              localStyles.iconButton,
+              atMinimumMonth && localStyles.disabledButton,
+              pressed && !atMinimumMonth && localStyles.pressed
+            ]}
+          >
+            <Ionicons color={atMinimumMonth ? colors.muted : colors.primaryDark} name="chevron-back" size={22} />
+          </Pressable>
+
+          <View style={{ alignItems: 'center', flex: 1 }}>
+            <Text style={styles.h2}>{formatMonthLabel(monthKey)}</Text>
+            {isSwitchingMonth ? <Text style={styles.muted}>正在更新...</Text> : null}
+          </View>
+
+          <Pressable
+            disabled={atCurrentMonth}
+            onPress={() => moveMonth(1)}
+            style={({ pressed }) => [
+              localStyles.iconButton,
+              atCurrentMonth && localStyles.disabledButton,
+              pressed && !atCurrentMonth && localStyles.pressed
+            ]}
+          >
+            <Ionicons color={atCurrentMonth ? colors.muted : colors.primaryDark} name="chevron-forward" size={22} />
           </Pressable>
         </View>
 
-        {recentExpenses.map((expense) => (
+        <View style={styles.dropdown}>
+          <Text style={styles.label}>统计对象</Text>
           <Pressable
-            key={expense.id}
-            onPress={() => router.push(`/expenses/${expense.id}`)}
-            style={styles.section}
+            onPress={() => setRangeMenuOpen((current) => !current)}
+            style={[styles.dropdownTrigger, rangeMenuOpen && styles.dropdownTriggerActive]}
           >
-            <View style={styles.between}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.h2}>{expense.category}</Text>
-                <Text style={styles.muted}>
-                  {expense.spent_on} · 支付人：{displayName(profiles[expense.paid_by]?.display_name)}
-                </Text>
-              </View>
-              <Text style={{ color: colors.ink, fontSize: 20, fontWeight: '900' }}>
-                {formatYen(expense.amount_yen)}
-              </Text>
-            </View>
+            <Text style={styles.dropdownValue}>{selectedRangeLabel}</Text>
+            <Text style={styles.dropdownIndicator}>{rangeMenuOpen ? '⌃' : '⌄'}</Text>
           </Pressable>
-        ))}
 
-        {!loading && recentExpenses.length === 0 ? (
-          <View style={styles.section}>
-            <Text style={styles.h2}>还没有支出</Text>
-            <Text style={styles.muted}>点击底部“记账”开始记录。</Text>
-          </View>
-        ) : null}
+          {rangeMenuOpen ? (
+            <View style={styles.dropdownMenu}>
+              {rangeOptions.map((option) => {
+                const selected = range === option.value;
+                const disabled = option.value === 'other' && !otherUserId;
+                return (
+                  <Pressable
+                    disabled={disabled}
+                    key={option.value}
+                    onPress={() => selectRange(option.value)}
+                    style={[
+                      styles.dropdownOption,
+                      selected && styles.dropdownOptionActive,
+                      disabled && localStyles.disabledButton
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownOptionText,
+                        selected && styles.dropdownOptionTextActive,
+                        disabled && localStyles.disabledText
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.between}>
+          <Text style={styles.label}>月度总支出</Text>
+          {refreshing ? <ActivityIndicator color={colors.primary} size="small" /> : null}
+        </View>
+        <Text style={{ color: colors.ink, fontSize: 34, fontWeight: '900' }}>
+          {formatYen(stats.totalYen)}
+        </Text>
+        <Text style={styles.muted}>
+          {stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} ${stats.count} 笔` : '这个月还没有支出记录'}
+        </Text>
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.between}>
+          <Text style={styles.h2}>类别占比</Text>
+          {isSwitchingMonth ? <Text style={styles.muted}>更新中</Text> : null}
+        </View>
+        <PieChart categories={stats.categories} totalYen={stats.totalYen} />
+      </View>
+
+      <View style={styles.section}>
+        <View style={styles.between}>
+          <Text style={styles.h2}>每日趋势</Text>
+          {isSwitchingMonth ? <Text style={styles.muted}>更新中</Text> : null}
+        </View>
+
+        <View style={styles.row}>
+          {CHART_MODES.map((mode) => {
+            const selected = chartMode === mode.value;
+            return (
+              <Pressable
+                key={mode.value}
+                onPress={() => setChartMode(mode.value)}
+                style={[styles.chip, selected && styles.chipActive]}
+              >
+                <Text style={styles.chipText}>{mode.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <DailyChart mode={chartMode} series={stats.dailySeries} />
       </View>
     </ScrollView>
   );
 }
+
+const localStyles = StyleSheet.create({
+  disabledButton: {
+    opacity: 0.45
+  },
+  disabledText: {
+    color: colors.muted
+  },
+  iconButton: {
+    alignItems: 'center',
+    backgroundColor: colors.tint,
+    borderColor: colors.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 44,
+    justifyContent: 'center',
+    width: 44
+  },
+  pressed: {
+    opacity: 0.75
+  }
+});
