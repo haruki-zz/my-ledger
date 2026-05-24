@@ -15,6 +15,12 @@ export type DailyStat = {
   amountYen: number;
 };
 
+export type MonthlyCategoryTrendStat = {
+  monthKey: string;
+  label: string;
+  amountYen: number;
+};
+
 export type DashboardStats = {
   totalYen: number;
   count: number;
@@ -130,7 +136,47 @@ export function buildDashboardStats(input: {
   };
 }
 
-function amountForRange(
+export function buildCategoryMonthlyTrend(input: {
+  expenses: Expense[];
+  category: string;
+  endMonthKey: string;
+  months: number;
+  range: DashboardRange;
+  currentUserId: string | null;
+  otherUserId: string | null;
+}): MonthlyCategoryTrendStat[] {
+  const monthCount = Math.max(1, input.months);
+  const monthKeys = Array.from({ length: monthCount }, (_, index) => (
+    addMonths(input.endMonthKey, index - monthCount + 1)
+  ));
+  const amountsByMonth = new Map(monthKeys.map((monthKey) => [monthKey, 0]));
+
+  for (const expense of input.expenses) {
+    if (expense.category !== input.category) {
+      continue;
+    }
+
+    const monthKey = monthKeyFromDateString(expense.spent_on);
+    if (!amountsByMonth.has(monthKey)) {
+      continue;
+    }
+
+    const amountYen = amountForRange(expense, input.range, input.currentUserId, input.otherUserId);
+    if (amountYen <= 0) {
+      continue;
+    }
+
+    amountsByMonth.set(monthKey, (amountsByMonth.get(monthKey) || 0) + amountYen);
+  }
+
+  return monthKeys.map((monthKey) => ({
+    monthKey,
+    label: formatShortMonthLabel(monthKey),
+    amountYen: amountsByMonth.get(monthKey) || 0
+  }));
+}
+
+export function amountForRange(
   expense: Expense,
   range: DashboardRange,
   currentUserId: string | null,
@@ -177,6 +223,11 @@ function monthStart(monthKey: string) {
 function parseMonthKey(monthKey: string) {
   const [year, month] = monthKey.split('-').map(Number);
   return [year, month] as const;
+}
+
+function formatShortMonthLabel(monthKey: string) {
+  const [, month] = parseMonthKey(monthKey);
+  return `${month}月`;
 }
 
 function formatDateString(date: Date) {

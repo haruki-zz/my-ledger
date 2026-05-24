@@ -34,6 +34,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
   const requestSequence = useRef(0);
   const hasLoadedData = useRef(false);
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
@@ -94,6 +95,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
       setMinimumMonthKey(nextMinimumMonthKey);
       setLoadedMonthKey(monthKey);
       setLoadedEndDateString(endDateString);
+      setDataVersion((current) => current + 1);
       hasLoadedData.current = true;
     } catch (loadError) {
       if (requestSequence.current === requestId) {
@@ -175,6 +177,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
     minimumMonthKey,
     loadedMonthKey,
     stats,
+    dataVersion,
     loading,
     refreshing,
     error,

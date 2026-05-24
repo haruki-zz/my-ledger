@@ -1,4 +1,4 @@
-import { Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { colors, styles } from '@/src/components/styles';
@@ -8,13 +8,14 @@ import type { CategoryStat } from '@/src/lib/stats';
 type PieChartProps = {
   categories: CategoryStat[];
   totalYen: number;
+  onCategoryPress?: (category: CategoryStat) => void;
 };
 
 const SIZE = 160;
 const CENTER = SIZE / 2;
 const RADIUS = 62;
 
-export function PieChart({ categories, totalYen }: PieChartProps) {
+export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProps) {
   if (totalYen <= 0 || categories.length === 0) {
     return (
       <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 180 }}>
@@ -52,7 +53,17 @@ export function PieChart({ categories, totalYen }: PieChartProps) {
 
       <View style={{ gap: 10 }}>
         {categories.map((category) => (
-          <View key={category.category} style={[styles.between, { alignItems: 'flex-start' }]}>
+          <Pressable
+            disabled={!onCategoryPress}
+            hitSlop={4}
+            key={category.category}
+            onPress={() => onCategoryPress?.(category)}
+            style={({ pressed }) => [
+              styles.between,
+              chartStyles.categoryRow,
+              pressed && onCategoryPress && chartStyles.categoryRowPressed
+            ]}
+          >
             <View style={{ flex: 1, flexDirection: 'row', gap: 8 }}>
               <View
                 style={{
@@ -71,7 +82,7 @@ export function PieChart({ categories, totalYen }: PieChartProps) {
             <Text style={{ color: colors.ink, fontSize: 16, fontWeight: '800' }}>
               {formatYen(category.amountYen)}
             </Text>
-          </View>
+          </Pressable>
         ))}
       </View>
     </View>
@@ -98,3 +109,16 @@ function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees
     y: cy + radius * Math.sin(angleInRadians)
   };
 }
+
+const chartStyles = StyleSheet.create({
+  categoryRow: {
+    alignItems: 'flex-start',
+    borderRadius: 8,
+    marginHorizontal: -6,
+    paddingHorizontal: 6,
+    paddingVertical: 2
+  },
+  categoryRowPressed: {
+    backgroundColor: colors.tint
+  }
+});
