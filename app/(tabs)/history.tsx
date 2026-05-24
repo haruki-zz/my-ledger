@@ -188,7 +188,7 @@ export default function HistoryScreen() {
       {!loading && expenses.length === 0 ? (
         <View style={styles.section}>
           <Text style={styles.h2}>还没有支出</Text>
-          <Text style={styles.muted}>点击底部“记账”添加第一条 Supabase 持久化记录。</Text>
+          <Text style={styles.muted}>点击悬浮“记账”按钮添加第一条 Supabase 持久化记录。</Text>
         </View>
       ) : null}
     </ScrollView>
