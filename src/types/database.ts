@@ -68,6 +68,38 @@ export type Database = {
           joined_at?: string;
         };
       };
+      ledger_categories: {
+        Row: {
+          id: string;
+          ledger_id: string;
+          category_name: string;
+          split_ratio_a: number;
+          split_ratio_b: number;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          ledger_id: string;
+          category_name: string;
+          split_ratio_a?: number;
+          split_ratio_b?: number;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          ledger_id?: string;
+          category_name?: string;
+          split_ratio_a?: number;
+          split_ratio_b?: number;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       expenses: {
         Row: {
           id: string;
@@ -137,6 +169,24 @@ export type Database = {
         Args: { p_invite_code: string };
         Returns: Database['public']['Tables']['ledgers']['Row'];
       };
+      seed_default_categories: {
+        Args: { p_ledger_id: string };
+        Returns: undefined;
+      };
+      save_ledger_category: {
+        Args: {
+          p_ledger_id: string;
+          p_category_name: string;
+          p_split_ratio_a: number;
+          p_split_ratio_b: number;
+          p_sort_order: number;
+        };
+        Returns: Database['public']['Tables']['ledger_categories']['Row'];
+      };
+      delete_ledger_category: {
+        Args: { p_ledger_id: string; p_category_name: string };
+        Returns: undefined;
+      };
       save_expense: {
         Args: {
           p_expense_id: string | null;
@@ -166,6 +216,7 @@ export type Database = {
 export type Profile = Database['public']['Tables']['profiles']['Row'];
 export type Ledger = Database['public']['Tables']['ledgers']['Row'];
 export type LedgerMember = Database['public']['Tables']['ledger_members']['Row'];
+export type LedgerCategory = Database['public']['Tables']['ledger_categories']['Row'];
 export type ExpenseRow = Database['public']['Tables']['expenses']['Row'];
 export type ExpenseSplitRow = Database['public']['Tables']['expense_splits']['Row'];
 

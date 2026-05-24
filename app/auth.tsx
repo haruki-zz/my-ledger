@@ -29,7 +29,7 @@ export default function AuthScreen() {
           throw authError;
         }
 
-        router.replace('/ledger');
+        router.replace('/');
       } else {
         const { data, error: authError } = await supabase.auth.signUp({
           email: email.trim(),
@@ -45,7 +45,7 @@ export default function AuthScreen() {
         }
 
         if (data.session) {
-          router.replace('/ledger');
+          router.replace('/');
           return;
         }
 
@@ -68,7 +68,7 @@ export default function AuthScreen() {
   }
 
   if (session) {
-    return <Redirect href="/ledger" />;
+    return <Redirect href="/" />;
   }
 
   return (

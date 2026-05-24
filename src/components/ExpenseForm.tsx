@@ -1,12 +1,23 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { colors, styles } from '@/src/components/styles';
-import { EXPENSE_CATEGORIES, getExpenseCategorySplitRatio } from '@/src/lib/categories';
+import {
+  DEFAULT_EXPENSE_CATEGORY_SPLIT_RATIO,
+  EXPENSE_CATEGORIES,
+  getExpenseCategorySplitRatio
+} from '@/src/lib/categories';
 import { displayName, todayDateString } from '@/src/lib/format';
 import { saveExpense } from '@/src/lib/ledger';
-import type { Expense, ExpenseOwnership, Ledger, LedgerMemberProfile, Profile } from '@/src/types/database';
+import type {
+  Expense,
+  ExpenseOwnership,
+  Ledger,
+  LedgerCategory,
+  LedgerMemberProfile,
+  Profile
+} from '@/src/types/database';
 
 type Props = {
   ledger: Ledger;
@@ -15,6 +26,7 @@ type Props = {
   currentProfile?: Profile;
   expense?: Expense;
   profilesById: Record<string, Profile>;
+  categories?: LedgerCategory[];
 };
 
 type SplitMode = 'amount' | 'ratio';
@@ -77,9 +89,31 @@ export function ExpenseForm({
   currentUserId,
   currentProfile,
   expense,
-  profilesById
+  profilesById,
+  categories
 }: Props) {
   const sortedMembers = useMemo(() => members.slice(0, 2), [members]);
+  const categoryRatiosByName = useMemo(
+    () => new Map(categories?.map((item) => [
+      item.category_name,
+      [item.split_ratio_a, item.split_ratio_b] as const
+    ]) || []),
+    [categories]
+  );
+
+  const getPresetSplitRatios = useCallback((nextCategory: string): readonly [number, number] => {
+    const categoryConfig = categoryRatiosByName.get(nextCategory);
+    if (categoryConfig) {
+      return categoryConfig;
+    }
+
+    if (categories) {
+      return DEFAULT_EXPENSE_CATEGORY_SPLIT_RATIO;
+    }
+
+    return getExpenseCategorySplitRatio(nextCategory);
+  }, [categories, categoryRatiosByName]);
+
   const [amount, setAmount] = useState(expense ? String(expense.amount_yen) : '');
   const [category, setCategory] = useState(expense?.category.trim() || '');
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
@@ -97,7 +131,7 @@ export function ExpenseForm({
 
     const amountYen = parsePositiveInteger(amount);
     if (amountYen && sortedMembers.length === 2) {
-      return toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, getExpenseCategorySplitRatio(category)));
+      return toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, getPresetSplitRatios(category)));
     }
 
     return toEmptySplitValues(sortedMembers);
@@ -109,19 +143,22 @@ export function ExpenseForm({
       return toRatioValues(sortedMembers, [firstRatio, 100 - firstRatio]);
     }
 
-    return toRatioValues(sortedMembers, getExpenseCategorySplitRatio(category));
+    return toRatioValues(sortedMembers, getPresetSplitRatios(category));
   });
   const [lastEditedAmountUserId, setLastEditedAmountUserId] = useState<string | null>(null);
   const [splitValuesTouched, setSplitValuesTouched] = useState(false);
 
   const categoryOptions = useMemo(() => {
+    const configuredOptions = categories === undefined
+      ? [...EXPENSE_CATEGORIES]
+      : categories.map((item) => item.category_name);
     const existingCategory = expense?.category.trim();
-    if (existingCategory && !EXPENSE_CATEGORIES.includes(existingCategory as (typeof EXPENSE_CATEGORIES)[number])) {
-      return [...EXPENSE_CATEGORIES, existingCategory];
+    if (existingCategory && !configuredOptions.includes(existingCategory)) {
+      return [...configuredOptions, existingCategory];
     }
 
-    return EXPENSE_CATEGORIES;
-  }, [expense?.category]);
+    return configuredOptions;
+  }, [categories, expense?.category]);
 
   const recordedByName = displayName(
     expense ? profilesById[expense.recorded_by]?.display_name : currentProfile?.display_name
@@ -175,7 +212,7 @@ export function ExpenseForm({
   }
 
   function applyPresetSplits(nextCategory: string, nextAmount = amount) {
-    const presetRatios = getExpenseCategorySplitRatio(nextCategory);
+    const presetRatios = getPresetSplitRatios(nextCategory);
     setRatioValues(toRatioValues(sortedMembers, presetRatios));
     setLastEditedAmountUserId(null);
 
@@ -235,12 +272,12 @@ export function ExpenseForm({
         const firstRatio = (firstAmount / amountYen) * 100;
         setRatioValues(toRatioValues(sortedMembers, [firstRatio, 100 - firstRatio]));
       } else {
-        setRatioValues(toRatioValues(sortedMembers, getExpenseCategorySplitRatio(category)));
+        setRatioValues(toRatioValues(sortedMembers, getPresetSplitRatios(category)));
       }
     }
 
     if (nextMode === 'amount' && amountYen) {
-      syncAmountValuesFromRatios(amountYen, currentRatios() || getExpenseCategorySplitRatio(category));
+      syncAmountValuesFromRatios(amountYen, currentRatios() || getPresetSplitRatios(category));
       setLastEditedAmountUserId(null);
     }
 
@@ -362,7 +399,7 @@ export function ExpenseForm({
       if (router.canGoBack()) {
         router.back();
       } else {
-        router.replace('/expenses');
+        router.replace('/(tabs)/history');
       }
     } catch (submitError) {
       Alert.alert('保存失败', submitError instanceof Error ? submitError.message : '请检查输入内容');
@@ -396,6 +433,11 @@ export function ExpenseForm({
           </Pressable>
           {categoryMenuOpen ? (
             <View style={styles.dropdownMenu}>
+              {categoryOptions.length === 0 ? (
+                <View style={styles.dropdownOption}>
+                  <Text style={styles.muted}>暂无类别，请先在设置中添加</Text>
+                </View>
+              ) : null}
               {categoryOptions.map((option) => {
                 const selected = option === category;
                 return (

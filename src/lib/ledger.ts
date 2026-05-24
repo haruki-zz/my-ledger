@@ -5,6 +5,7 @@ import type {
   ExpenseRow,
   ExpenseSplitRow,
   Ledger,
+  LedgerCategory,
   LedgerMember,
   LedgerMemberProfile,
   Profile
@@ -130,6 +131,87 @@ export async function getLedgerMembers(ledgerId: string): Promise<LedgerMemberPr
       updated_at: member.joined_at
     }
   }));
+}
+
+export async function getLedgerCategories(ledgerId: string): Promise<LedgerCategory[]> {
+  const { data, error } = await supabase
+    .from('ledger_categories')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .order('sort_order', { ascending: true })
+    .order('category_name', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+export function isLedgerCategoriesSchemaError(error: unknown) {
+  const message = getErrorMessage(error);
+  return (
+    message.includes('ledger_categories') ||
+    message.includes('seed_default_categories') ||
+    message.includes('save_ledger_category') ||
+    message.includes('delete_ledger_category')
+  ) && (
+    message.includes('Could not find') ||
+    message.includes('does not exist') ||
+    message.includes('schema cache') ||
+    message.includes('relation') ||
+    message.includes('function')
+  );
+}
+
+export function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string') {
+      return message;
+    }
+  }
+
+  return String(error);
+}
+
+export type SaveLedgerCategoryInput = {
+  ledgerId: string;
+  categoryName: string;
+  splitRatioA: number;
+  splitRatioB: number;
+  sortOrder: number;
+};
+
+export async function saveLedgerCategory(input: SaveLedgerCategoryInput): Promise<LedgerCategory> {
+  const { data, error } = await supabase.rpc('save_ledger_category', {
+    p_ledger_id: input.ledgerId,
+    p_category_name: input.categoryName,
+    p_split_ratio_a: input.splitRatioA,
+    p_split_ratio_b: input.splitRatioB,
+    p_sort_order: input.sortOrder
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function deleteLedgerCategory(ledgerId: string, categoryName: string) {
+  const { error } = await supabase.rpc('delete_ledger_category', {
+    p_ledger_id: ledgerId,
+    p_category_name: categoryName
+  });
+
+  if (error) {
+    throw error;
+  }
 }
 
 export async function getProfiles(userIds: string[]): Promise<Record<string, Profile>> {

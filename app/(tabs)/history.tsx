@@ -7,18 +7,16 @@ import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
   getExpenses,
-  getLedgerMembers,
   getMyLedger,
   getProfiles
 } from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
-import type { Expense, Ledger, LedgerMemberProfile, Profile } from '@/src/types/database';
+import type { Expense, Ledger, Profile } from '@/src/types/database';
 
 let realtimeSubscriptionSequence = 0;
 
-export default function ExpensesScreen() {
+export default function HistoryScreen() {
   const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
@@ -35,16 +33,16 @@ export default function ExpensesScreen() {
         return;
       }
 
-      const [nextMembers, nextExpenses] = await Promise.all([
-        getLedgerMembers(currentLedger.id),
-        getExpenses(currentLedger.id)
+      const nextExpenses = await getExpenses(currentLedger.id);
+      const profileIds = nextExpenses.flatMap((expense) => [
+        expense.paid_by,
+        expense.recorded_by,
+        ...expense.splits.map((split) => split.user_id)
       ]);
-      const profileIds = nextExpenses.flatMap((expense) => [expense.paid_by, expense.recorded_by]);
 
       setLedger(currentLedger);
-      setMembers(nextMembers);
       setExpenses(nextExpenses);
-      setProfiles(await getProfiles([...nextMembers.map((member) => member.user_id), ...profileIds]));
+      setProfiles(await getProfiles(profileIds));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '读取支出失败');
     } finally {
@@ -65,7 +63,7 @@ export default function ExpensesScreen() {
 
     const subscriptionId = ++realtimeSubscriptionSequence;
     const channel = supabase
-      .channel(`ledger-expenses-${ledgerId}-${subscriptionId}`)
+      .channel(`ledger-history-${ledgerId}-${subscriptionId}`)
       .on(
         'postgres_changes',
         {
@@ -125,14 +123,9 @@ export default function ExpensesScreen() {
       style={styles.page}
       contentContainerStyle={styles.content}
     >
-      <View style={styles.between}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>支出明细</Text>
-          <Text style={styles.muted}>{ledger ? ledger.name : '共享账本'}</Text>
-        </View>
-        <Pressable onPress={() => router.push('/expenses/new')} style={[styles.button, { minHeight: 44 }]}>
-          <Text style={styles.buttonText}>记一笔</Text>
-        </Pressable>
+      <View>
+        <Text style={styles.title}>支出明细</Text>
+        <Text style={styles.muted}>{ledger ? ledger.name : '共享账本'}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -195,13 +188,9 @@ export default function ExpensesScreen() {
       {!loading && expenses.length === 0 ? (
         <View style={styles.section}>
           <Text style={styles.h2}>还没有支出</Text>
-          <Text style={styles.muted}>点击“记一笔”添加第一条 Supabase 持久化记录。</Text>
+          <Text style={styles.muted}>点击底部“记账”添加第一条 Supabase 持久化记录。</Text>
         </View>
       ) : null}
-
-      <Pressable onPress={() => router.push('/ledger')} style={[styles.button, styles.secondaryButton]}>
-        <Text style={[styles.buttonText, styles.secondaryButtonText]}>返回账本</Text>
-      </Pressable>
     </ScrollView>
   );
 }

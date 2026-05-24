@@ -4,14 +4,22 @@ import { ActivityIndicator, Text, View } from 'react-native';
 
 import { ExpenseForm } from '@/src/components/ExpenseForm';
 import { styles } from '@/src/components/styles';
-import { getExpense, getLedgerMembers, getMyLedger, getProfiles } from '@/src/lib/ledger';
+import {
+  getExpense,
+  getErrorMessage,
+  getLedgerCategories,
+  getLedgerMembers,
+  getMyLedger,
+  getProfiles
+} from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
-import type { Expense, Ledger, LedgerMemberProfile, Profile } from '@/src/types/database';
+import type { Expense, Ledger, LedgerCategory, LedgerMemberProfile, Profile } from '@/src/types/database';
 
 export default function EditExpenseScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
+  const [categories, setCategories] = useState<LedgerCategory[] | undefined>(undefined);
   const [expense, setExpense] = useState<Expense | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
@@ -25,16 +33,17 @@ export default function EditExpenseScreen() {
         throw new Error('缺少支出 ID');
       }
 
-      const [{ data: userData }, currentLedger, currentExpense] = await Promise.all([
-        supabase.auth.getUser(),
-        getMyLedger(),
-        getExpense(expenseId)
-      ]);
+      const { data: userData } = await supabase.auth.getUser();
 
       if (!userData.user) {
         router.replace('/auth');
         return;
       }
+
+      const [currentLedger, currentExpense] = await Promise.all([
+        getMyLedger(),
+        getExpense(expenseId)
+      ]);
 
       if (!currentLedger) {
         router.replace('/ledger');
@@ -42,6 +51,13 @@ export default function EditExpenseScreen() {
       }
 
       const nextMembers = await getLedgerMembers(currentLedger.id);
+      let nextCategories: LedgerCategory[] | undefined;
+      try {
+        const ledgerCategories = await getLedgerCategories(currentLedger.id);
+        nextCategories = ledgerCategories.length > 0 ? ledgerCategories : undefined;
+      } catch (categoriesError) {
+        console.warn('Falling back to default categories:', getErrorMessage(categoriesError));
+      }
       const profileIds = [
         ...nextMembers.map((member) => member.user_id),
         currentExpense.paid_by,
@@ -53,10 +69,11 @@ export default function EditExpenseScreen() {
       setCurrentUserId(userData.user.id);
       setLedger(currentLedger);
       setMembers(nextMembers);
+      setCategories(nextCategories);
       setExpense(currentExpense);
       setProfiles(nextProfiles);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '加载失败');
+      setError(getErrorMessage(loadError));
     } finally {
       setLoading(false);
     }
@@ -86,6 +103,7 @@ export default function EditExpenseScreen() {
     <ExpenseForm
       currentProfile={profiles[currentUserId]}
       currentUserId={currentUserId}
+      categories={categories}
       expense={expense}
       ledger={ledger}
       members={members}

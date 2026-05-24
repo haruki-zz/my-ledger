@@ -6,8 +6,22 @@ export function formatYen(value: number) {
   }).format(value);
 }
 
+function padDatePart(value: number) {
+  return String(value).padStart(2, '0');
+}
+
 export function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
+  const date = new Date();
+  return [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate())
+  ].join('-');
+}
+
+export function currentMonthPrefix() {
+  const date = new Date();
+  return [date.getFullYear(), padDatePart(date.getMonth() + 1)].join('-');
 }
 
 export function displayName(name: string | null | undefined) {

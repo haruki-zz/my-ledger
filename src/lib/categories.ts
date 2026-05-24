@@ -30,6 +30,15 @@ export const EXPENSE_CATEGORY_SPLIT_RATIOS: Record<ExpenseCategory, readonly [nu
   其他: [50, 50]
 };
 
+export function getDefaultCategories() {
+  return EXPENSE_CATEGORIES.map((categoryName, index) => ({
+    categoryName,
+    splitRatioA: EXPENSE_CATEGORY_SPLIT_RATIOS[categoryName][0],
+    splitRatioB: EXPENSE_CATEGORY_SPLIT_RATIOS[categoryName][1],
+    sortOrder: (index + 1) * 10
+  }));
+}
+
 export function getExpenseCategorySplitRatio(category: string): readonly [number, number] {
   if ((EXPENSE_CATEGORIES as readonly string[]).includes(category)) {
     return EXPENSE_CATEGORY_SPLIT_RATIOS[category as ExpenseCategory];

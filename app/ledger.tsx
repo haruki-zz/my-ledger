@@ -1,15 +1,11 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
-import { colors, styles } from '@/src/components/styles';
-import { createLedger, getLedgerMembers, getMyLedger, joinLedger } from '@/src/lib/ledger';
-import { supabase } from '@/src/lib/supabase';
-import type { Ledger, LedgerMemberProfile } from '@/src/types/database';
+import { styles } from '@/src/components/styles';
+import { createLedger, getMyLedger, joinLedger } from '@/src/lib/ledger';
 
 export default function LedgerScreen() {
-  const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [ledgerName, setLedgerName] = useState('我们的账本');
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(true);
@@ -22,8 +18,10 @@ export default function LedgerScreen() {
 
     try {
       const currentLedger = await getMyLedger();
-      setLedger(currentLedger);
-      setMembers(currentLedger ? await getLedgerMembers(currentLedger.id) : []);
+      if (currentLedger) {
+        router.replace('/(tabs)');
+        return;
+      }
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '读取账本失败');
     } finally {
@@ -40,9 +38,8 @@ export default function LedgerScreen() {
     setError(null);
 
     try {
-      const created = await createLedger(ledgerName);
-      setLedger(created);
-      setMembers(await getLedgerMembers(created.id));
+      await createLedger(ledgerName);
+      router.replace('/(tabs)');
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : '创建账本失败');
     } finally {
@@ -55,24 +52,13 @@ export default function LedgerScreen() {
     setError(null);
 
     try {
-      const joined = await joinLedger(inviteCode);
-      setLedger(joined);
-      setMembers(await getLedgerMembers(joined.id));
+      await joinLedger(inviteCode);
+      router.replace('/(tabs)');
     } catch (joinError) {
       setError(joinError instanceof Error ? joinError.message : '加入账本失败');
     } finally {
       setSubmitting(false);
     }
-  }
-
-  async function signOut() {
-    const { error: signOutError } = await supabase.auth.signOut();
-    if (signOutError) {
-      Alert.alert('退出失败', signOutError.message);
-      return;
-    }
-
-    router.replace('/auth');
   }
 
   return (
@@ -88,72 +74,31 @@ export default function LedgerScreen() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {ledger ? (
-        <>
-          <View style={styles.section}>
-            <View style={styles.between}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.h2}>{ledger.name}</Text>
-                <Text style={styles.muted}>邀请码：{ledger.invite_code}</Text>
-              </View>
-              <View
-                style={{
-                  backgroundColor: colors.tint,
-                  borderRadius: 8,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6
-                }}
-              >
-                <Text style={{ color: colors.primaryDark, fontWeight: '800' }}>{members.length}/2</Text>
-              </View>
-            </View>
+      <View style={styles.section}>
+        <Text style={styles.h2}>创建账本</Text>
+        <Text style={styles.label}>账本名称</Text>
+        <TextInput onChangeText={setLedgerName} style={styles.input} value={ledgerName} />
+        <Pressable disabled={submitting} onPress={handleCreate} style={styles.button}>
+          <Text style={styles.buttonText}>{submitting ? '处理中...' : '创建并进入'}</Text>
+        </Pressable>
+      </View>
 
-            <View style={{ gap: 8 }}>
-              {members.map((member) => (
-                <Text key={member.user_id} style={styles.body}>
-                  {member.profile.display_name}
-                </Text>
-              ))}
-            </View>
-
-            <Pressable onPress={() => router.push('/expenses')} style={styles.button}>
-              <Text style={styles.buttonText}>进入支出明细</Text>
-            </Pressable>
-          </View>
-
-          <Pressable onPress={signOut} style={[styles.button, styles.secondaryButton]}>
-            <Text style={[styles.buttonText, styles.secondaryButtonText]}>退出登录</Text>
-          </Pressable>
-        </>
-      ) : (
-        <>
-          <View style={styles.section}>
-            <Text style={styles.h2}>创建账本</Text>
-            <Text style={styles.label}>账本名称</Text>
-            <TextInput onChangeText={setLedgerName} style={styles.input} value={ledgerName} />
-            <Pressable disabled={submitting} onPress={handleCreate} style={styles.button}>
-              <Text style={styles.buttonText}>{submitting ? '处理中...' : '创建并进入'}</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.h2}>加入账本</Text>
-            <Text style={styles.label}>邀请码</Text>
-            <TextInput
-              autoCapitalize="characters"
-              onChangeText={setInviteCode}
-              placeholder="例如：A1B2C3D4"
-              style={styles.input}
-              value={inviteCode}
-            />
-            <Pressable disabled={submitting} onPress={handleJoin} style={[styles.button, styles.secondaryButton]}>
-              <Text style={[styles.buttonText, styles.secondaryButtonText]}>
-                {submitting ? '处理中...' : '加入账本'}
-              </Text>
-            </Pressable>
-          </View>
-        </>
-      )}
+      <View style={styles.section}>
+        <Text style={styles.h2}>加入账本</Text>
+        <Text style={styles.label}>邀请码</Text>
+        <TextInput
+          autoCapitalize="characters"
+          onChangeText={setInviteCode}
+          placeholder="例如：A1B2C3D4"
+          style={styles.input}
+          value={inviteCode}
+        />
+        <Pressable disabled={submitting} onPress={handleJoin} style={[styles.button, styles.secondaryButton]}>
+          <Text style={[styles.buttonText, styles.secondaryButtonText]}>
+            {submitting ? '处理中...' : '加入账本'}
+          </Text>
+        </Pressable>
+      </View>
     </ScrollView>
   );
 }
