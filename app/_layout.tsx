@@ -18,6 +18,10 @@ export default function RootLayout() {
         <Stack.Screen name="auth" options={{ title: '登录' }} />
         <Stack.Screen name="ledger" options={{ title: '共享账本' }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        {/* Settings detail screens */}
+        <Stack.Screen name="settings/account" options={{ title: '账户信息' }} />
+        <Stack.Screen name="settings/categories" options={{ title: '类别管理' }} />
+        {/* Expense detail screens */}
         <Stack.Screen name="expenses/new" options={{ title: '记一笔', presentation: 'modal' }} />
         <Stack.Screen name="expenses/[id]" options={{ title: '编辑支出' }} />
       </Stack>
