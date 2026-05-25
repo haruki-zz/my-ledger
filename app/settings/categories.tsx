@@ -8,6 +8,7 @@ import {
   getErrorMessage,
   getLedgerCategories,
   getLedgerMembers,
+  seedDefaultLedgerCategories,
   saveLedgerCategory
 } from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
@@ -34,11 +35,32 @@ export default function CategorySettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [savingCategory, setSavingCategory] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const categoryLoadSequenceRef = useRef(0);
+  const legacySeedPromisesRef = useRef(new Map<string, Promise<void>>());
   const realtimeSubscriptionSequenceRef = useRef(0);
 
+  async function seedLegacyCategories(ledgerId: string) {
+    const existingPromise = legacySeedPromisesRef.current.get(ledgerId);
+    if (existingPromise) {
+      await existingPromise;
+      return;
+    }
+
+    const promise = seedDefaultLedgerCategories(ledgerId).finally(() => {
+      legacySeedPromisesRef.current.delete(ledgerId);
+    });
+
+    legacySeedPromisesRef.current.set(ledgerId, promise);
+    await promise;
+  }
+
   const loadCategoryData = useCallback(async (currentLedger = ledger) => {
+    const loadSequence = ++categoryLoadSequenceRef.current;
+
     if (!currentLedger) {
-      setLoading(false);
+      if (loadSequence === categoryLoadSequenceRef.current) {
+        setLoading(false);
+      }
       return;
     }
 
@@ -46,17 +68,29 @@ export default function CategorySettingsScreen() {
     setLoading(true);
 
     try {
-      const [nextMembers, nextCategories] = await Promise.all([
+      const [nextMembers, loadedCategories] = await Promise.all([
         getLedgerMembers(currentLedger.id),
         getLedgerCategories(currentLedger.id)
       ]);
+      let nextCategories = loadedCategories;
 
-      setMembers(nextMembers);
-      setCategories(nextCategories);
+      if (nextCategories.length === 0) {
+        await seedLegacyCategories(currentLedger.id);
+        nextCategories = await getLedgerCategories(currentLedger.id);
+      }
+
+      if (loadSequence === categoryLoadSequenceRef.current) {
+        setMembers(nextMembers);
+        setCategories(nextCategories);
+      }
     } catch (loadError) {
-      setError(getErrorMessage(loadError));
+      if (loadSequence === categoryLoadSequenceRef.current) {
+        setError(getErrorMessage(loadError));
+      }
     } finally {
-      setLoading(false);
+      if (loadSequence === categoryLoadSequenceRef.current) {
+        setLoading(false);
+      }
     }
   }, [ledger]);
 

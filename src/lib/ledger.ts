@@ -148,6 +148,16 @@ export async function getLedgerCategories(ledgerId: string): Promise<LedgerCateg
   return data || [];
 }
 
+export async function seedDefaultLedgerCategories(ledgerId: string) {
+  const { error } = await supabase.rpc('seed_default_categories', {
+    p_ledger_id: ledgerId
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
 export function isLedgerCategoriesSchemaError(error: unknown) {
   const message = getErrorMessage(error);
   return (
