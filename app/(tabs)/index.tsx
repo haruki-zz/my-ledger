@@ -27,6 +27,7 @@ const CHART_MODES: { label: string; value: DailyChartMode }[] = [
   { label: '柱状', value: 'bar' }
 ];
 
+const CHART_MODE_SEGMENT_WIDTH = `${100 / CHART_MODES.length}%` as `${number}%`;
 const RANGE_VALUES: DashboardRange[] = ['all', 'current', 'other'];
 const RANGE_SEGMENT_WIDTH = `${100 / RANGE_VALUES.length}%` as `${number}%`;
 const SWIPE_DISTANCE = 36;
@@ -63,6 +64,8 @@ export default function DashboardScreen() {
   ];
   const selectedRangeIndex = Math.max(0, RANGE_VALUES.indexOf(range));
   const selectedRangeLeft = `${selectedRangeIndex * (100 / RANGE_VALUES.length)}%` as `${number}%`;
+  const selectedChartModeIndex = Math.max(0, CHART_MODES.findIndex((mode) => mode.value === chartMode));
+  const selectedChartModeLeft = `${selectedChartModeIndex * (100 / CHART_MODES.length)}%` as `${number}%`;
   const atCurrentMonth = compareMonthKeys(monthKey, currentMonthKey()) >= 0;
   const atMinimumMonth = minimumMonthKey ? compareMonthKeys(monthKey, minimumMonthKey) <= 0 : false;
   const isSwitchingMonth = refreshing && Boolean(loadedMonthKey && loadedMonthKey !== monthKey);
@@ -201,24 +204,39 @@ export default function DashboardScreen() {
         </View>
 
         <View style={styles.section}>
-          <View style={styles.between}>
-            <Text style={styles.h2}>每日趋势</Text>
-            {isSwitchingMonth ? <Text style={styles.muted}>更新中</Text> : null}
-          </View>
+          <View style={localStyles.dailyTrendHeader}>
+            <View style={localStyles.dailyTrendTitle}>
+              <Text style={styles.h2}>每日趋势</Text>
+              {isSwitchingMonth ? <Text style={styles.muted}>更新中</Text> : null}
+            </View>
 
-          <View style={styles.row}>
-            {CHART_MODES.map((mode) => {
-              const selected = chartMode === mode.value;
-              return (
-                <Pressable
-                  key={mode.value}
-                  onPress={() => setChartMode(mode.value)}
-                  style={[styles.chip, selected && styles.chipActive]}
-                >
-                  <Text style={styles.chipText}>{mode.label}</Text>
-                </Pressable>
-              );
-            })}
+            <View style={localStyles.chartPillTrack}>
+              <View style={[localStyles.chartPillIndicator, { left: selectedChartModeLeft }]} />
+              {CHART_MODES.map((mode) => {
+                const selected = chartMode === mode.value;
+                return (
+                  <Pressable
+                    key={mode.value}
+                    onPress={() => setChartMode(mode.value)}
+                    style={({ pressed }) => [
+                      localStyles.chartPill,
+                      pressed && localStyles.pressed
+                    ]}
+                  >
+                    <Text
+                      ellipsizeMode="tail"
+                      numberOfLines={1}
+                      style={[
+                        localStyles.chartPillText,
+                        selected && localStyles.chartPillTextActive
+                      ]}
+                    >
+                      {mode.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
           <DailyChart mode={chartMode} series={stats.dailySeries} />
@@ -263,6 +281,49 @@ const localStyles = StyleSheet.create({
   centerText: {
     textAlign: 'center'
   },
+  chartPill: {
+    alignItems: 'center',
+    flex: 1,
+    height: '100%',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    zIndex: 1
+  },
+  chartPillIndicator: {
+    backgroundColor: colors.surface,
+    borderColor: colors.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    bottom: 3,
+    pointerEvents: 'none',
+    position: 'absolute',
+    top: 3,
+    width: CHART_MODE_SEGMENT_WIDTH
+  },
+  chartPillText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+    textAlign: 'center'
+  },
+  chartPillTextActive: {
+    color: colors.primaryDark,
+    fontWeight: '900'
+  },
+  chartPillTrack: {
+    backgroundColor: colors.tint,
+    borderColor: colors.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    height: 34,
+    maxWidth: 160,
+    minWidth: 132,
+    overflow: 'hidden',
+    position: 'relative'
+  },
   compactIconButton: {
     alignItems: 'center',
     backgroundColor: colors.tint,
@@ -278,6 +339,17 @@ const localStyles = StyleSheet.create({
   },
   disabledText: {
     color: colors.muted
+  },
+  dailyTrendHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between'
+  },
+  dailyTrendTitle: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0
   },
   monthLabel: {
     color: colors.ink,
@@ -309,6 +381,7 @@ const localStyles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     bottom: 3,
+    pointerEvents: 'none',
     position: 'absolute',
     top: 3,
     width: RANGE_SEGMENT_WIDTH
