@@ -32,7 +32,18 @@ export async function updateMyProfile(displayName: string) {
   }
 }
 
-export async function getMyLedger(): Promise<Ledger | null> {
+export type LedgerMembership = {
+  ledger: Ledger;
+  joined_at: string;
+  user_id: string;
+  isOwner: boolean;
+};
+
+type LedgerMembershipRow = LedgerMember & {
+  ledger: Ledger | null;
+};
+
+export async function getMyLedgerMemberships(): Promise<LedgerMembership[]> {
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError) {
     throw userError;
@@ -40,35 +51,33 @@ export async function getMyLedger(): Promise<Ledger | null> {
 
   const userId = userData.user?.id;
   if (!userId) {
-    return null;
+    return [];
   }
 
   const { data: memberships, error: membershipError } = await supabase
     .from('ledger_members')
-    .select('ledger_id')
+    .select('*, ledger:ledgers(*)')
     .eq('user_id', userId)
-    .limit(1);
+    .order('joined_at', { ascending: true });
 
   if (membershipError) {
     throw membershipError;
   }
 
-  const ledgerId = memberships?.[0]?.ledger_id;
-  if (!ledgerId) {
-    return null;
-  }
+  return ((memberships || []) as LedgerMembershipRow[])
+    .map((membership) => {
+      if (!membership.ledger) {
+        return null;
+      }
 
-  const { data: ledger, error: ledgerError } = await supabase
-    .from('ledgers')
-    .select('*')
-    .eq('id', ledgerId)
-    .single();
-
-  if (ledgerError) {
-    throw ledgerError;
-  }
-
-  return ledger;
+      return {
+        ledger: membership.ledger,
+        joined_at: membership.joined_at,
+        user_id: membership.user_id,
+        isOwner: membership.ledger.created_by === userId
+      };
+    })
+    .filter((membership): membership is LedgerMembership => Boolean(membership));
 }
 
 export async function createLedger(name: string): Promise<Ledger> {
@@ -93,6 +102,26 @@ export async function joinLedger(inviteCode: string): Promise<Ledger> {
   }
 
   return data;
+}
+
+export async function leaveLedger(ledgerId: string) {
+  const { error } = await supabase.rpc('leave_ledger', {
+    p_ledger_id: ledgerId
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function deleteLedger(ledgerId: string) {
+  const { error } = await supabase.rpc('delete_ledger', {
+    p_ledger_id: ledgerId
+  });
+
+  if (error) {
+    throw error;
+  }
 }
 
 export async function getLedgerMembers(ledgerId: string): Promise<LedgerMemberProfile[]> {

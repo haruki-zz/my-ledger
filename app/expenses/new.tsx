@@ -4,10 +4,10 @@ import { ActivityIndicator, Text, View } from 'react-native';
 
 import { ExpenseForm } from '@/src/components/ExpenseForm';
 import { styles } from '@/src/components/styles';
+import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   getLedgerCategories,
   getLedgerMembers,
-  getMyLedger,
   getErrorMessage,
   getProfiles
 } from '@/src/lib/ledger';
@@ -15,6 +15,7 @@ import { supabase } from '@/src/lib/supabase';
 import type { Ledger, LedgerCategory, LedgerMemberProfile, Profile } from '@/src/types/database';
 
 export default function NewExpenseScreen() {
+  const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [categories, setCategories] = useState<LedgerCategory[] | undefined>(undefined);
@@ -24,6 +25,10 @@ export default function NewExpenseScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (ledgerLoading) {
+      return;
+    }
+
     try {
       const { data: userData } = await supabase.auth.getUser();
 
@@ -32,7 +37,7 @@ export default function NewExpenseScreen() {
         return;
       }
 
-      const currentLedger = await getMyLedger();
+      const currentLedger = activeLedger?.ledger || null;
       if (!currentLedger) {
         router.replace('/ledger');
         return;
@@ -58,7 +63,7 @@ export default function NewExpenseScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeLedger?.ledger, ledgerLoading]);
 
   useEffect(() => {
     load();

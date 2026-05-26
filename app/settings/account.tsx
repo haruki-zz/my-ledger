@@ -1,12 +1,11 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
-import { colors, styles } from '@/src/components/styles';
+import { styles } from '@/src/components/styles';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { getErrorMessage, getLedgerMembers, updateMyProfile } from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
-import type { LedgerMemberProfile } from '@/src/types/database';
 
 export default function AccountSettingsScreen() {
   const {
@@ -16,82 +15,39 @@ export default function AccountSettingsScreen() {
     reloadLedger,
     user
   } = useRequiredLedger();
-  const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [displayNameInput, setDisplayNameInput] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const realtimeSubscriptionSequenceRef = useRef(0);
 
-  const loadMembers = useCallback(async (currentLedger = ledger) => {
-    if (!currentLedger || !user) {
-      setLoading(false);
+  const loadProfile = useCallback(async () => {
+    if (!ledger || !user) {
+      setLoadingProfile(false);
       return;
     }
 
     setError(null);
-    setLoading(true);
+    setLoadingProfile(true);
 
     try {
-      const nextMembers = await getLedgerMembers(currentLedger.id);
-      const currentMember = nextMembers.find((member) => member.user_id === user.id);
-
+      const members = await getLedgerMembers(ledger.id);
+      const currentMember = members.find((member) => member.user_id === user.id);
       setDisplayNameInput(currentMember?.profile.display_name || '用户');
-      setMembers(nextMembers);
     } catch (loadError) {
       setError(getErrorMessage(loadError));
     } finally {
-      setLoading(false);
+      setLoadingProfile(false);
     }
   }, [ledger, user]);
 
   const refresh = useCallback(async () => {
-    const nextLedger = await reloadLedger();
-    await loadMembers(nextLedger);
-  }, [loadMembers, reloadLedger]);
+    await reloadLedger();
+    await loadProfile();
+  }, [loadProfile, reloadLedger]);
 
   useEffect(() => {
-    loadMembers();
-  }, [loadMembers]);
-
-  useEffect(() => {
-    const ledgerId = ledger?.id;
-    if (!ledgerId) {
-      return undefined;
-    }
-
-    const subscriptionId = ++realtimeSubscriptionSequenceRef.current;
-    const channel = supabase
-      .channel(`ledger-account-${ledgerId}-${subscriptionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'ledger_members',
-          filter: `ledger_id=eq.${ledgerId}`
-        },
-        () => {
-          loadMembers();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'profiles'
-        },
-        () => {
-          loadMembers();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [ledger?.id, loadMembers]);
+    loadProfile();
+  }, [loadProfile]);
 
   async function saveProfile() {
     setSavingProfile(true);
@@ -99,7 +55,7 @@ export default function AccountSettingsScreen() {
       await updateMyProfile(displayNameInput);
       await refresh();
     } catch (saveError) {
-      Alert.alert('保存失败', saveError instanceof Error ? saveError.message : '请稍后重试');
+      Alert.alert('保存失败', getErrorMessage(saveError));
     } finally {
       setSavingProfile(false);
     }
@@ -115,7 +71,7 @@ export default function AccountSettingsScreen() {
     router.replace('/auth');
   }
 
-  if ((ledgerLoading || loading) && !ledger) {
+  if ((ledgerLoading || loadingProfile) && !ledger) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
@@ -125,13 +81,13 @@ export default function AccountSettingsScreen() {
 
   return (
     <ScrollView
-      refreshControl={<RefreshControl refreshing={ledgerLoading || loading} onRefresh={refresh} />}
+      refreshControl={<RefreshControl refreshing={ledgerLoading || loadingProfile} onRefresh={refresh} />}
       style={styles.page}
       contentContainerStyle={styles.content}
     >
       <View>
         <Text style={styles.title}>账户信息</Text>
-        <Text style={styles.muted}>账户、登录状态和共享账本</Text>
+        <Text style={styles.muted}>个人资料、登录状态和当前账本</Text>
       </View>
 
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
@@ -155,19 +111,12 @@ export default function AccountSettingsScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.h2}>账本信息</Text>
-        <Text style={styles.label}>账本名称</Text>
-        <Text style={styles.body}>{ledger?.name || '共享账本'}</Text>
-        <Text style={styles.label}>邀请码</Text>
-        <Text style={{ color: colors.ink, fontSize: 22, fontWeight: '900' }}>{ledger?.invite_code || '-'}</Text>
-        <Text style={styles.label}>成员</Text>
-        <View style={{ gap: 8 }}>
-          {members.map((member) => (
-            <Text key={member.user_id} style={styles.body}>
-              {member.profile.display_name}{member.user_id === user?.id ? '（我）' : ''}
-            </Text>
-          ))}
-        </View>
+        <Text style={styles.h2}>当前账本</Text>
+        <Text style={styles.body}>{ledger?.name || '未选择账本'}</Text>
+        <Text style={styles.muted}>创建、加入、切换和删除账本请进入账本管理。</Text>
+        <Pressable onPress={() => router.push('/settings/ledgers')} style={styles.button}>
+          <Text style={styles.buttonText}>进入账本管理</Text>
+        </Pressable>
       </View>
     </ScrollView>
   );

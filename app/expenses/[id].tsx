@@ -4,12 +4,12 @@ import { ActivityIndicator, Text, View } from 'react-native';
 
 import { ExpenseForm } from '@/src/components/ExpenseForm';
 import { styles } from '@/src/components/styles';
+import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   getExpense,
   getErrorMessage,
   getLedgerCategories,
   getLedgerMembers,
-  getMyLedger,
   getProfiles
 } from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
@@ -17,6 +17,7 @@ import type { Expense, Ledger, LedgerCategory, LedgerMemberProfile, Profile } fr
 
 export default function EditExpenseScreen() {
   const params = useLocalSearchParams<{ id: string }>();
+  const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [categories, setCategories] = useState<LedgerCategory[] | undefined>(undefined);
@@ -27,6 +28,10 @@ export default function EditExpenseScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (ledgerLoading) {
+      return;
+    }
+
     try {
       const expenseId = Array.isArray(params.id) ? params.id[0] : params.id;
       if (!expenseId) {
@@ -40,14 +45,16 @@ export default function EditExpenseScreen() {
         return;
       }
 
-      const [currentLedger, currentExpense] = await Promise.all([
-        getMyLedger(),
-        getExpense(expenseId)
-      ]);
+      const currentExpense = await getExpense(expenseId);
+      const currentLedger = activeLedger?.ledger || null;
 
       if (!currentLedger) {
         router.replace('/ledger');
         return;
+      }
+
+      if (currentExpense.ledger_id !== currentLedger.id) {
+        throw new Error('这笔支出不属于当前账本');
       }
 
       const nextMembers = await getLedgerMembers(currentLedger.id);
@@ -77,7 +84,7 @@ export default function EditExpenseScreen() {
     } finally {
       setLoading(false);
     }
-  }, [params.id]);
+  }, [activeLedger?.ledger, ledgerLoading, params.id]);
 
   useEffect(() => {
     load();

@@ -1,47 +1,57 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { styles } from '@/src/components/styles';
-import { createLedger, getMyLedger, joinLedger } from '@/src/lib/ledger';
+import { useLedgerContext } from '@/src/context/LedgerContext';
+import { getErrorMessage } from '@/src/lib/ledger';
 
 export default function LedgerScreen() {
+  const {
+    activeLedger,
+    createAndSelect,
+    joinAndSelect,
+    ledgers,
+    loading,
+    reloadLedgers
+  } = useLedgerContext();
   const [ledgerName, setLedgerName] = useState('我们的账本');
   const [inviteCode, setInviteCode] = useState('');
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const didRedirectRef = useRef(false);
 
-  const load = useCallback(async () => {
+  async function refresh() {
     setError(null);
-    setLoading(true);
 
     try {
-      const currentLedger = await getMyLedger();
-      if (currentLedger) {
+      const nextLedger = await reloadLedgers();
+      if (nextLedger) {
+        didRedirectRef.current = true;
         router.replace('/(tabs)');
-        return;
       }
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '读取账本失败');
-    } finally {
-      setLoading(false);
+    } catch (refreshError) {
+      setError(getErrorMessage(refreshError));
     }
-  }, []);
+  }
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!didRedirectRef.current && !submitting && !loading && (activeLedger || ledgers.length > 0)) {
+      didRedirectRef.current = true;
+      router.replace('/(tabs)');
+    }
+  }, [activeLedger, ledgers.length, loading, submitting]);
 
   async function handleCreate() {
     setSubmitting(true);
     setError(null);
 
     try {
-      await createLedger(ledgerName);
+      await createAndSelect(ledgerName);
+      didRedirectRef.current = true;
       router.replace('/(tabs)');
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : '创建账本失败');
+      setError(getErrorMessage(createError));
     } finally {
       setSubmitting(false);
     }
@@ -52,10 +62,11 @@ export default function LedgerScreen() {
     setError(null);
 
     try {
-      await joinLedger(inviteCode);
+      await joinAndSelect(inviteCode);
+      didRedirectRef.current = true;
       router.replace('/(tabs)');
     } catch (joinError) {
-      setError(joinError instanceof Error ? joinError.message : '加入账本失败');
+      setError(getErrorMessage(joinError));
     } finally {
       setSubmitting(false);
     }
@@ -63,7 +74,7 @@ export default function LedgerScreen() {
 
   return (
     <ScrollView
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
+      refreshControl={<RefreshControl refreshing={loading} onRefresh={refresh} />}
       style={styles.page}
       contentContainerStyle={styles.content}
     >
@@ -71,6 +82,8 @@ export default function LedgerScreen() {
         <Text style={styles.title}>共享账本</Text>
         <Text style={styles.muted}>每个账本最多两名成员，双方都可以记账、编辑和删除。</Text>
       </View>
+
+      {loading ? <ActivityIndicator /> : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 

@@ -1,11 +1,11 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   getExpensesByMonth,
   getFirstExpenseSpentOn,
   getLedgerMembers,
-  getMyLedger,
   getProfiles
 } from '@/src/lib/ledger';
 import {
@@ -22,6 +22,10 @@ import type { Expense, Ledger, LedgerMemberProfile, Profile } from '@/src/types/
 let realtimeSubscriptionSequence = 0;
 
 export function useDashboardData(monthKey: string, range: DashboardRange) {
+  const { activeLedger, loading: ledgerLoading } = useLedgerContext();
+  const currentLedger = activeLedger?.ledger || null;
+  const ledgerId = currentLedger?.id || null;
+  const currentLedgerRef = useRef<Ledger | null>(null);
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -39,7 +43,15 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
   const hasLoadedData = useRef(false);
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
 
+  useEffect(() => {
+    currentLedgerRef.current = currentLedger;
+  }, [currentLedger]);
+
   const load = useCallback(async () => {
+    if (ledgerLoading) {
+      return;
+    }
+
     const requestId = requestSequence.current + 1;
     requestSequence.current = requestId;
     const shouldKeepCurrentData = hasLoadedData.current;
@@ -55,17 +67,17 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
       }
 
       const userId = userData.user?.id || null;
-      const currentLedger = await getMyLedger();
-      if (!currentLedger) {
+      const activeLedger = currentLedgerRef.current;
+      if (!activeLedger) {
         router.replace('/ledger');
         return;
       }
 
       const endDateString = dashboardEndDateString(monthKey);
       const [nextMembers, firstExpenseSpentOn, nextExpenses] = await Promise.all([
-        getLedgerMembers(currentLedger.id),
-        getFirstExpenseSpentOn(currentLedger.id),
-        getExpensesByMonth(currentLedger.id, monthStartDateString(monthKey), endDateString)
+        getLedgerMembers(activeLedger.id),
+        getFirstExpenseSpentOn(activeLedger.id),
+        getExpensesByMonth(activeLedger.id, monthStartDateString(monthKey), endDateString)
       ]);
 
       const nextOtherUserId = nextMembers.find((member) => member.user_id !== userId)?.user_id || null;
@@ -76,7 +88,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
         ...expense.splits.map((split) => split.user_id)
       ]);
       const nextProfiles = await getProfiles([...memberProfileIds, ...expenseProfileIds]);
-      const ledgerCreatedMonth = monthKeyFromDateString(currentLedger.created_at);
+      const ledgerCreatedMonth = monthKeyFromDateString(activeLedger.created_at);
       const firstExpenseMonth = firstExpenseSpentOn ? monthKeyFromDateString(firstExpenseSpentOn) : null;
       const nextMinimumMonthKey = firstExpenseMonth && compareMonthKeys(firstExpenseMonth, ledgerCreatedMonth) < 0
         ? firstExpenseMonth
@@ -86,7 +98,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
         return;
       }
 
-      setLedger(currentLedger);
+      setLedger(activeLedger);
       setMembers(nextMembers);
       setExpenses(nextExpenses);
       setProfiles(nextProfiles);
@@ -107,18 +119,32 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
         setRefreshing(false);
       }
     }
-  }, [monthKey]);
+  }, [ledgerLoading, monthKey]);
+
+  useEffect(() => {
+    requestSequence.current += 1;
+    hasLoadedData.current = false;
+    setLedger(null);
+    setMembers([]);
+    setExpenses([]);
+    setProfiles({});
+    setCurrentUserId(null);
+    setOtherUserId(null);
+    setMinimumMonthKey(null);
+    setLoadedMonthKey(null);
+    setLoadedEndDateString(null);
+    setDataVersion((current) => current + 1);
+  }, [ledgerId]);
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [ledgerId, load]);
 
   useEffect(() => {
     loadRef.current = load;
   }, [load]);
 
   useEffect(() => {
-    const ledgerId = ledger?.id;
     if (!ledgerId) {
       return undefined;
     }
@@ -143,6 +169,18 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
         {
           event: '*',
           schema: 'public',
+          table: 'ledger_categories',
+          filter: `ledger_id=eq.${ledgerId}`
+        },
+        () => {
+          void loadRef.current();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
           table: 'expense_splits'
         },
         () => {
@@ -154,7 +192,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [ledger?.id]);
+  }, [ledgerId]);
 
   const stats = useMemo(
     () => buildDashboardStats({

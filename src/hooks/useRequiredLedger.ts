@@ -1,9 +1,9 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { User } from '@supabase/supabase-js';
 
 import { useAuth } from '@/src/context/AuthContext';
-import { getErrorMessage, getMyLedger } from '@/src/lib/ledger';
+import { useLedgerContext } from '@/src/context/LedgerContext';
 import type { Ledger } from '@/src/types/database';
 
 type RequiredLedgerState = {
@@ -16,37 +16,20 @@ type RequiredLedgerState = {
 
 export function useRequiredLedger(): RequiredLedgerState {
   const { loading: authLoading, session } = useAuth();
+  const {
+    activeLedger,
+    error,
+    ledgers,
+    loading: ledgerLoading,
+    reloadLedgers
+  } = useLedgerContext();
   const user = session?.user ?? null;
-  const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [checkingLedger, setCheckingLedger] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const ledger = activeLedger?.ledger || null;
 
   const reloadLedger = useCallback(async () => {
-    setError(null);
-
-    if (!user) {
-      setLedger(null);
-      return null;
-    }
-
-    setCheckingLedger(true);
-    try {
-      const nextLedger = await getMyLedger();
-      if (!nextLedger) {
-        setLedger(null);
-        router.replace('/ledger');
-        return null;
-      }
-
-      setLedger(nextLedger);
-      return nextLedger;
-    } catch (loadError) {
-      setError(getErrorMessage(loadError));
-      return null;
-    } finally {
-      setCheckingLedger(false);
-    }
-  }, [user]);
+    const nextLedger = await reloadLedgers();
+    return nextLedger?.ledger || null;
+  }, [reloadLedgers]);
 
   useEffect(() => {
     if (authLoading) {
@@ -54,23 +37,23 @@ export function useRequiredLedger(): RequiredLedgerState {
     }
 
     if (!user) {
-      setLedger(null);
-      setCheckingLedger(false);
       router.replace('/auth');
       return;
     }
 
-    reloadLedger();
-  }, [authLoading, reloadLedger, user]);
+    if (!ledgerLoading && !ledger && ledgers.length === 0) {
+      router.replace('/ledger');
+    }
+  }, [authLoading, ledger, ledgerLoading, ledgers.length, user]);
 
   return useMemo(
     () => ({
       error,
       ledger,
-      loading: authLoading || checkingLedger,
+      loading: authLoading || ledgerLoading,
       reloadLedger,
       user
     }),
-    [authLoading, checkingLedger, error, ledger, reloadLedger, user]
+    [authLoading, ledgerLoading, error, ledger, reloadLedger, user]
   );
 }

@@ -169,6 +169,14 @@ export type Database = {
         Args: { p_invite_code: string };
         Returns: Database['public']['Tables']['ledgers']['Row'];
       };
+      leave_ledger: {
+        Args: { p_ledger_id: string };
+        Returns: undefined;
+      };
+      delete_ledger: {
+        Args: { p_ledger_id: string };
+        Returns: undefined;
+      };
       seed_default_categories: {
         Args: { p_ledger_id: string };
         Returns: undefined;

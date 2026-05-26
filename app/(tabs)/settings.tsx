@@ -26,9 +26,17 @@ export default function SettingsScreen() {
 
       <View style={styles.section}>
         <Text style={styles.h2}>账户信息</Text>
-        <Text style={styles.muted}>管理显示名称、邮箱、登录状态和账本信息。</Text>
+        <Text style={styles.muted}>管理显示名称、邮箱和登录状态。</Text>
         <Pressable onPress={() => router.push('/settings/account')} style={styles.button}>
           <Text style={styles.buttonText}>进入账户信息</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.h2}>账本管理</Text>
+        <Text style={styles.muted}>创建、加入、切换、退出或删除账本。</Text>
+        <Pressable onPress={() => router.push('/settings/ledgers')} style={styles.button}>
+          <Text style={styles.buttonText}>进入账本管理</Text>
         </Pressable>
       </View>
 

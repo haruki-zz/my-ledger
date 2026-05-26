@@ -1,54 +1,14 @@
 import { Redirect } from 'expo-router';
-import { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 
 import { styles } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
-import { getMyLedger } from '@/src/lib/ledger';
+import { useLedgerContext } from '@/src/context/LedgerContext';
 import { isSupabaseConfigured } from '@/src/lib/supabase';
-import type { Ledger } from '@/src/types/database';
 
 export default function HomeScreen() {
   const { session, loading } = useAuth();
-  const [ledger, setLedger] = useState<Ledger | null>(null);
-  const [checkingLedger, setCheckingLedger] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadLedger() {
-      if (!session) {
-        setLedger(null);
-        setCheckingLedger(false);
-        return;
-      }
-
-      setCheckingLedger(true);
-      setError(null);
-
-      try {
-        const nextLedger = await getMyLedger();
-        if (active) {
-          setLedger(nextLedger);
-        }
-      } catch (loadError) {
-        if (active) {
-          setError(loadError instanceof Error ? loadError.message : '读取账本失败');
-        }
-      } finally {
-        if (active) {
-          setCheckingLedger(false);
-        }
-      }
-    }
-
-    loadLedger();
-
-    return () => {
-      active = false;
-    };
-  }, [session]);
+  const { activeLedger, error, loading: ledgerLoading } = useLedgerContext();
 
   if (!isSupabaseConfigured) {
     return (
@@ -61,7 +21,7 @@ export default function HomeScreen() {
     );
   }
 
-  if (loading || checkingLedger) {
+  if (loading || (session && ledgerLoading)) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
@@ -84,7 +44,7 @@ export default function HomeScreen() {
     );
   }
 
-  if (!ledger) {
+  if (!activeLedger) {
     return <Redirect href="/ledger" />;
   }
 

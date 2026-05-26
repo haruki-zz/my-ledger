@@ -1,13 +1,14 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { colors, styles } from '@/src/components/styles';
+import { useLedgerContext } from '@/src/context/LedgerContext';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
   getExpenses,
-  getMyLedger,
+  getLedgerMembers,
   getProfiles
 } from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
@@ -16,45 +17,69 @@ import type { Expense, Ledger, Profile } from '@/src/types/database';
 let realtimeSubscriptionSequence = 0;
 
 export default function HistoryScreen() {
+  const { activeLedger, loading: ledgerLoading } = useLedgerContext();
+  const currentLedger = activeLedger?.ledger || null;
+  const activeLedgerId = activeLedger?.ledger.id || null;
+  const currentLedgerRef = useRef<Ledger | null>(null);
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [activeMemberIds, setActiveMemberIds] = useState<Set<string>>(new Set());
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    currentLedgerRef.current = currentLedger;
+  }, [currentLedger]);
+
   const load = useCallback(async () => {
+    if (ledgerLoading) {
+      return;
+    }
+
     setError(null);
     setLoading(true);
 
     try {
-      const currentLedger = await getMyLedger();
-      if (!currentLedger) {
+      const activeLedger = currentLedgerRef.current;
+      if (!activeLedger) {
         router.replace('/ledger');
         return;
       }
 
-      const nextExpenses = await getExpenses(currentLedger.id);
+      const [nextExpenses, nextMembers] = await Promise.all([
+        getExpenses(activeLedger.id),
+        getLedgerMembers(activeLedger.id)
+      ]);
       const profileIds = nextExpenses.flatMap((expense) => [
         expense.paid_by,
         expense.recorded_by,
         ...expense.splits.map((split) => split.user_id)
       ]);
 
-      setLedger(currentLedger);
+      setLedger(activeLedger);
       setExpenses(nextExpenses);
-      setProfiles(await getProfiles(profileIds));
+      setActiveMemberIds(new Set(nextMembers.map((member) => member.user_id)));
+      setProfiles(await getProfiles([...profileIds, ...nextMembers.map((member) => member.user_id)]));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '读取支出失败');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ledgerLoading]);
+
+  useEffect(() => {
+    setLedger(null);
+    setExpenses([]);
+    setProfiles({});
+    setActiveMemberIds(new Set());
+  }, [activeLedgerId]);
 
   useEffect(() => {
     load();
-  }, [load]);
+  }, [activeLedgerId, load]);
 
-  const ledgerId = ledger?.id;
+  const ledgerId = activeLedgerId;
 
   useEffect(() => {
     if (!ledgerId) {
@@ -98,6 +123,11 @@ export default function HistoryScreen() {
     () => expenses.reduce((sum, expense) => sum + expense.amount_yen, 0),
     [expenses]
   );
+
+  const profileDisplayName = useCallback((userId: string) => {
+    const suffix = activeMemberIds.has(userId) ? '' : '（已退出）';
+    return `${displayName(profiles[userId]?.display_name)}${suffix}`;
+  }, [activeMemberIds, profiles]);
 
   async function confirmDelete(expenseId: string) {
     Alert.alert('删除支出', '删除后无法恢复。', [
@@ -152,8 +182,8 @@ export default function HistoryScreen() {
             </View>
 
             <View style={{ gap: 4 }}>
-              <Text style={styles.muted}>支付人：{displayName(profiles[expense.paid_by]?.display_name)}</Text>
-              <Text style={styles.muted}>记录人：{displayName(profiles[expense.recorded_by]?.display_name)}</Text>
+              <Text style={styles.muted}>支付人：{profileDisplayName(expense.paid_by)}</Text>
+              <Text style={styles.muted}>记录人：{profileDisplayName(expense.recorded_by)}</Text>
               {expense.note ? <Text style={styles.body}>{expense.note}</Text> : null}
             </View>
 
@@ -161,7 +191,7 @@ export default function HistoryScreen() {
               <View style={{ gap: 4 }}>
                 {expense.splits.map((split) => (
                   <Text key={split.user_id} style={styles.muted}>
-                    {displayName(profiles[split.user_id]?.display_name)}承担 {formatYen(split.amount_yen)}
+                    {profileDisplayName(split.user_id)}承担 {formatYen(split.amount_yen)}
                   </Text>
                 ))}
               </View>
