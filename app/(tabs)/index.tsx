@@ -1,10 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryTrendModal } from '@/src/components/CategoryTrendModal';
 import { DailyChart, type DailyChartMode } from '@/src/components/DailyChart';
-import { PieChart } from '@/src/components/PieChart';
+import { PieChart, type AnchorPoint } from '@/src/components/PieChart';
 import { colors, styles } from '@/src/components/styles';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { displayName, formatYen } from '@/src/lib/format';
@@ -20,6 +20,11 @@ import {
 type RangeOption = {
   label: string;
   value: DashboardRange;
+};
+
+type SelectedCategoryState = {
+  category: CategoryStat;
+  anchorPoint?: AnchorPoint;
 };
 
 const CHART_MODES: { label: string; value: DailyChartMode }[] = [
@@ -39,7 +44,8 @@ export default function DashboardScreen() {
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [range, setRange] = useState<DashboardRange>('all');
   const [chartMode, setChartMode] = useState<DailyChartMode>('curve');
-  const [selectedCategory, setSelectedCategory] = useState<CategoryStat | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<SelectedCategoryState | null>(null);
+  const [drillProgress] = useState(() => new Animated.Value(1));
   const {
     ledger,
     members,
@@ -69,6 +75,23 @@ export default function DashboardScreen() {
   const atCurrentMonth = compareMonthKeys(monthKey, currentMonthKey()) >= 0;
   const atMinimumMonth = minimumMonthKey ? compareMonthKeys(monthKey, minimumMonthKey) <= 0 : false;
   const isSwitchingMonth = refreshing && Boolean(loadedMonthKey && loadedMonthKey !== monthKey);
+  const drillAnimatedStyle = {
+    opacity: drillProgress,
+    transform: [
+      {
+        translateY: drillProgress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [10, 0]
+        })
+      },
+      {
+        scale: drillProgress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.985, 1]
+        })
+      }
+    ]
+  };
 
   useEffect(() => {
     if (range === 'other' && !otherUserId) {
@@ -79,6 +102,29 @@ export default function DashboardScreen() {
   const moveMonth = useCallback((amount: number) => {
     setMonthKey((current) => addMonths(current, amount));
   }, []);
+
+  const runDrillTransition = useCallback(() => {
+    drillProgress.stopAnimation();
+    drillProgress.setValue(0);
+    Animated.timing(drillProgress, {
+      duration: 240,
+      toValue: 1,
+      useNativeDriver: true
+    }).start();
+  }, [drillProgress]);
+
+  function selectRange(nextRange: DashboardRange) {
+    if (nextRange === range) {
+      return;
+    }
+
+    runDrillTransition();
+    setRange(nextRange);
+  }
+
+  function openCategoryTrend(category: CategoryStat, anchorPoint?: AnchorPoint) {
+    setSelectedCategory({ category, anchorPoint });
+  }
 
   const monthSwipeResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: () => false,
@@ -161,7 +207,7 @@ export default function DashboardScreen() {
                   <Pressable
                     disabled={disabled}
                     key={option.value}
-                    onPress={() => setRange(option.value)}
+                    onPress={() => selectRange(option.value)}
                     style={({ pressed }) => [
                       localStyles.rangePill,
                       disabled && localStyles.disabledButton,
@@ -185,22 +231,24 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          <View style={localStyles.totalSummary}>
-            <View style={localStyles.totalLabelRow}>
-              <Text style={styles.label}>月度总支出</Text>
-              {refreshing ? <ActivityIndicator color={colors.primary} size="small" /> : null}
+          <Animated.View style={[localStyles.userDependentSummary, drillAnimatedStyle]}>
+            <View style={localStyles.totalSummary}>
+              <View style={localStyles.totalLabelRow}>
+                <Text style={styles.label}>月度总支出</Text>
+                {refreshing ? <ActivityIndicator color={colors.primary} size="small" /> : null}
+              </View>
+              <Text style={localStyles.totalAmount}>{formatYen(stats.totalYen)}</Text>
+              <Text style={[styles.muted, localStyles.centerText]}>
+                {stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} ${stats.count} 笔` : '这个月还没有支出记录'}
+              </Text>
+              {isSwitchingMonth ? <Text style={[styles.muted, localStyles.centerText]}>正在更新...</Text> : null}
             </View>
-            <Text style={localStyles.totalAmount}>{formatYen(stats.totalYen)}</Text>
-            <Text style={[styles.muted, localStyles.centerText]}>
-              {stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} ${stats.count} 笔` : '这个月还没有支出记录'}
-            </Text>
-            {isSwitchingMonth ? <Text style={[styles.muted, localStyles.centerText]}>正在更新...</Text> : null}
-          </View>
 
-          <View style={localStyles.categoryHeader}>
-            <Text style={styles.h2}>类别占比</Text>
-          </View>
-          <PieChart categories={stats.categories} onCategoryPress={setSelectedCategory} totalYen={stats.totalYen} />
+            <View style={localStyles.categoryHeader}>
+              <Text style={styles.h2}>类别占比</Text>
+            </View>
+            <PieChart categories={stats.categories} onCategoryPress={openCategoryTrend} totalYen={stats.totalYen} />
+          </Animated.View>
         </View>
 
         <View style={styles.section}>
@@ -244,7 +292,8 @@ export default function DashboardScreen() {
       </ScrollView>
 
       <CategoryTrendModal
-        category={selectedCategory}
+        anchorPoint={selectedCategory?.anchorPoint}
+        category={selectedCategory?.category || null}
         currentUserId={currentUserId}
         dataVersion={dataVersion}
         endMonthKey={loadedMonthKey || monthKey}
@@ -436,5 +485,8 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     paddingTop: 2
+  },
+  userDependentSummary: {
+    gap: 18
   }
 });

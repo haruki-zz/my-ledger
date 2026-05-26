@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { colors, styles } from '@/src/components/styles';
@@ -8,7 +8,12 @@ import type { CategoryStat } from '@/src/lib/stats';
 type PieChartProps = {
   categories: CategoryStat[];
   totalYen: number;
-  onCategoryPress?: (category: CategoryStat) => void;
+  onCategoryPress?: (category: CategoryStat, anchorPoint?: AnchorPoint) => void;
+};
+
+export type AnchorPoint = {
+  x: number;
+  y: number;
 };
 
 const SIZE = 160;
@@ -30,6 +35,15 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
     items.push({ ...category, startAngle, endAngle });
     return items;
   }, []);
+
+  function handleCategoryPress(category: CategoryStat, event: GestureResponderEvent) {
+    const { pageX, pageY } = event.nativeEvent;
+    const anchorPoint = typeof pageX === 'number' && typeof pageY === 'number'
+      ? { x: pageX, y: pageY }
+      : undefined;
+
+    onCategoryPress?.(category, anchorPoint);
+  }
 
   return (
     <View style={{ gap: 16 }}>
@@ -57,7 +71,7 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
             disabled={!onCategoryPress}
             hitSlop={4}
             key={category.category}
-            onPress={() => onCategoryPress?.(category)}
+            onPress={(event) => handleCategoryPress(category, event)}
             style={({ pressed }) => [
               styles.between,
               chartStyles.categoryRow,
