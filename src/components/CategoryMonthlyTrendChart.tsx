@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
-import { colors, styles } from '@/src/components/styles';
+import { colors, styles, theme } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
 import type { MonthlyCategoryTrendStat } from '@/src/lib/stats';
 
@@ -42,8 +42,8 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
   return (
     <View style={{ gap: 8 }}>
       <Svg height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%">
-        <Line stroke={colors.line} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={baseline} y2={baseline} />
-        <Line stroke={colors.line} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={PADDING_TOP} y2={PADDING_TOP} />
+        <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={baseline} y2={baseline} />
+        <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={PADDING_TOP} y2={PADDING_TOP} />
         <SvgText fill={colors.muted} fontSize={10} x={4} y={PADDING_TOP + 4}>
           {formatYen(maxAmount)}
         </SvgText>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { colors, styles } from '@/src/components/styles';
+import { BentoCard } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import {
   deleteLedgerCategory,
@@ -252,7 +253,7 @@ export default function CategorySettingsScreen() {
 
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
 
-      <View style={styles.section}>
+      <BentoCard variant="list">
         <Text style={styles.h2}>当前类别</Text>
         <View style={{ gap: 12 }}>
           {categories.map((category) => {
@@ -263,7 +264,8 @@ export default function CategorySettingsScreen() {
                 key={category.id}
                 style={{
                   borderColor: colors.line,
-                  borderRadius: 8,
+                  backgroundColor: 'rgba(255,255,255,0.58)',
+                  borderRadius: 16,
                   borderWidth: 1,
                   gap: 10,
                   padding: 12
@@ -356,7 +358,7 @@ export default function CategorySettingsScreen() {
             <Text style={styles.buttonText}>{savingCategory ? '添加中...' : '添加'}</Text>
           </Pressable>
         </View>
-      </View>
+      </BentoCard>
     </ScrollView>
   );
 }

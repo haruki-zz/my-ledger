@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { colors, styles } from '@/src/components/styles';
+import { BentoCard } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { getErrorMessage, getLedgerMembers } from '@/src/lib/ledger';
@@ -163,14 +164,14 @@ export default function LedgerDetailScreen() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <View style={styles.section}>
+      <BentoCard>
         <Text style={styles.h2}>邀请码</Text>
         <Text style={{ color: colors.ink, fontSize: 24, fontWeight: '900' }}>
           {membership.ledger.invite_code}
         </Text>
-      </View>
+      </BentoCard>
 
-      <View style={styles.section}>
+      <BentoCard variant="list">
         <Text style={styles.h2}>成员</Text>
         <View style={{ gap: 8 }}>
           {members.map((member) => {
@@ -186,9 +187,9 @@ export default function LedgerDetailScreen() {
             );
           })}
         </View>
-      </View>
+      </BentoCard>
 
-      <View style={styles.section}>
+      <BentoCard variant="danger">
         <Text style={styles.h2}>操作</Text>
         {!isActive ? (
           <Pressable disabled={submitting} onPress={handleSelect} style={styles.button}>
@@ -205,7 +206,7 @@ export default function LedgerDetailScreen() {
             <Text style={styles.buttonText}>{submitting ? '处理中...' : '退出账本'}</Text>
           </Pressable>
         )}
-      </View>
+      </BentoCard>
     </ScrollView>
   );
 }

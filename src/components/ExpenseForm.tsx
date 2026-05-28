@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { colors, styles } from '@/src/components/styles';
+import { BentoCard, PillTabs } from '@/src/components/ui';
 import {
   DEFAULT_EXPENSE_CATEGORY_SPLIT_RATIO,
   EXPENSE_CATEGORIES,
@@ -410,7 +411,7 @@ export function ExpenseForm({
 
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <View style={styles.section}>
+      <BentoCard variant="form">
         <Text style={styles.label}>金额（日元）</Text>
         <TextInput
           inputMode="numeric"
@@ -457,17 +458,15 @@ export function ExpenseForm({
         </View>
 
         <Text style={styles.label}>支付人</Text>
-        <View style={styles.row}>
-          {sortedMembers.map((member) => (
-            <Pressable
-              key={member.user_id}
-              onPress={() => setPaidBy(member.user_id)}
-              style={[styles.chip, paidBy === member.user_id && styles.chipActive]}
-            >
-              <Text style={styles.chipText}>{displayName(member.profile.display_name)}</Text>
-            </Pressable>
-          ))}
-        </View>
+        <PillTabs
+          accessibilityLabel="支付人"
+          onChange={setPaidBy}
+          options={sortedMembers.map((member) => ({
+            label: displayName(member.profile.display_name),
+            value: member.user_id
+          }))}
+          value={paidBy}
+        />
 
         <Text style={styles.label}>记录人</Text>
         <View style={[styles.input, { justifyContent: 'center' }]}>
@@ -475,38 +474,28 @@ export function ExpenseForm({
         </View>
 
         <Text style={styles.label}>归属</Text>
-        <View style={styles.row}>
-          <Pressable
-            onPress={() => selectOwnership('personal')}
-            style={[styles.chip, ownership === 'personal' && styles.chipActive]}
-          >
-            <Text style={styles.chipText}>个人</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => selectOwnership('shared')}
-            style={[styles.chip, ownership === 'shared' && styles.chipActive]}
-          >
-            <Text style={styles.chipText}>共同</Text>
-          </Pressable>
-        </View>
+        <PillTabs
+          accessibilityLabel="支出归属"
+          onChange={selectOwnership}
+          options={[
+            { label: '个人', value: 'personal' },
+            { label: '共同', value: 'shared' }
+          ]}
+          value={ownership}
+        />
 
         {ownership === 'shared' ? (
           <View style={{ gap: 12 }}>
             <Text style={styles.label}>分摊方式</Text>
-            <View style={styles.row}>
-              <Pressable
-                onPress={() => selectSplitMode('amount')}
-                style={[styles.chip, splitMode === 'amount' && styles.chipActive]}
-              >
-                <Text style={styles.chipText}>金额</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => selectSplitMode('ratio')}
-                style={[styles.chip, splitMode === 'ratio' && styles.chipActive]}
-              >
-                <Text style={styles.chipText}>比例</Text>
-              </Pressable>
-            </View>
+            <PillTabs
+              accessibilityLabel="分摊方式"
+              onChange={selectSplitMode}
+              options={[
+                { label: '金额', value: 'amount' },
+                { label: '比例', value: 'ratio' }
+              ]}
+              value={splitMode}
+            />
 
             {sortedMembers.map((member) => (
               <View key={member.user_id} style={{ gap: 6 }}>
@@ -548,7 +537,7 @@ export function ExpenseForm({
         <Pressable disabled={submitting} onPress={submit} style={styles.button}>
           <Text style={styles.buttonText}>{submitting ? '保存中...' : '保存'}</Text>
         </Pressable>
-      </View>
+      </BentoCard>
 
       <Text style={[styles.muted, { color: colors.muted }]}>数据会直接写入 Supabase。编辑时不会改变原始记录人。</Text>
     </ScrollView>

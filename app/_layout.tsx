@@ -22,9 +22,9 @@ export default function RootLayout() {
         <StatusBar style="dark" />
         <Stack
           screenOptions={{
-            headerStyle: { backgroundColor: '#F5F7FA' },
+            headerStyle: { backgroundColor: colors.bg },
             headerShadowVisible: false,
-            headerTitleStyle: { color: '#17202A', fontWeight: '800' }
+            headerTitleStyle: { color: colors.ink, fontWeight: '800' }
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />

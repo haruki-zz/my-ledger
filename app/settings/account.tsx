@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { styles } from '@/src/components/styles';
+import { BentoCard } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { getErrorMessage, getLedgerMembers, updateMyProfile } from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
@@ -92,7 +93,7 @@ export default function AccountSettingsScreen() {
 
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
 
-      <View style={styles.section}>
+      <BentoCard variant="form">
         <Text style={styles.h2}>个人资料</Text>
         <Text style={styles.label}>显示名称</Text>
         <TextInput onChangeText={setDisplayNameInput} style={styles.input} value={displayNameInput} />
@@ -108,16 +109,16 @@ export default function AccountSettingsScreen() {
         <Pressable onPress={signOut} style={[styles.button, styles.secondaryButton]}>
           <Text style={[styles.buttonText, styles.secondaryButtonText]}>退出登录</Text>
         </Pressable>
-      </View>
+      </BentoCard>
 
-      <View style={styles.section}>
+      <BentoCard>
         <Text style={styles.h2}>当前账本</Text>
         <Text style={styles.body}>{ledger?.name || '未选择账本'}</Text>
         <Text style={styles.muted}>创建、加入、切换和删除账本请进入账本管理。</Text>
         <Pressable onPress={() => router.push('/settings/ledgers')} style={styles.button}>
           <Text style={styles.buttonText}>进入账本管理</Text>
         </Pressable>
-      </View>
+      </BentoCard>
     </ScrollView>
   );
 }

@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-import { colors, styles } from '@/src/components/styles';
+import { colors, styles, theme } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
 import type { CategoryStat } from '@/src/lib/stats';
 
@@ -49,7 +49,7 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
     <View style={{ gap: 16 }}>
       <View style={{ alignItems: 'center' }}>
         <Svg height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE}>
-          <Circle cx={CENTER} cy={CENTER} fill="#EEF3F7" r={RADIUS} />
+          <Circle cx={CENTER} cy={CENTER} fill="rgba(15,118,110,0.08)" r={RADIUS} />
           {slices.length === 1 ? (
             <Circle cx={CENTER} cy={CENTER} fill={slices[0].color} r={RADIUS} />
           ) : (
@@ -61,7 +61,7 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
               />
             ))
           )}
-          <Circle cx={CENTER} cy={CENTER} fill={colors.surface} r={34} />
+          <Circle cx={CENTER} cy={CENTER} fill={theme.chart.donutCenter} r={34} />
         </Svg>
       </View>
 

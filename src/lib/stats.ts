@@ -1,4 +1,5 @@
 import type { Expense } from '@/src/types/database';
+import { CHART_PALETTE } from '@/src/lib/chartPalette';
 
 export type DashboardRange = 'all' | 'current' | 'other';
 
@@ -28,22 +29,7 @@ export type DashboardStats = {
   dailySeries: DailyStat[];
 };
 
-const CATEGORY_COLORS = [
-  '#1F7A8C',
-  '#F97316',
-  '#6D5BD0',
-  '#16A34A',
-  '#DC2626',
-  '#0F766E',
-  '#B45309',
-  '#2563EB',
-  '#BE185D',
-  '#64748B',
-  '#7C2D12',
-  '#047857',
-  '#9333EA',
-  '#0891B2'
-];
+const CATEGORY_COLORS = CHART_PALETTE;
 
 function padDatePart(value: number) {
   return String(value).padStart(2, '0');

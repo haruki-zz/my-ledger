@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
 
 import { styles } from '@/src/components/styles';
+import { BentoCard, PillTabs } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
 import { supabase } from '@/src/lib/supabase';
 
@@ -82,22 +83,17 @@ export default function AuthScreen() {
           <Text style={styles.muted}>用 Supabase 同步你们的日常支出。</Text>
         </View>
 
-        <View style={styles.row}>
-          <Pressable
-            onPress={() => setMode('signIn')}
-            style={[styles.chip, mode === 'signIn' && styles.chipActive]}
-          >
-            <Text style={styles.chipText}>登录</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setMode('signUp')}
-            style={[styles.chip, mode === 'signUp' && styles.chipActive]}
-          >
-            <Text style={styles.chipText}>注册</Text>
-          </Pressable>
-        </View>
+        <PillTabs
+          accessibilityLabel="登录模式"
+          onChange={setMode}
+          options={[
+            { label: '登录', value: 'signIn' },
+            { label: '注册', value: 'signUp' }
+          ]}
+          value={mode}
+        />
 
-        <View style={styles.section}>
+        <BentoCard variant="form">
           {mode === 'signUp' ? (
             <>
               <Text style={styles.label}>显示名称</Text>
@@ -135,7 +131,7 @@ export default function AuthScreen() {
           <Pressable disabled={submitting} onPress={submit} style={styles.button}>
             <Text style={styles.buttonText}>{submitting ? '提交中...' : mode === 'signIn' ? '登录' : '注册'}</Text>
           </Pressable>
-        </View>
+        </BentoCard>
       </View>
     </KeyboardAvoidingView>
   );

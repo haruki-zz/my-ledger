@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 
 import { styles } from '@/src/components/styles';
+import { BentoCard, SettingsActionRow } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 
 export default function SettingsScreen() {
@@ -24,29 +25,26 @@ export default function SettingsScreen() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <View style={styles.section}>
-        <Text style={styles.h2}>账户信息</Text>
-        <Text style={styles.muted}>管理显示名称、邮箱和登录状态。</Text>
-        <Pressable onPress={() => router.push('/settings/account')} style={styles.button}>
-          <Text style={styles.buttonText}>进入账户信息</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.h2}>账本管理</Text>
-        <Text style={styles.muted}>创建、加入、切换、退出或删除账本。</Text>
-        <Pressable onPress={() => router.push('/settings/ledgers')} style={styles.button}>
-          <Text style={styles.buttonText}>进入账本管理</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.h2}>类别管理</Text>
-        <Text style={styles.muted}>维护共享支出类别和默认分摊比例。</Text>
-        <Pressable onPress={() => router.push('/settings/categories')} style={styles.button}>
-          <Text style={styles.buttonText}>进入类别管理</Text>
-        </Pressable>
-      </View>
+      <BentoCard variant="list">
+        <SettingsActionRow
+          description="管理显示名称、邮箱和登录状态。"
+          icon="person-circle-outline"
+          onPress={() => router.push('/settings/account')}
+          title="账户信息"
+        />
+        <SettingsActionRow
+          description="创建、加入、切换、退出或删除账本。"
+          icon="albums-outline"
+          onPress={() => router.push('/settings/ledgers')}
+          title="账本管理"
+        />
+        <SettingsActionRow
+          description="维护共享支出类别和默认分摊比例。"
+          icon="pricetags-outline"
+          onPress={() => router.push('/settings/categories')}
+          title="类别管理"
+        />
+      </BentoCard>
     </ScrollView>
   );
 }

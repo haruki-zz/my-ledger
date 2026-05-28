@@ -1,16 +1,45 @@
 import { StyleSheet } from 'react-native';
 
-export const colors = {
-  ink: '#17202A',
-  muted: '#697586',
-  line: '#D8DEE8',
-  bg: '#F5F7FA',
-  surface: '#FFFFFF',
-  primary: '#1F7A8C',
-  primaryDark: '#155E6F',
-  danger: '#B42318',
-  tint: '#E6F3F6'
+import { CONTENT_BOTTOM_PADDING } from '@/src/components/layout';
+import { CHART_PALETTE } from '@/src/lib/chartPalette';
+
+export const theme = {
+  colors: {
+    accent: '#6366F1',
+    bg: '#F6F8FB',
+    danger: '#DC2626',
+    glass: 'rgba(255,255,255,0.76)',
+    glassBorder: 'rgba(255,255,255,0.72)',
+    ink: '#111827',
+    line: 'rgba(17,24,39,0.08)',
+    muted: '#667085',
+    primary: '#0F766E',
+    primaryDark: '#115E59',
+    subtle: '#98A2B3',
+    surface: '#FFFFFF',
+    tint: 'rgba(15,118,110,0.10)'
+  },
+  radii: {
+    control: 16,
+    compact: 12,
+    surface: 20
+  },
+  shadow: {
+    elevation: 3,
+    shadowColor: '#0F172A',
+    shadowOffset: { height: 12, width: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 24
+  },
+  chart: {
+    grid: 'rgba(17,24,39,0.08)',
+    palette: CHART_PALETTE,
+    primary: '#0F766E',
+    donutCenter: 'rgba(255,255,255,0.92)'
+  }
 };
+
+export const colors = theme.colors;
 
 export const styles = StyleSheet.create({
   page: {
@@ -18,9 +47,12 @@ export const styles = StyleSheet.create({
     backgroundColor: colors.bg
   },
   content: {
-    gap: 16,
+    alignSelf: 'center',
+    gap: 18,
+    maxWidth: 1040,
     padding: 20,
-    paddingBottom: 32
+    paddingBottom: CONTENT_BOTTOM_PADDING,
+    width: '100%'
   },
   center: {
     alignItems: 'center',
@@ -30,13 +62,15 @@ export const styles = StyleSheet.create({
   },
   title: {
     color: colors.ink,
-    fontSize: 28,
-    fontWeight: '800'
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: 0
   },
   h1: {
     color: colors.ink,
     fontSize: 24,
-    fontWeight: '800'
+    fontWeight: '900',
+    letterSpacing: 0
   },
   h2: {
     color: colors.ink,
@@ -54,17 +88,18 @@ export const styles = StyleSheet.create({
     lineHeight: 20
   },
   section: {
-    backgroundColor: colors.surface,
-    borderColor: colors.line,
-    borderRadius: 8,
+    backgroundColor: colors.glass,
+    borderColor: colors.glassBorder,
+    borderRadius: theme.radii.surface,
     borderWidth: 1,
     gap: 12,
-    padding: 16
+    padding: 16,
+    ...theme.shadow
   },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.86)',
     borderColor: colors.line,
-    borderRadius: 8,
+    borderRadius: theme.radii.control,
     borderWidth: 1,
     color: colors.ink,
     fontSize: 16,
@@ -77,9 +112,9 @@ export const styles = StyleSheet.create({
   },
   dropdownTrigger: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.86)',
     borderColor: colors.line,
-    borderRadius: 8,
+    borderRadius: theme.radii.control,
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -110,11 +145,12 @@ export const styles = StyleSheet.create({
     marginLeft: 10
   },
   dropdownMenu: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.96)',
     borderColor: colors.line,
-    borderRadius: 8,
+    borderRadius: theme.radii.control,
     borderWidth: 1,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    ...theme.shadow
   },
   dropdownOption: {
     minHeight: 44,
@@ -142,15 +178,15 @@ export const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     backgroundColor: colors.primary,
-    borderRadius: 8,
+    borderRadius: theme.radii.control,
     minHeight: 48,
     justifyContent: 'center',
     paddingHorizontal: 14,
     paddingVertical: 12
   },
   secondaryButton: {
-    backgroundColor: colors.tint,
-    borderColor: colors.primary,
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderColor: colors.line,
     borderWidth: 1
   },
   dangerButton: {
@@ -177,7 +213,8 @@ export const styles = StyleSheet.create({
   },
   chip: {
     borderColor: colors.line,
-    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.62)',
+    borderRadius: theme.radii.control,
     borderWidth: 1,
     flex: 1,
     minHeight: 44,

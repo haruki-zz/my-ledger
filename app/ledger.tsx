@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { styles } from '@/src/components/styles';
+import { BentoCard } from '@/src/components/ui';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { getErrorMessage } from '@/src/lib/ledger';
 
@@ -87,16 +88,16 @@ export default function LedgerScreen() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <View style={styles.section}>
+      <BentoCard variant="form">
         <Text style={styles.h2}>创建账本</Text>
         <Text style={styles.label}>账本名称</Text>
         <TextInput onChangeText={setLedgerName} style={styles.input} value={ledgerName} />
         <Pressable disabled={submitting} onPress={handleCreate} style={styles.button}>
           <Text style={styles.buttonText}>{submitting ? '处理中...' : '创建并进入'}</Text>
         </Pressable>
-      </View>
+      </BentoCard>
 
-      <View style={styles.section}>
+      <BentoCard variant="form">
         <Text style={styles.h2}>加入账本</Text>
         <Text style={styles.label}>邀请码</Text>
         <TextInput
@@ -111,7 +112,7 @@ export default function LedgerScreen() {
             {submitting ? '处理中...' : '加入账本'}
           </Text>
         </Pressable>
-      </View>
+      </BentoCard>
     </ScrollView>
   );
 }

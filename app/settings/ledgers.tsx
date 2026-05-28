@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 
 import { colors, styles } from '@/src/components/styles';
+import { BentoCard } from '@/src/components/ui';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { getErrorMessage } from '@/src/lib/ledger';
 
@@ -76,7 +77,7 @@ export default function LedgerManagementScreen() {
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
       {loading ? <ActivityIndicator /> : null}
 
-      <View style={styles.section}>
+      <BentoCard variant="list">
         <Text style={styles.h2}>我的账本</Text>
         <View style={{ gap: 10 }}>
           {ledgers.map((membership) => {
@@ -87,7 +88,8 @@ export default function LedgerManagementScreen() {
                 key={membership.ledger.id}
                 style={{
                   borderColor: isActive ? colors.primary : colors.line,
-                  borderRadius: 8,
+                  backgroundColor: 'rgba(255,255,255,0.58)',
+                  borderRadius: 16,
                   borderWidth: 1,
                   gap: 10,
                   padding: 12
@@ -119,18 +121,18 @@ export default function LedgerManagementScreen() {
 
           {!loading && ledgers.length === 0 ? <Text style={styles.muted}>还没有账本。</Text> : null}
         </View>
-      </View>
+      </BentoCard>
 
-      <View style={styles.section}>
+      <BentoCard variant="form">
         <Text style={styles.h2}>创建账本</Text>
         <Text style={styles.label}>账本名称</Text>
         <TextInput onChangeText={setLedgerName} style={styles.input} value={ledgerName} />
         <Pressable disabled={submitting} onPress={handleCreate} style={styles.button}>
           <Text style={styles.buttonText}>{submitting ? '处理中...' : '创建并切换'}</Text>
         </Pressable>
-      </View>
+      </BentoCard>
 
-      <View style={styles.section}>
+      <BentoCard variant="form">
         <Text style={styles.h2}>通过邀请码加入</Text>
         <Text style={styles.label}>邀请码</Text>
         <TextInput
@@ -145,7 +147,7 @@ export default function LedgerManagementScreen() {
             {submitting ? '处理中...' : '加入并切换'}
           </Text>
         </Pressable>
-      </View>
+      </BentoCard>
     </ScrollView>
   );
 }

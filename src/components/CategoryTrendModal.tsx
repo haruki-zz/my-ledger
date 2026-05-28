@@ -3,7 +3,7 @@ import { ActivityIndicator, Animated, Modal, Pressable, StyleSheet, Text, View, 
 
 import { CategoryMonthlyTrendChart } from '@/src/components/CategoryMonthlyTrendChart';
 import type { AnchorPoint } from '@/src/components/PieChart';
-import { colors, styles } from '@/src/components/styles';
+import { colors, styles, theme } from '@/src/components/styles';
 import { useCategoryTrend } from '@/src/hooks/useCategoryTrend';
 import { currentMonthKey, formatMonthLabel, type CategoryStat, type DashboardRange } from '@/src/lib/stats';
 
@@ -237,14 +237,15 @@ const modalStyles = StyleSheet.create({
     flex: 1
   },
   panel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.line,
-    borderRadius: 8,
+    backgroundColor: colors.glass,
+    borderColor: colors.glassBorder,
+    borderRadius: theme.radii.surface,
     borderWidth: 1,
     gap: 16,
     maxWidth: 440,
     padding: 18,
-    width: '100%'
+    width: '100%',
+    ...theme.shadow
   },
   panelHitArea: {
     maxWidth: 440,

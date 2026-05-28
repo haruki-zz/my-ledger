@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { colors, styles } from '@/src/components/styles';
+import { BentoCard, MetricTile } from '@/src/components/ui';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
@@ -160,15 +161,18 @@ export default function HistoryScreen() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <View style={styles.section}>
-        <Text style={styles.h2}>合计</Text>
-        <Text style={{ color: colors.ink, fontSize: 32, fontWeight: '900' }}>{formatYen(total)}</Text>
-        <Text style={styles.muted}>当前明细共 {expenses.length} 笔</Text>
-      </View>
+      <BentoCard variant="hero" style={{ minHeight: 0 }}>
+        <MetricTile
+          helper={`当前明细共 ${expenses.length} 笔`}
+          icon="receipt-outline"
+          label="合计"
+          value={formatYen(total)}
+        />
+      </BentoCard>
 
       <View style={{ gap: 12 }}>
         {expenses.map((expense) => (
-          <View key={expense.id} style={styles.section}>
+          <BentoCard key={expense.id} variant="list">
             <View style={styles.between}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.h2}>{expense.category}</Text>
@@ -211,15 +215,15 @@ export default function HistoryScreen() {
                 <Text style={styles.buttonText}>删除</Text>
               </Pressable>
             </View>
-          </View>
+          </BentoCard>
         ))}
       </View>
 
       {!loading && expenses.length === 0 ? (
-        <View style={styles.section}>
+        <BentoCard>
           <Text style={styles.h2}>还没有支出</Text>
           <Text style={styles.muted}>点击悬浮“记账”按钮添加第一条 Supabase 持久化记录。</Text>
-        </View>
+        </BentoCard>
       ) : null}
     </ScrollView>
   );

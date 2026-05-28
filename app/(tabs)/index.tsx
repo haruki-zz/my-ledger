@@ -1,11 +1,11 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Animated, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryTrendModal } from '@/src/components/CategoryTrendModal';
 import { DailyChart, type DailyChartMode } from '@/src/components/DailyChart';
 import { PieChart, type AnchorPoint } from '@/src/components/PieChart';
 import { colors, styles } from '@/src/components/styles';
+import { BentoCard, IconButton, MetricTile, PillTabs, type PillTabOption } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
@@ -20,6 +20,7 @@ import {
 type RangeOption = {
   label: string;
   value: DashboardRange;
+  disabled?: boolean;
 };
 
 type SelectedCategoryState = {
@@ -32,9 +33,6 @@ const CHART_MODES: { label: string; value: DailyChartMode }[] = [
   { label: '柱状', value: 'bar' }
 ];
 
-const CHART_MODE_SEGMENT_WIDTH = `${100 / CHART_MODES.length}%` as `${number}%`;
-const RANGE_VALUES: DashboardRange[] = ['all', 'current', 'other'];
-const RANGE_SEGMENT_WIDTH = `${100 / RANGE_VALUES.length}%` as `${number}%`;
 const SWIPE_DISTANCE = 36;
 const SWIPE_DIRECTION_RATIO = 2.5;
 const SWIPE_VELOCITY = 0.35;
@@ -66,12 +64,9 @@ export default function DashboardScreen() {
   const rangeOptions: RangeOption[] = [
     { label: '双方', value: 'all' },
     { label: currentUserName, value: 'current' },
-    { label: otherUserId ? otherUserName : '对方', value: 'other' }
+    { disabled: !otherUserId, label: otherUserId ? otherUserName : '对方', value: 'other' }
   ];
-  const selectedRangeIndex = Math.max(0, RANGE_VALUES.indexOf(range));
-  const selectedRangeLeft = `${selectedRangeIndex * (100 / RANGE_VALUES.length)}%` as `${number}%`;
-  const selectedChartModeIndex = Math.max(0, CHART_MODES.findIndex((mode) => mode.value === chartMode));
-  const selectedChartModeLeft = `${selectedChartModeIndex * (100 / CHART_MODES.length)}%` as `${number}%`;
+  const chartModeOptions = CHART_MODES satisfies PillTabOption<DailyChartMode>[];
   const atCurrentMonth = compareMonthKeys(monthKey, currentMonthKey()) >= 0;
   const atMinimumMonth = minimumMonthKey ? compareMonthKeys(monthKey, minimumMonthKey) <= 0 : false;
   const isSwitchingMonth = refreshing && Boolean(loadedMonthKey && loadedMonthKey !== monthKey);
@@ -159,136 +154,87 @@ export default function DashboardScreen() {
         style={styles.page}
         contentContainerStyle={styles.content}
       >
-        <View>
+        <View style={localStyles.pageHeader}>
           <Text style={styles.title}>Dashboard</Text>
           <Text style={styles.muted}>{ledger ? ledger.name : '共享账本'}</Text>
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <View style={[styles.section, localStyles.summarySection]} {...monthSwipeResponder.panHandlers}>
+        <BentoCard variant="hero" style={localStyles.summarySection} {...monthSwipeResponder.panHandlers}>
           <View style={localStyles.summaryHeader}>
             <View style={localStyles.monthSwitcher}>
-              <Pressable
+              <IconButton
+                accessibilityLabel="上个月"
                 disabled={atMinimumMonth}
+                icon="chevron-back"
                 onPress={() => moveMonth(-1)}
-                style={({ pressed }) => [
-                  localStyles.compactIconButton,
-                  atMinimumMonth && localStyles.disabledButton,
-                  pressed && !atMinimumMonth && localStyles.pressed
-                ]}
-              >
-                <Ionicons color={atMinimumMonth ? colors.muted : colors.primaryDark} name="chevron-back" size={18} />
-              </Pressable>
+                size="sm"
+                tone="primary"
+              />
 
               <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthLabel}>
                 {formatMonthLabel(monthKey)}
               </Text>
 
-              <Pressable
+              <IconButton
+                accessibilityLabel="下个月"
                 disabled={atCurrentMonth}
+                icon="chevron-forward"
                 onPress={() => moveMonth(1)}
-                style={({ pressed }) => [
-                  localStyles.compactIconButton,
-                  atCurrentMonth && localStyles.disabledButton,
-                  pressed && !atCurrentMonth && localStyles.pressed
-                ]}
-              >
-                <Ionicons color={atCurrentMonth ? colors.muted : colors.primaryDark} name="chevron-forward" size={18} />
-              </Pressable>
+                size="sm"
+                tone="primary"
+              />
             </View>
 
-            <View style={localStyles.rangePillTrack}>
-              <View style={[localStyles.rangePillIndicator, { left: selectedRangeLeft }]} />
-              {rangeOptions.map((option) => {
-                const selected = range === option.value;
-                const disabled = option.value === 'other' && !otherUserId;
-                return (
-                  <Pressable
-                    disabled={disabled}
-                    key={option.value}
-                    onPress={() => selectRange(option.value)}
-                    style={({ pressed }) => [
-                      localStyles.rangePill,
-                      disabled && localStyles.disabledButton,
-                      pressed && !disabled && localStyles.pressed
-                    ]}
-                  >
-                    <Text
-                      ellipsizeMode="tail"
-                      numberOfLines={1}
-                      style={[
-                        localStyles.rangePillText,
-                        selected && localStyles.rangePillTextActive,
-                        disabled && localStyles.disabledText
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <PillTabs
+              accessibilityLabel="支出范围"
+              onChange={selectRange}
+              options={rangeOptions}
+              style={localStyles.rangePillTrack}
+              value={range}
+            />
           </View>
 
           <Animated.View style={[localStyles.userDependentSummary, drillAnimatedStyle]}>
-            <View style={localStyles.totalSummary}>
-              <View style={localStyles.totalLabelRow}>
-                <Text style={styles.label}>月度总支出</Text>
-                {refreshing ? <ActivityIndicator color={colors.primary} size="small" /> : null}
+            <MetricTile
+              helper={stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} ${stats.count} 笔` : '这个月还没有支出记录'}
+              icon="sparkles-outline"
+              label="月度总支出"
+              value={formatYen(stats.totalYen)}
+            />
+            {refreshing ? (
+              <View style={localStyles.refreshRow}>
+                <ActivityIndicator color={colors.primary} size="small" />
+                <Text style={styles.muted}>{isSwitchingMonth ? '正在更新...' : '正在同步...'}</Text>
               </View>
-              <Text style={localStyles.totalAmount}>{formatYen(stats.totalYen)}</Text>
-              <Text style={[styles.muted, localStyles.centerText]}>
-                {stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} ${stats.count} 笔` : '这个月还没有支出记录'}
-              </Text>
-              {isSwitchingMonth ? <Text style={[styles.muted, localStyles.centerText]}>正在更新...</Text> : null}
-            </View>
+            ) : null}
 
             <View style={localStyles.categoryHeader}>
               <Text style={styles.h2}>类别占比</Text>
             </View>
             <PieChart categories={stats.categories} onCategoryPress={openCategoryTrend} totalYen={stats.totalYen} />
           </Animated.View>
-        </View>
+        </BentoCard>
 
-        <View style={styles.section}>
+        <BentoCard variant="chart">
           <View style={localStyles.dailyTrendHeader}>
             <View style={localStyles.dailyTrendTitle}>
               <Text style={styles.h2}>每日趋势</Text>
               {isSwitchingMonth ? <Text style={styles.muted}>更新中</Text> : null}
             </View>
 
-            <View style={localStyles.chartPillTrack}>
-              <View style={[localStyles.chartPillIndicator, { left: selectedChartModeLeft }]} />
-              {CHART_MODES.map((mode) => {
-                const selected = chartMode === mode.value;
-                return (
-                  <Pressable
-                    key={mode.value}
-                    onPress={() => setChartMode(mode.value)}
-                    style={({ pressed }) => [
-                      localStyles.chartPill,
-                      pressed && localStyles.pressed
-                    ]}
-                  >
-                    <Text
-                      ellipsizeMode="tail"
-                      numberOfLines={1}
-                      style={[
-                        localStyles.chartPillText,
-                        selected && localStyles.chartPillTextActive
-                      ]}
-                    >
-                      {mode.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <PillTabs
+              accessibilityLabel="图表类型"
+              onChange={setChartMode}
+              options={chartModeOptions}
+              style={localStyles.chartPillTrack}
+              value={chartMode}
+            />
           </View>
 
           <DailyChart mode={chartMode} series={stats.dailySeries} />
-        </View>
+        </BentoCard>
       </ScrollView>
 
       <CategoryTrendModal
@@ -327,67 +273,10 @@ const localStyles = StyleSheet.create({
   categoryHeader: {
     alignItems: 'center'
   },
-  centerText: {
-    textAlign: 'center'
-  },
-  chartPill: {
-    alignItems: 'center',
-    flex: 1,
-    height: '100%',
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-    zIndex: 1
-  },
-  chartPillIndicator: {
-    backgroundColor: colors.surface,
-    borderColor: colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    bottom: 3,
-    pointerEvents: 'none',
-    position: 'absolute',
-    top: 3,
-    width: CHART_MODE_SEGMENT_WIDTH
-  },
-  chartPillText: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    textAlign: 'center'
-  },
-  chartPillTextActive: {
-    color: colors.primaryDark,
-    fontWeight: '900'
-  },
   chartPillTrack: {
-    backgroundColor: colors.tint,
-    borderColor: colors.line,
-    borderRadius: 8,
-    borderWidth: 1,
     flex: 1,
-    flexDirection: 'row',
-    height: 34,
     maxWidth: 160,
-    minWidth: 132,
-    overflow: 'hidden',
-    position: 'relative'
-  },
-  compactIconButton: {
-    alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderColor: colors.line,
-    borderRadius: 8,
-    borderWidth: 1,
-    height: 28,
-    justifyContent: 'center',
-    width: 28
-  },
-  disabledButton: {
-    opacity: 0.45
-  },
-  disabledText: {
-    color: colors.muted
+    minWidth: 132
   },
   dailyTrendHeader: {
     alignItems: 'center',
@@ -413,51 +302,18 @@ const localStyles = StyleSheet.create({
     flexShrink: 0,
     gap: 4
   },
-  pressed: {
-    opacity: 0.75
-  },
-  rangePill: {
-    alignItems: 'center',
-    flex: 1,
-    height: '100%',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-    zIndex: 1
-  },
-  rangePillIndicator: {
-    backgroundColor: colors.surface,
-    borderColor: colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    bottom: 3,
-    pointerEvents: 'none',
-    position: 'absolute',
-    top: 3,
-    width: RANGE_SEGMENT_WIDTH
-  },
-  rangePillText: {
-    color: colors.muted,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    textAlign: 'center'
-  },
-  rangePillTextActive: {
-    color: colors.primaryDark,
-    fontWeight: '900'
+  pageHeader: {
+    gap: 4
   },
   rangePillTrack: {
-    backgroundColor: colors.tint,
-    borderColor: colors.line,
-    borderRadius: 8,
-    borderWidth: 1,
     flex: 1,
-    flexDirection: 'row',
-    height: 34,
     maxWidth: 176,
-    minWidth: 104,
-    overflow: 'hidden',
-    position: 'relative'
+    minWidth: 104
+  },
+  refreshRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8
   },
   summaryHeader: {
     alignItems: 'center',
@@ -467,24 +323,6 @@ const localStyles = StyleSheet.create({
   },
   summarySection: {
     gap: 18
-  },
-  totalAmount: {
-    color: colors.ink,
-    fontSize: 34,
-    fontWeight: '900',
-    textAlign: 'center'
-  },
-  totalLabelRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-    minHeight: 22
-  },
-  totalSummary: {
-    alignItems: 'center',
-    gap: 4,
-    paddingTop: 2
   },
   userDependentSummary: {
     gap: 18
