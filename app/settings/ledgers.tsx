@@ -18,7 +18,7 @@ export default function LedgerManagementScreen() {
     reloadLedgers,
     selectLedger
   } = useLedgerContext();
-  const [ledgerName, setLedgerName] = useState('我们的账本');
+  const [ledgerName, setLedgerName] = useState('Shared Ledger');
   const [inviteCode, setInviteCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,10 +39,10 @@ export default function LedgerManagementScreen() {
 
     try {
       await createAndSelect(ledgerName);
-      setLedgerName('我们的账本');
+      setLedgerName('Shared Ledger');
       router.replace('/(tabs)');
     } catch (createError) {
-      Alert.alert('创建失败', getErrorMessage(createError));
+      Alert.alert('Create Failed', getErrorMessage(createError));
     } finally {
       setSubmitting(false);
     }
@@ -57,7 +57,7 @@ export default function LedgerManagementScreen() {
       setInviteCode('');
       router.replace('/(tabs)');
     } catch (joinError) {
-      Alert.alert('加入失败', getErrorMessage(joinError));
+      Alert.alert('Join Failed', getErrorMessage(joinError));
     } finally {
       setSubmitting(false);
     }
@@ -70,15 +70,15 @@ export default function LedgerManagementScreen() {
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>账本管理</Text>
-        <Text style={styles.muted}>创建、加入和切换你的账本</Text>
+        <Text style={styles.title}>Ledgers</Text>
+        <Text style={styles.muted}>Create, join, and switch your ledgers</Text>
       </View>
 
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
       {loading ? <ActivityIndicator /> : null}
 
       <BentoCard variant="list">
-        <Text style={styles.h2}>我的账本</Text>
+        <Text style={styles.h2}>My Ledgers</Text>
         <View style={{ gap: 10 }}>
           {ledgers.map((membership) => {
             const isActive = membership.ledger.id === activeLedger?.ledger.id;
@@ -99,52 +99,52 @@ export default function LedgerManagementScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={styles.h2}>{membership.ledger.name}</Text>
                     <Text style={styles.muted}>
-                      {isActive ? '当前账本' : '可切换'} · {membership.isOwner ? '创建者' : '成员'}
+                      {isActive ? 'Current ledger' : 'Available'} · {membership.isOwner ? 'Owner' : 'Member'}
                     </Text>
                   </View>
                   <Pressable
                     onPress={() => router.push(`/settings/ledger/${membership.ledger.id}`)}
                     style={[styles.button, styles.secondaryButton, { minHeight: 40 }]}
                   >
-                    <Text style={[styles.buttonText, styles.secondaryButtonText]}>详情</Text>
+                    <Text style={[styles.buttonText, styles.secondaryButtonText]}>Details</Text>
                   </Pressable>
                 </View>
 
                 {!isActive ? (
                   <Pressable onPress={() => handleSelect(membership.ledger.id)} style={styles.button}>
-                    <Text style={styles.buttonText}>切换到此账本</Text>
+                    <Text style={styles.buttonText}>Switch to This Ledger</Text>
                   </Pressable>
                 ) : null}
               </View>
             );
           })}
 
-          {!loading && ledgers.length === 0 ? <Text style={styles.muted}>还没有账本。</Text> : null}
+          {!loading && ledgers.length === 0 ? <Text style={styles.muted}>No ledgers yet.</Text> : null}
         </View>
       </BentoCard>
 
       <BentoCard variant="form">
-        <Text style={styles.h2}>创建账本</Text>
-        <Text style={styles.label}>账本名称</Text>
+        <Text style={styles.h2}>Create Ledger</Text>
+        <Text style={styles.label}>Ledger Name</Text>
         <TextInput onChangeText={setLedgerName} style={styles.input} value={ledgerName} />
         <Pressable disabled={submitting} onPress={handleCreate} style={styles.button}>
-          <Text style={styles.buttonText}>{submitting ? '处理中...' : '创建并切换'}</Text>
+          <Text style={styles.buttonText}>{submitting ? 'Processing...' : 'Create and Switch'}</Text>
         </Pressable>
       </BentoCard>
 
       <BentoCard variant="form">
-        <Text style={styles.h2}>通过邀请码加入</Text>
-        <Text style={styles.label}>邀请码</Text>
+        <Text style={styles.h2}>Join with Invite Code</Text>
+        <Text style={styles.label}>Invite Code</Text>
         <TextInput
           autoCapitalize="characters"
           onChangeText={setInviteCode}
-          placeholder="例如：A1B2C3D4"
+          placeholder="Example: A1B2C3D4"
           style={styles.input}
           value={inviteCode}
         />
         <Pressable disabled={submitting} onPress={handleJoin} style={[styles.button, styles.secondaryButton]}>
           <Text style={[styles.buttonText, styles.secondaryButtonText]}>
-            {submitting ? '处理中...' : '加入并切换'}
+            {submitting ? 'Processing...' : 'Join and Switch'}
           </Text>
         </Pressable>
       </BentoCard>

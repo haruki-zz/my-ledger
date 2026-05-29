@@ -37,7 +37,7 @@ export default function AuthScreen() {
           password,
           options: {
             data: {
-              display_name: displayName.trim() || email.trim().split('@')[0] || '用户'
+              display_name: displayName.trim() || email.trim().split('@')[0] || 'User'
             }
           }
         });
@@ -50,10 +50,10 @@ export default function AuthScreen() {
           return;
         }
 
-        Alert.alert('注册完成', '如果 Supabase 开启了邮箱确认，请先完成邮箱验证后再登录。');
+        Alert.alert('Sign-up complete', 'If email confirmation is enabled in Supabase, confirm your email before signing in.');
       }
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : '登录失败');
+      setError(submitError instanceof Error ? submitError.message : 'Sign-in failed');
     } finally {
       setSubmitting(false);
     }
@@ -63,7 +63,7 @@ export default function AuthScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
-        <Text style={[styles.muted, { marginTop: 10 }]}>正在读取登录状态</Text>
+        <Text style={[styles.muted, { marginTop: 10 }]}>Checking sign-in status</Text>
       </View>
     );
   }
@@ -79,16 +79,16 @@ export default function AuthScreen() {
     >
       <View style={styles.content}>
         <View>
-          <Text style={styles.title}>两人共享记账</Text>
-          <Text style={styles.muted}>用 Supabase 同步你们的日常支出。</Text>
+          <Text style={styles.title}>Shared Expense Ledger</Text>
+          <Text style={styles.muted}>Sync daily expenses with Supabase.</Text>
         </View>
 
         <PillTabs
-          accessibilityLabel="登录模式"
+          accessibilityLabel="Auth mode"
           onChange={setMode}
           options={[
-            { label: '登录', value: 'signIn' },
-            { label: '注册', value: 'signUp' }
+            { label: 'Sign In', value: 'signIn' },
+            { label: 'Sign Up', value: 'signUp' }
           ]}
           value={mode}
         />
@@ -96,18 +96,18 @@ export default function AuthScreen() {
         <BentoCard variant="form">
           {mode === 'signUp' ? (
             <>
-              <Text style={styles.label}>显示名称</Text>
+              <Text style={styles.label}>Display Name</Text>
               <TextInput
                 autoCapitalize="none"
                 onChangeText={setDisplayName}
-                placeholder="例如：小林"
+                placeholder="Example: Alex"
                 style={styles.input}
                 value={displayName}
               />
             </>
           ) : null}
 
-          <Text style={styles.label}>邮箱</Text>
+          <Text style={styles.label}>Email</Text>
           <TextInput
             autoCapitalize="none"
             inputMode="email"
@@ -117,10 +117,10 @@ export default function AuthScreen() {
             value={email}
           />
 
-          <Text style={styles.label}>密码</Text>
+          <Text style={styles.label}>Password</Text>
           <TextInput
             onChangeText={setPassword}
-            placeholder="至少 6 位"
+            placeholder="At least 6 characters"
             secureTextEntry
             style={styles.input}
             value={password}
@@ -129,7 +129,7 @@ export default function AuthScreen() {
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
           <Pressable disabled={submitting} onPress={submit} style={styles.button}>
-            <Text style={styles.buttonText}>{submitting ? '提交中...' : mode === 'signIn' ? '登录' : '注册'}</Text>
+            <Text style={styles.buttonText}>{submitting ? 'Submitting...' : mode === 'signIn' ? 'Sign In' : 'Sign Up'}</Text>
           </Pressable>
         </BentoCard>
       </View>

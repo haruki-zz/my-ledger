@@ -30,6 +30,13 @@ export type DashboardStats = {
 };
 
 const CATEGORY_COLORS = CHART_PALETTE;
+const monthFormatter = new Intl.DateTimeFormat('en', {
+  month: 'short',
+  year: 'numeric'
+});
+const shortMonthFormatter = new Intl.DateTimeFormat('en', {
+  month: 'short'
+});
 
 function padDatePart(value: number) {
   return String(value).padStart(2, '0');
@@ -58,8 +65,8 @@ export function addMonths(monthKey: string, amount: number) {
 }
 
 export function formatMonthLabel(monthKey: string) {
-  const [year, month] = monthKey.split('-');
-  return `${year}年${Number(month)}月`;
+  const [year, month] = parseMonthKey(monthKey);
+  return monthFormatter.format(new Date(year, month - 1, 1));
 }
 
 export function monthStartDateString(monthKey: string) {
@@ -193,7 +200,7 @@ function buildDailySeries(monthKey: string, endDateString: string, amountsByDate
     const date = [year, padDatePart(month), padDatePart(day)].join('-');
     series.push({
       date,
-      label: String(day),
+      label: `Day ${day}`,
       amountYen: amountsByDate.get(date) || 0
     });
   }
@@ -212,8 +219,8 @@ function parseMonthKey(monthKey: string) {
 }
 
 function formatShortMonthLabel(monthKey: string) {
-  const [, month] = parseMonthKey(monthKey);
-  return `${month}月`;
+  const [year, month] = parseMonthKey(monthKey);
+  return shortMonthFormatter.format(new Date(year, month - 1, 1));
 }
 
 function formatDateString(date: Date) {

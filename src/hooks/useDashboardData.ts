@@ -111,7 +111,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
       hasLoadedData.current = true;
     } catch (loadError) {
       if (requestSequence.current === requestId) {
-        setError(loadError instanceof Error ? loadError.message : '读取首页失败');
+        setError(loadError instanceof Error ? loadError.message : 'Could not load dashboard');
       }
     } finally {
       if (requestSequence.current === requestId) {

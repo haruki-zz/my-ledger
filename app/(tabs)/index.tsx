@@ -4,7 +4,7 @@ import { ActivityIndicator, Animated, PanResponder, RefreshControl, ScrollView, 
 import { CategoryTrendModal } from '@/src/components/CategoryTrendModal';
 import { DailyChart, type DailyChartMode } from '@/src/components/DailyChart';
 import { PieChart, type AnchorPoint } from '@/src/components/PieChart';
-import { colors, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { BentoCard, IconButton, MetricTile, PillTabs, type PillTabOption } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { displayName, formatYen } from '@/src/lib/format';
@@ -29,8 +29,8 @@ type SelectedCategoryState = {
 };
 
 const CHART_MODES: { label: string; value: DailyChartMode }[] = [
-  { label: '曲线', value: 'curve' },
-  { label: '柱状', value: 'bar' }
+  { label: 'Curve', value: 'curve' },
+  { label: 'Bar', value: 'bar' }
 ];
 
 const SWIPE_DISTANCE = 36;
@@ -62,9 +62,9 @@ export default function DashboardScreen() {
   const currentUserName = displayName(members.find((member) => member.user_id === currentUserId)?.profile.display_name);
   const otherUserName = displayName(members.find((member) => member.user_id === otherUserId)?.profile.display_name);
   const rangeOptions: RangeOption[] = [
-    { label: '双方', value: 'all' },
+    { label: 'Both', value: 'all' },
     { label: currentUserName, value: 'current' },
-    { disabled: !otherUserId, label: otherUserId ? otherUserName : '对方', value: 'other' }
+    { disabled: !otherUserId, label: otherUserId ? otherUserName : 'Partner', value: 'other' }
   ];
   const chartModeOptions = CHART_MODES satisfies PillTabOption<DailyChartMode>[];
   const atCurrentMonth = compareMonthKeys(monthKey, currentMonthKey()) >= 0;
@@ -156,7 +156,7 @@ export default function DashboardScreen() {
       >
         <View style={localStyles.pageHeader}>
           <Text style={styles.title}>Dashboard</Text>
-          <Text style={styles.muted}>{ledger ? ledger.name : '共享账本'}</Text>
+          <Text style={styles.muted}>{ledger ? ledger.name : 'Shared Ledger'}</Text>
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -165,7 +165,7 @@ export default function DashboardScreen() {
           <View style={localStyles.summaryHeader}>
             <View style={localStyles.monthSwitcher}>
               <IconButton
-                accessibilityLabel="上个月"
+                accessibilityLabel="Previous month"
                 disabled={atMinimumMonth}
                 icon="chevron-back"
                 onPress={() => moveMonth(-1)}
@@ -178,7 +178,7 @@ export default function DashboardScreen() {
               </Text>
 
               <IconButton
-                accessibilityLabel="下个月"
+                accessibilityLabel="Next month"
                 disabled={atCurrentMonth}
                 icon="chevron-forward"
                 onPress={() => moveMonth(1)}
@@ -188,7 +188,7 @@ export default function DashboardScreen() {
             </View>
 
             <PillTabs
-              accessibilityLabel="支出范围"
+              accessibilityLabel="Expense range"
               onChange={selectRange}
               options={rangeOptions}
               style={localStyles.rangePillTrack}
@@ -198,20 +198,20 @@ export default function DashboardScreen() {
 
           <Animated.View style={[localStyles.userDependentSummary, drillAnimatedStyle]}>
             <MetricTile
-              helper={stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} ${stats.count} 笔` : '这个月还没有支出记录'}
+              helper={stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} · ${stats.count} records` : 'No expenses this month'}
               icon="sparkles-outline"
-              label="月度总支出"
+              label="Monthly Total"
               value={formatYen(stats.totalYen)}
             />
             {refreshing ? (
               <View style={localStyles.refreshRow}>
                 <ActivityIndicator color={colors.primary} size="small" />
-                <Text style={styles.muted}>{isSwitchingMonth ? '正在更新...' : '正在同步...'}</Text>
+                <Text style={styles.muted}>{isSwitchingMonth ? 'Updating...' : 'Syncing...'}</Text>
               </View>
             ) : null}
 
             <View style={localStyles.categoryHeader}>
-              <Text style={styles.h2}>类别占比</Text>
+              <Text style={styles.h2}>Category Share</Text>
             </View>
             <PieChart categories={stats.categories} onCategoryPress={openCategoryTrend} totalYen={stats.totalYen} />
           </Animated.View>
@@ -220,12 +220,12 @@ export default function DashboardScreen() {
         <BentoCard variant="chart">
           <View style={localStyles.dailyTrendHeader}>
             <View style={localStyles.dailyTrendTitle}>
-              <Text style={styles.h2}>每日趋势</Text>
-              {isSwitchingMonth ? <Text style={styles.muted}>更新中</Text> : null}
+              <Text style={styles.h2}>Daily Trend</Text>
+              {isSwitchingMonth ? <Text style={styles.muted}>Updating</Text> : null}
             </View>
 
             <PillTabs
-              accessibilityLabel="图表类型"
+              accessibilityLabel="Chart type"
               onChange={setChartMode}
               options={chartModeOptions}
               style={localStyles.chartPillTrack}
@@ -291,6 +291,7 @@ const localStyles = StyleSheet.create({
   },
   monthLabel: {
     color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 15,
     fontWeight: '800',
     lineHeight: 21,

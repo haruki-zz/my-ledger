@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-import { colors, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
 import type { CategoryStat } from '@/src/lib/stats';
 
@@ -24,7 +24,7 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
   if (totalYen <= 0 || categories.length === 0) {
     return (
       <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 180 }}>
-        <Text style={styles.muted}>暂无可统计的类别支出</Text>
+        <Text style={styles.muted}>No category expenses to chart yet</Text>
       </View>
     );
   }
@@ -93,7 +93,7 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
                 <Text style={styles.muted}>{category.percentage.toFixed(1)}%</Text>
               </View>
             </View>
-            <Text style={{ color: colors.ink, fontSize: 16, fontWeight: '800' }}>
+            <Text style={{ color: colors.ink, fontFamily: fontFamilies.extraBold, fontSize: 16, fontWeight: '800' }}>
               {formatYen(category.amountYen)}
             </Text>
           </Pressable>

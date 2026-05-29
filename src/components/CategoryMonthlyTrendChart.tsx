@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
-import { colors, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
 import type { MonthlyCategoryTrendStat } from '@/src/lib/stats';
 
@@ -24,7 +24,7 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
   if (series.length === 0 || maxAmount <= 0) {
     return (
       <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 190 }}>
-        <Text style={styles.muted}>暂无该类别趋势数据</Text>
+        <Text style={styles.muted}>No trend data for this category yet</Text>
       </View>
     );
   }
@@ -44,10 +44,10 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
       <Svg height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%">
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={baseline} y2={baseline} />
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={PADDING_TOP} y2={PADDING_TOP} />
-        <SvgText fill={colors.muted} fontSize={10} x={4} y={PADDING_TOP + 4}>
+        <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} x={4} y={PADDING_TOP + 4}>
           {formatYen(maxAmount)}
         </SvgText>
-        <SvgText fill={colors.muted} fontSize={10} x={4} y={baseline + 4}>
+        <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} x={4} y={baseline + 4}>
           ¥0
         </SvgText>
 
@@ -68,6 +68,7 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
         {valueIndexes.map((index) => (
           <SvgText
             fill={colors.ink}
+            fontFamily={fontFamilies.regular}
             fontSize={9}
             key={`value-${points[index].monthKey}`}
             textAnchor="middle"
@@ -81,6 +82,7 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
         {labelIndexes.map((index) => (
           <SvgText
             fill={colors.muted}
+            fontFamily={fontFamilies.regular}
             fontSize={10}
             key={series[index].monthKey}
             textAnchor="middle"
@@ -142,15 +144,19 @@ function valueIndexSet(
 }
 
 function compactYen(amountYen: number) {
-  if (amountYen >= 9950) {
-    return `¥${Math.round(amountYen / 1000) / 10}万`;
+  if (amountYen >= 1_000_000) {
+    return `¥${formatCompactValue(amountYen / 1_000_000)}M`;
   }
 
   if (amountYen >= 1000) {
-    return `¥${Math.round(amountYen / 100) / 10}千`;
+    return `¥${formatCompactValue(amountYen / 1000)}k`;
   }
 
   return `¥${amountYen}`;
+}
+
+function formatCompactValue(value: number) {
+  return String(Math.round(value * 10) / 10);
 }
 
 function clamp(value: number, min: number, max: number) {

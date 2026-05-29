@@ -134,8 +134,8 @@ export default function CategorySettingsScreen() {
   }, [ledgerId, loadCategoryData]);
 
   const memberNames = useMemo(() => {
-    const firstName = members[0]?.profile.display_name || '成员 A';
-    const secondName = members[1]?.profile.display_name || '成员 B';
+    const firstName = members[0]?.profile.display_name || 'Member A';
+    const secondName = members[1]?.profile.display_name || 'Member B';
     return [firstName, secondName] as const;
   }, [members]);
 
@@ -153,7 +153,7 @@ export default function CategorySettingsScreen() {
     const ratioA = parseRatio(editingRatioA);
     const ratioB = parseRatio(editingRatioB);
     if (ratioA === null || ratioB === null || ratioA + ratioB !== 100) {
-      Alert.alert('比例无效', '双方比例必须是 0 到 100 的整数，且相加等于 100。');
+      Alert.alert('Invalid Ratio', 'Both ratios must be integers from 0 to 100 and add up to 100.');
       return;
     }
 
@@ -169,7 +169,7 @@ export default function CategorySettingsScreen() {
       setEditingCategoryName(null);
       await refresh();
     } catch (saveError) {
-      Alert.alert('保存失败', saveError instanceof Error ? saveError.message : '请稍后重试');
+      Alert.alert('Save Failed', saveError instanceof Error ? saveError.message : 'Please try again later');
     } finally {
       setSavingCategory(false);
     }
@@ -182,7 +182,7 @@ export default function CategorySettingsScreen() {
 
     const categoryName = newCategoryName.trim();
     if (!categoryName) {
-      Alert.alert('类别名称不能为空');
+      Alert.alert('Category name cannot be empty');
       return;
     }
 
@@ -199,7 +199,7 @@ export default function CategorySettingsScreen() {
       setNewCategoryName('');
       await refresh();
     } catch (saveError) {
-      Alert.alert('添加失败', saveError instanceof Error ? saveError.message : '请稍后重试');
+      Alert.alert('Add Failed', saveError instanceof Error ? saveError.message : 'Please try again later');
     } finally {
       setSavingCategory(false);
     }
@@ -211,21 +211,21 @@ export default function CategorySettingsScreen() {
     }
 
     if (categories.length <= 1) {
-      Alert.alert('无法删除', '至少需要保留一个支出类别。');
+      Alert.alert('Cannot Delete', 'Keep at least one expense category.');
       return;
     }
 
-    Alert.alert('删除类别', `删除“${category.category_name}”后，历史支出仍会保留该类别名称。`, [
-      { text: '取消', style: 'cancel' },
+    Alert.alert('Delete Category', `After deleting "${category.category_name}", historical expenses will keep this category name.`, [
+      { text: 'Cancel', style: 'cancel' },
       {
-        text: '删除',
+        text: 'Delete',
         style: 'destructive',
         onPress: async () => {
           try {
             await deleteLedgerCategory(ledger.id, category.category_name);
             await refresh();
           } catch (deleteError) {
-            Alert.alert('删除失败', deleteError instanceof Error ? deleteError.message : '请稍后重试');
+            Alert.alert('Delete Failed', deleteError instanceof Error ? deleteError.message : 'Please try again later');
           }
         }
       }
@@ -247,14 +247,14 @@ export default function CategorySettingsScreen() {
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>类别管理</Text>
-        <Text style={styles.muted}>共享支出类别和默认分摊比例</Text>
+        <Text style={styles.title}>Categories</Text>
+        <Text style={styles.muted}>Shared expense categories and default split ratios</Text>
       </View>
 
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
 
       <BentoCard variant="list">
-        <Text style={styles.h2}>当前类别</Text>
+        <Text style={styles.h2}>Current Categories</Text>
         <View style={{ gap: 12 }}>
           {categories.map((category) => {
             const isEditing = editingCategoryName === category.category_name;
@@ -279,7 +279,7 @@ export default function CategorySettingsScreen() {
                     </Text>
                   </View>
                   <Pressable onPress={() => beginEditCategory(category)} style={[styles.button, { minHeight: 40 }]}>
-                    <Text style={styles.buttonText}>编辑</Text>
+                    <Text style={styles.buttonText}>Edit</Text>
                   </Pressable>
                 </View>
 
@@ -287,7 +287,7 @@ export default function CategorySettingsScreen() {
                   <View style={{ gap: 10 }}>
                     <View style={styles.row}>
                       <View style={{ flex: 1, gap: 6 }}>
-                        <Text style={styles.label}>{memberNames[0]}比例</Text>
+                        <Text style={styles.label}>{memberNames[0]} Ratio</Text>
                         <TextInput
                           inputMode="numeric"
                           onChangeText={(value) => {
@@ -302,7 +302,7 @@ export default function CategorySettingsScreen() {
                         />
                       </View>
                       <View style={{ flex: 1, gap: 6 }}>
-                        <Text style={styles.label}>{memberNames[1]}比例</Text>
+                        <Text style={styles.label}>{memberNames[1]} Ratio</Text>
                         <TextInput
                           inputMode="numeric"
                           onChangeText={(value) => {
@@ -324,38 +324,38 @@ export default function CategorySettingsScreen() {
                         onPress={() => saveCategory(category)}
                         style={[styles.button, { flex: 1 }]}
                       >
-                        <Text style={styles.buttonText}>{savingCategory ? '保存中...' : '保存'}</Text>
+                        <Text style={styles.buttonText}>{savingCategory ? 'Saving...' : 'Save'}</Text>
                       </Pressable>
                       <Pressable
                         onPress={() => setEditingCategoryName(null)}
                         style={[styles.button, styles.secondaryButton, { flex: 1 }]}
                       >
-                        <Text style={[styles.buttonText, styles.secondaryButtonText]}>取消</Text>
+                        <Text style={[styles.buttonText, styles.secondaryButtonText]}>Cancel</Text>
                       </Pressable>
                     </View>
                   </View>
                 ) : null}
 
                 <Pressable onPress={() => confirmDeleteCategory(category)} style={[styles.button, styles.dangerButton]}>
-                  <Text style={styles.buttonText}>删除</Text>
+                  <Text style={styles.buttonText}>Delete</Text>
                 </Pressable>
               </View>
             );
           })}
 
-          {categories.length === 0 ? <Text style={styles.muted}>暂无类别。</Text> : null}
+          {categories.length === 0 ? <Text style={styles.muted}>No categories yet.</Text> : null}
         </View>
 
         <View style={{ gap: 10 }}>
-          <Text style={styles.label}>新增类别</Text>
+          <Text style={styles.label}>New Category</Text>
           <TextInput
             onChangeText={setNewCategoryName}
-            placeholder="例如：咖啡"
+            placeholder="Example: Coffee"
             style={styles.input}
             value={newCategoryName}
           />
           <Pressable disabled={savingCategory} onPress={addCategory} style={styles.button}>
-            <Text style={styles.buttonText}>{savingCategory ? '添加中...' : '添加'}</Text>
+            <Text style={styles.buttonText}>{savingCategory ? 'Adding...' : 'Add'}</Text>
           </Pressable>
         </View>
       </BentoCard>

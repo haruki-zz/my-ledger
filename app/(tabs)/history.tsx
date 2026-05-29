@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
-import { colors, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { BentoCard, MetricTile } from '@/src/components/ui';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { displayName, formatYen } from '@/src/lib/format';
@@ -63,7 +63,7 @@ export default function HistoryScreen() {
       setActiveMemberIds(new Set(nextMembers.map((member) => member.user_id)));
       setProfiles(await getProfiles([...profileIds, ...nextMembers.map((member) => member.user_id)]));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : '读取支出失败');
+      setError(loadError instanceof Error ? loadError.message : 'Could not load expenses');
     } finally {
       setLoading(false);
     }
@@ -126,22 +126,22 @@ export default function HistoryScreen() {
   );
 
   const profileDisplayName = useCallback((userId: string) => {
-    const suffix = activeMemberIds.has(userId) ? '' : '（已退出）';
+    const suffix = activeMemberIds.has(userId) ? '' : ' (left)';
     return `${displayName(profiles[userId]?.display_name)}${suffix}`;
   }, [activeMemberIds, profiles]);
 
   async function confirmDelete(expenseId: string) {
-    Alert.alert('删除支出', '删除后无法恢复。', [
-      { text: '取消', style: 'cancel' },
+    Alert.alert('Delete Expense', 'This cannot be undone.', [
+      { text: 'Cancel', style: 'cancel' },
       {
-        text: '删除',
+        text: 'Delete',
         style: 'destructive',
         onPress: async () => {
           try {
             await deleteExpense(expenseId);
             await load();
           } catch (deleteError) {
-            Alert.alert('删除失败', deleteError instanceof Error ? deleteError.message : '请稍后重试');
+            Alert.alert('Delete Failed', deleteError instanceof Error ? deleteError.message : 'Please try again later');
           }
         }
       }
@@ -155,17 +155,17 @@ export default function HistoryScreen() {
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>支出明细</Text>
-        <Text style={styles.muted}>{ledger ? ledger.name : '共享账本'}</Text>
+        <Text style={styles.title}>Expense History</Text>
+        <Text style={styles.muted}>{ledger ? ledger.name : 'Shared Ledger'}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <BentoCard variant="hero" style={{ minHeight: 0 }}>
         <MetricTile
-          helper={`当前明细共 ${expenses.length} 笔`}
+          helper={`${expenses.length} records`}
           icon="receipt-outline"
-          label="合计"
+          label="Total"
           value={formatYen(total)}
         />
       </BentoCard>
@@ -177,17 +177,17 @@ export default function HistoryScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.h2}>{expense.category}</Text>
                 <Text style={styles.muted}>
-                  {expense.spent_on} · {expense.ownership === 'shared' ? '共同支出' : '个人支出'}
+                  {expense.spent_on} · {expense.ownership === 'shared' ? 'Shared expense' : 'Personal expense'}
                 </Text>
               </View>
-              <Text style={{ color: colors.ink, fontSize: 20, fontWeight: '900' }}>
+              <Text style={{ color: colors.ink, fontFamily: fontFamilies.extraBold, fontSize: 20, fontWeight: '900' }}>
                 {formatYen(expense.amount_yen)}
               </Text>
             </View>
 
             <View style={{ gap: 4 }}>
-              <Text style={styles.muted}>支付人：{profileDisplayName(expense.paid_by)}</Text>
-              <Text style={styles.muted}>记录人：{profileDisplayName(expense.recorded_by)}</Text>
+              <Text style={styles.muted}>Paid by: {profileDisplayName(expense.paid_by)}</Text>
+              <Text style={styles.muted}>Recorded by: {profileDisplayName(expense.recorded_by)}</Text>
               {expense.note ? <Text style={styles.body}>{expense.note}</Text> : null}
             </View>
 
@@ -195,7 +195,7 @@ export default function HistoryScreen() {
               <View style={{ gap: 4 }}>
                 {expense.splits.map((split) => (
                   <Text key={split.user_id} style={styles.muted}>
-                    {profileDisplayName(split.user_id)}承担 {formatYen(split.amount_yen)}
+                    {profileDisplayName(split.user_id)} owes {formatYen(split.amount_yen)}
                   </Text>
                 ))}
               </View>
@@ -206,13 +206,13 @@ export default function HistoryScreen() {
                 onPress={() => router.push(`/expenses/${expense.id}`)}
                 style={[styles.button, styles.secondaryButton, { flex: 1 }]}
               >
-                <Text style={[styles.buttonText, styles.secondaryButtonText]}>编辑</Text>
+                <Text style={[styles.buttonText, styles.secondaryButtonText]}>Edit</Text>
               </Pressable>
               <Pressable
                 onPress={() => confirmDelete(expense.id)}
                 style={[styles.button, styles.dangerButton, { flex: 1 }]}
               >
-                <Text style={styles.buttonText}>删除</Text>
+                <Text style={styles.buttonText}>Delete</Text>
               </Pressable>
             </View>
           </BentoCard>
@@ -221,8 +221,8 @@ export default function HistoryScreen() {
 
       {!loading && expenses.length === 0 ? (
         <BentoCard>
-          <Text style={styles.h2}>还没有支出</Text>
-          <Text style={styles.muted}>点击悬浮“记账”按钮添加第一条 Supabase 持久化记录。</Text>
+          <Text style={styles.h2}>No Expenses Yet</Text>
+          <Text style={styles.muted}>Tap the floating add button to create the first Supabase-backed record.</Text>
         </BentoCard>
       ) : null}
     </ScrollView>

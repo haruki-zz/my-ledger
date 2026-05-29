@@ -63,7 +63,7 @@ export function useCategoryTrend(input: UseCategoryTrendInput) {
         setExpenses(expenses);
       } catch (loadError) {
         if (requestSequence.current === requestId) {
-          setError(loadError instanceof Error ? loadError.message : '读取类别趋势失败');
+          setError(loadError instanceof Error ? loadError.message : 'Could not load category trend');
         }
       } finally {
         if (requestSequence.current === requestId) {

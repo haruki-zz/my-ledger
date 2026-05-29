@@ -23,9 +23,9 @@ type CategoryTrendModalProps = {
 };
 
 const TREND_RANGE_OPTIONS: { label: string; value: TrendMonths }[] = [
-  { label: '过去3个月', value: 3 },
-  { label: '过去半年', value: 6 },
-  { label: '过去1年', value: 12 }
+  { label: 'Last 3 Months', value: 3 },
+  { label: 'Last 6 Months', value: 6 },
+  { label: 'Last 12 Months', value: 12 }
 ];
 
 export function CategoryTrendModal({
@@ -141,13 +141,13 @@ export function CategoryTrendModal({
           <Pressable onPress={(event) => event.stopPropagation()} style={modalStyles.panelHitArea}>
             <Animated.View style={[modalStyles.panel, panelAnimatedStyle]}>
               <View>
-                <Text style={styles.h2}>{displayCategory?.category || '类别趋势'}</Text>
-                <Text style={styles.muted}>截至 {formatMonthLabel(endMonthKey)}</Text>
-                {isCurrentMonthTrend ? <Text style={styles.muted}>本月数据截至今天</Text> : null}
+                <Text style={styles.h2}>{displayCategory?.category || 'Category Trend'}</Text>
+                <Text style={styles.muted}>Through {formatMonthLabel(endMonthKey)}</Text>
+                {isCurrentMonthTrend ? <Text style={styles.muted}>Current month data is through today</Text> : null}
               </View>
 
               <View style={styles.dropdown}>
-                <Text style={styles.label}>时间范围</Text>
+                <Text style={styles.label}>Time Range</Text>
                 <Pressable
                   onPress={() => setMenuOpen((current) => !current)}
                   style={[styles.dropdownTrigger, menuOpen && styles.dropdownTriggerActive]}
@@ -182,7 +182,7 @@ export function CategoryTrendModal({
                 {trend.loading ? (
                   <View style={modalStyles.loading}>
                     <ActivityIndicator color={colors.primary} size="small" />
-                    <Text style={styles.muted}>正在更新...</Text>
+                    <Text style={styles.muted}>Updating...</Text>
                   </View>
                 ) : null}
                 <View style={trend.loading ? modalStyles.chartRefreshing : null}>

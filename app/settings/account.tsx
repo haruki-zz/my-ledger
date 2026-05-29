@@ -33,7 +33,7 @@ export default function AccountSettingsScreen() {
     try {
       const members = await getLedgerMembers(ledger.id);
       const currentMember = members.find((member) => member.user_id === user.id);
-      setDisplayNameInput(currentMember?.profile.display_name || '用户');
+      setDisplayNameInput(currentMember?.profile.display_name || 'User');
     } catch (loadError) {
       setError(getErrorMessage(loadError));
     } finally {
@@ -56,7 +56,7 @@ export default function AccountSettingsScreen() {
       await updateMyProfile(displayNameInput);
       await refresh();
     } catch (saveError) {
-      Alert.alert('保存失败', getErrorMessage(saveError));
+      Alert.alert('Save Failed', getErrorMessage(saveError));
     } finally {
       setSavingProfile(false);
     }
@@ -65,7 +65,7 @@ export default function AccountSettingsScreen() {
   async function signOut() {
     const { error: signOutError } = await supabase.auth.signOut();
     if (signOutError) {
-      Alert.alert('退出失败', signOutError.message);
+      Alert.alert('Sign Out Failed', signOutError.message);
       return;
     }
 
@@ -87,36 +87,36 @@ export default function AccountSettingsScreen() {
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>账户信息</Text>
-        <Text style={styles.muted}>个人资料、登录状态和当前账本</Text>
+        <Text style={styles.title}>Account</Text>
+        <Text style={styles.muted}>Profile, sign-in status, and current ledger</Text>
       </View>
 
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
 
       <BentoCard variant="form">
-        <Text style={styles.h2}>个人资料</Text>
-        <Text style={styles.label}>显示名称</Text>
+        <Text style={styles.h2}>Profile</Text>
+        <Text style={styles.label}>Display Name</Text>
         <TextInput onChangeText={setDisplayNameInput} style={styles.input} value={displayNameInput} />
         <Pressable disabled={savingProfile} onPress={saveProfile} style={styles.button}>
-          <Text style={styles.buttonText}>{savingProfile ? '保存中...' : '保存名称'}</Text>
+          <Text style={styles.buttonText}>{savingProfile ? 'Saving...' : 'Save Name'}</Text>
         </Pressable>
 
-        <Text style={styles.label}>邮箱</Text>
+        <Text style={styles.label}>Email</Text>
         <View style={[styles.input, { justifyContent: 'center' }]}>
-          <Text style={styles.body}>{user?.email || '未设置'}</Text>
+          <Text style={styles.body}>{user?.email || 'Not set'}</Text>
         </View>
 
         <Pressable onPress={signOut} style={[styles.button, styles.secondaryButton]}>
-          <Text style={[styles.buttonText, styles.secondaryButtonText]}>退出登录</Text>
+          <Text style={[styles.buttonText, styles.secondaryButtonText]}>Sign Out</Text>
         </Pressable>
       </BentoCard>
 
       <BentoCard>
-        <Text style={styles.h2}>当前账本</Text>
-        <Text style={styles.body}>{ledger?.name || '未选择账本'}</Text>
-        <Text style={styles.muted}>创建、加入、切换和删除账本请进入账本管理。</Text>
+        <Text style={styles.h2}>Current Ledger</Text>
+        <Text style={styles.body}>{ledger?.name || 'No ledger selected'}</Text>
+        <Text style={styles.muted}>Use ledger management to create, join, switch, or delete ledgers.</Text>
         <Pressable onPress={() => router.push('/settings/ledgers')} style={styles.button}>
-          <Text style={styles.buttonText}>进入账本管理</Text>
+          <Text style={styles.buttonText}>Open Ledger Management</Text>
         </Pressable>
       </BentoCard>
     </ScrollView>

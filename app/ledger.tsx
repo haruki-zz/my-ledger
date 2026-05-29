@@ -16,7 +16,7 @@ export default function LedgerScreen() {
     loading,
     reloadLedgers
   } = useLedgerContext();
-  const [ledgerName, setLedgerName] = useState('我们的账本');
+  const [ledgerName, setLedgerName] = useState('Shared Ledger');
   const [inviteCode, setInviteCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,8 +80,8 @@ export default function LedgerScreen() {
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>共享账本</Text>
-        <Text style={styles.muted}>每个账本最多两名成员，双方都可以记账、编辑和删除。</Text>
+        <Text style={styles.title}>Shared Ledger</Text>
+        <Text style={styles.muted}>Each ledger supports up to two members. Both members can add, edit, and delete expenses.</Text>
       </View>
 
       {loading ? <ActivityIndicator /> : null}
@@ -89,27 +89,27 @@ export default function LedgerScreen() {
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <BentoCard variant="form">
-        <Text style={styles.h2}>创建账本</Text>
-        <Text style={styles.label}>账本名称</Text>
+        <Text style={styles.h2}>Create Ledger</Text>
+        <Text style={styles.label}>Ledger Name</Text>
         <TextInput onChangeText={setLedgerName} style={styles.input} value={ledgerName} />
         <Pressable disabled={submitting} onPress={handleCreate} style={styles.button}>
-          <Text style={styles.buttonText}>{submitting ? '处理中...' : '创建并进入'}</Text>
+          <Text style={styles.buttonText}>{submitting ? 'Processing...' : 'Create and Open'}</Text>
         </Pressable>
       </BentoCard>
 
       <BentoCard variant="form">
-        <Text style={styles.h2}>加入账本</Text>
-        <Text style={styles.label}>邀请码</Text>
+        <Text style={styles.h2}>Join Ledger</Text>
+        <Text style={styles.label}>Invite Code</Text>
         <TextInput
           autoCapitalize="characters"
           onChangeText={setInviteCode}
-          placeholder="例如：A1B2C3D4"
+          placeholder="Example: A1B2C3D4"
           style={styles.input}
           value={inviteCode}
         />
         <Pressable disabled={submitting} onPress={handleJoin} style={[styles.button, styles.secondaryButton]}>
           <Text style={[styles.buttonText, styles.secondaryButtonText]}>
-            {submitting ? '处理中...' : '加入账本'}
+            {submitting ? 'Processing...' : 'Join Ledger'}
           </Text>
         </Pressable>
       </BentoCard>

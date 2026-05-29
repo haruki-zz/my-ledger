@@ -26,5 +26,5 @@ export function currentMonthPrefix() {
 
 export function displayName(name: string | null | undefined) {
   const value = name?.trim();
-  return value || '未命名用户';
+  return value || 'Unnamed user';
 }

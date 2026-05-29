@@ -19,7 +19,7 @@ import {
   SIDEBAR_WIDTH,
   WIDE_LAYOUT_BREAKPOINT
 } from '@/src/components/layout';
-import { colors, theme } from '@/src/components/styles';
+import { colors, fontFamilies, theme } from '@/src/components/styles';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
@@ -199,7 +199,7 @@ function DraggableAddExpenseButton() {
 
   return (
     <Animated.View
-      accessibilityLabel="记账"
+      accessibilityLabel="Add expense"
       accessibilityRole="button"
       onMoveShouldSetResponder={() => true}
       onResponderGrant={handleResponderGrant}
@@ -240,11 +240,12 @@ export default function TabsLayout() {
         screenOptions={{
           headerStyle: { backgroundColor: colors.bg },
           headerShadowVisible: false,
-          headerTitleStyle: { color: colors.ink, fontWeight: '800' },
+          headerTitleStyle: { color: colors.ink, fontFamily: fontFamilies.extraBold, fontWeight: '800' },
           sceneStyle,
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.muted,
           tabBarLabelStyle: {
+            fontFamily: fontFamilies.bold,
             fontSize: 12,
             fontWeight: '700'
           },
@@ -255,21 +256,21 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="index"
           options={{
-            title: '首页',
+            title: 'Dashboard',
             tabBarIcon: tabIcon('home-outline', 'home')
           }}
         />
         <Tabs.Screen
           name="history"
           options={{
-            title: '明细',
+            title: 'History',
             tabBarIcon: tabIcon('receipt-outline', 'receipt')
           }}
         />
         <Tabs.Screen
           name="settings"
           options={{
-            title: '设置',
+            title: 'Settings',
             tabBarIcon: tabIcon('settings-outline', 'settings')
           }}
         />
@@ -390,6 +391,7 @@ const localStyles = StyleSheet.create({
   },
   bottomTabItemText: {
     color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 11,
     fontWeight: '800',
     lineHeight: 15
@@ -459,6 +461,7 @@ const localStyles = StyleSheet.create({
   },
   sidebarItemText: {
     color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 11,
     fontWeight: '800',
     lineHeight: 15,

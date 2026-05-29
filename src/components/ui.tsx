@@ -14,7 +14,7 @@ import {
   type ViewStyle
 } from 'react-native';
 
-import { colors, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -318,6 +318,7 @@ const uiStyles = StyleSheet.create({
   },
   actionTitle: {
     color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 16,
     fontWeight: '800',
     lineHeight: 22
@@ -420,6 +421,7 @@ const uiStyles = StyleSheet.create({
   },
   metricValue: {
     color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 34,
     fontWeight: '900',
     letterSpacing: 0,
@@ -448,6 +450,7 @@ const uiStyles = StyleSheet.create({
   },
   pillText: {
     color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 12,
     fontWeight: '800',
     lineHeight: 17,
@@ -455,6 +458,7 @@ const uiStyles = StyleSheet.create({
   } satisfies TextStyle,
   pillTextActive: {
     color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
     fontWeight: '900'
   },
   pillTrack: {

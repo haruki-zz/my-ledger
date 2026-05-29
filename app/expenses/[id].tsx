@@ -35,7 +35,7 @@ export default function EditExpenseScreen() {
     try {
       const expenseId = Array.isArray(params.id) ? params.id[0] : params.id;
       if (!expenseId) {
-        throw new Error('缺少支出 ID');
+        throw new Error('Missing expense ID');
       }
 
       const { data: userData } = await supabase.auth.getUser();
@@ -54,7 +54,7 @@ export default function EditExpenseScreen() {
       }
 
       if (currentExpense.ledger_id !== currentLedger.id) {
-        throw new Error('这笔支出不属于当前账本');
+        throw new Error('This expense does not belong to the current ledger');
       }
 
       const nextMembers = await getLedgerMembers(currentLedger.id);
@@ -101,7 +101,7 @@ export default function EditExpenseScreen() {
   if (error || !ledger || !currentUserId || !expense) {
     return (
       <View style={styles.center}>
-        <Text style={styles.error}>{error || '无法编辑支出'}</Text>
+        <Text style={styles.error}>{error || 'Could not edit expense'}</Text>
       </View>
     );
   }

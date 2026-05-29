@@ -328,19 +328,19 @@ export function ExpenseForm({
     }
 
     if (sortedMembers.length !== 2) {
-      throw new Error('共同支出需要账本内已有两名成员');
+      throw new Error('Shared expenses require two ledger members');
     }
 
     if (splitMode === 'ratio') {
       const ratios = sortedMembers.map((member) => parseRatio(ratioValues[member.user_id] || ''));
       if (ratios.some((ratio) => ratio === null)) {
-        throw new Error('比例必须是 0 到 100 之间的数字');
+        throw new Error('Ratios must be numbers from 0 to 100');
       }
 
       const firstRatio = ratios[0] || 0;
       const secondRatio = ratios[1] || 0;
       if (Math.abs(firstRatio + secondRatio - 100) >= 0.0001) {
-        throw new Error('双方承担比例之和必须等于 100%');
+        throw new Error('Both responsibility ratios must add up to 100%');
       }
 
       const [firstAmount, secondAmount] = calculateAmountsFromRatios(totalAmount, [firstRatio, secondRatio]);
@@ -352,7 +352,7 @@ export function ExpenseForm({
 
     const splitAmounts = sortedMembers.map((member) => parseNonNegativeInteger(amountSplitValues[member.user_id] || ''));
     if (splitAmounts.some((splitAmount) => splitAmount === null)) {
-      throw new Error('承担金额必须是非负日元整数');
+      throw new Error('Split amounts must be non-negative whole yen values');
     }
 
     const splits = sortedMembers.map((member, index) => ({
@@ -362,7 +362,7 @@ export function ExpenseForm({
 
     const splitTotal = splits.reduce((sum, split) => sum + split.amount_yen, 0);
     if (splitTotal !== totalAmount) {
-      throw new Error('双方承担金额之和必须等于总金额');
+      throw new Error('Split amounts must add up to the total amount');
     }
 
     return splits;
@@ -374,15 +374,15 @@ export function ExpenseForm({
     try {
       const amountYen = Number(amount);
       if (!Number.isInteger(amountYen) || amountYen <= 0) {
-        throw new Error('金额必须是大于 0 的日元整数');
+        throw new Error('Amount must be a whole yen value greater than 0');
       }
 
       if (!category.trim()) {
-        throw new Error('请选择类别');
+        throw new Error('Choose a category');
       }
 
       if (!/^\d{4}-\d{2}-\d{2}$/.test(spentOn)) {
-        throw new Error('日期格式必须为 YYYY-MM-DD');
+        throw new Error('Date format must be YYYY-MM-DD');
       }
 
       await saveExpense({
@@ -403,7 +403,7 @@ export function ExpenseForm({
         router.replace('/(tabs)/history');
       }
     } catch (submitError) {
-      Alert.alert('保存失败', submitError instanceof Error ? submitError.message : '请检查输入内容');
+      Alert.alert('Save Failed', submitError instanceof Error ? submitError.message : 'Check the form values');
     } finally {
       setSubmitting(false);
     }
@@ -412,23 +412,23 @@ export function ExpenseForm({
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
       <BentoCard variant="form">
-        <Text style={styles.label}>金额（日元）</Text>
+        <Text style={styles.label}>Amount (JPY)</Text>
         <TextInput
           inputMode="numeric"
           onChangeText={handleAmountChange}
-          placeholder="例如：1200"
+          placeholder="Example: 1200"
           style={styles.input}
           value={amount}
         />
 
-        <Text style={styles.label}>类别</Text>
+        <Text style={styles.label}>Category</Text>
         <View style={styles.dropdown}>
           <Pressable
             onPress={() => setCategoryMenuOpen((current) => !current)}
             style={[styles.dropdownTrigger, categoryMenuOpen && styles.dropdownTriggerActive]}
           >
             <Text style={category ? styles.dropdownValue : styles.dropdownPlaceholder}>
-              {category || '请选择类别'}
+              {category || 'Choose a category'}
             </Text>
             <Text style={styles.dropdownIndicator}>{categoryMenuOpen ? '⌃' : '⌄'}</Text>
           </Pressable>
@@ -436,7 +436,7 @@ export function ExpenseForm({
             <View style={styles.dropdownMenu}>
               {categoryOptions.length === 0 ? (
                 <View style={styles.dropdownOption}>
-                  <Text style={styles.muted}>暂无类别，请先在设置中添加</Text>
+                  <Text style={styles.muted}>No categories yet. Add one in Settings first.</Text>
                 </View>
               ) : null}
               {categoryOptions.map((option) => {
@@ -457,9 +457,9 @@ export function ExpenseForm({
           ) : null}
         </View>
 
-        <Text style={styles.label}>支付人</Text>
+        <Text style={styles.label}>Paid By</Text>
         <PillTabs
-          accessibilityLabel="支付人"
+          accessibilityLabel="Paid by"
           onChange={setPaidBy}
           options={sortedMembers.map((member) => ({
             label: displayName(member.profile.display_name),
@@ -468,31 +468,31 @@ export function ExpenseForm({
           value={paidBy}
         />
 
-        <Text style={styles.label}>记录人</Text>
+        <Text style={styles.label}>Recorded By</Text>
         <View style={[styles.input, { justifyContent: 'center' }]}>
           <Text style={styles.body}>{recordedByName}</Text>
         </View>
 
-        <Text style={styles.label}>归属</Text>
+        <Text style={styles.label}>Ownership</Text>
         <PillTabs
-          accessibilityLabel="支出归属"
+          accessibilityLabel="Expense ownership"
           onChange={selectOwnership}
           options={[
-            { label: '个人', value: 'personal' },
-            { label: '共同', value: 'shared' }
+            { label: 'Personal', value: 'personal' },
+            { label: 'Shared', value: 'shared' }
           ]}
           value={ownership}
         />
 
         {ownership === 'shared' ? (
           <View style={{ gap: 12 }}>
-            <Text style={styles.label}>分摊方式</Text>
+            <Text style={styles.label}>Split Method</Text>
             <PillTabs
-              accessibilityLabel="分摊方式"
+              accessibilityLabel="Split method"
               onChange={selectSplitMode}
               options={[
-                { label: '金额', value: 'amount' },
-                { label: '比例', value: 'ratio' }
+                { label: 'Amount', value: 'amount' },
+                { label: 'Ratio', value: 'ratio' }
               ]}
               value={splitMode}
             />
@@ -500,7 +500,9 @@ export function ExpenseForm({
             {sortedMembers.map((member) => (
               <View key={member.user_id} style={{ gap: 6 }}>
                 <Text style={styles.label}>
-                  {displayName(member.profile.display_name)}承担{splitMode === 'amount' ? '金额' : '比例（%）'}
+                  {splitMode === 'amount'
+                    ? `Amount for ${displayName(member.profile.display_name)}`
+                    : `Ratio for ${displayName(member.profile.display_name)} (%)`}
                 </Text>
                 <TextInput
                   inputMode="numeric"
@@ -509,7 +511,7 @@ export function ExpenseForm({
                       ? setAmountSplitValue(member.user_id, value)
                       : setRatioValue(member.user_id, value)
                   }
-                  placeholder={splitMode === 'amount' ? '例如：600' : '例如：50'}
+                  placeholder={splitMode === 'amount' ? 'Example: 600' : 'Example: 50'}
                   style={styles.input}
                   value={
                     splitMode === 'amount'
@@ -522,24 +524,24 @@ export function ExpenseForm({
           </View>
         ) : null}
 
-        <Text style={styles.label}>日期</Text>
+        <Text style={styles.label}>Date</Text>
         <TextInput onChangeText={setSpentOn} placeholder="YYYY-MM-DD" style={styles.input} value={spentOn} />
 
-        <Text style={styles.label}>备注</Text>
+        <Text style={styles.label}>Note</Text>
         <TextInput
           multiline
           onChangeText={setNote}
-          placeholder="可选"
+          placeholder="Optional"
           style={[styles.input, { minHeight: 84, textAlignVertical: 'top' }]}
           value={note}
         />
 
         <Pressable disabled={submitting} onPress={submit} style={styles.button}>
-          <Text style={styles.buttonText}>{submitting ? '保存中...' : '保存'}</Text>
+          <Text style={styles.buttonText}>{submitting ? 'Saving...' : 'Save'}</Text>
         </Pressable>
       </BentoCard>
 
-      <Text style={[styles.muted, { color: colors.muted }]}>数据会直接写入 Supabase。编辑时不会改变原始记录人。</Text>
+      <Text style={[styles.muted, { color: colors.muted }]}>Data is written directly to Supabase. Editing does not change the original recorder.</Text>
     </ScrollView>
   );
 }

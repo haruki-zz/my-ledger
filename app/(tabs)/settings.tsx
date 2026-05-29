@@ -19,30 +19,30 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={styles.page} contentContainerStyle={styles.content}>
       <View>
-        <Text style={styles.title}>设置</Text>
-        <Text style={styles.muted}>账户、账本和共享类别</Text>
+        <Text style={styles.title}>Settings</Text>
+        <Text style={styles.muted}>Account, ledgers, and shared categories</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <BentoCard variant="list">
         <SettingsActionRow
-          description="管理显示名称、邮箱和登录状态。"
+          description="Manage display name, email, and sign-in status."
           icon="person-circle-outline"
           onPress={() => router.push('/settings/account')}
-          title="账户信息"
+          title="Account"
         />
         <SettingsActionRow
-          description="创建、加入、切换、退出或删除账本。"
+          description="Create, join, switch, leave, or delete ledgers."
           icon="albums-outline"
           onPress={() => router.push('/settings/ledgers')}
-          title="账本管理"
+          title="Ledgers"
         />
         <SettingsActionRow
-          description="维护共享支出类别和默认分摊比例。"
+          description="Maintain shared expense categories and default split ratios."
           icon="pricetags-outline"
           onPress={() => router.push('/settings/categories')}
-          title="类别管理"
+          title="Categories"
         />
       </BentoCard>
     </ScrollView>

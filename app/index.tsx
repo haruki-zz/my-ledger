@@ -13,9 +13,9 @@ export default function HomeScreen() {
   if (!isSupabaseConfigured) {
     return (
       <View style={styles.center}>
-        <Text style={styles.h1}>Supabase 尚未配置</Text>
+        <Text style={styles.h1}>Supabase is not configured</Text>
         <Text style={[styles.muted, { marginTop: 8, textAlign: 'center' }]}>
-          请根据 .env.example 配置 EXPO_PUBLIC_SUPABASE_URL 和 EXPO_PUBLIC_SUPABASE_ANON_KEY。
+          Configure EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env.example.
         </Text>
       </View>
     );
@@ -26,7 +26,7 @@ export default function HomeScreen() {
       <View style={styles.center}>
         <ActivityIndicator />
         <Text style={[styles.muted, { marginTop: 10 }]}>
-          {loading ? '正在读取登录状态' : '正在读取账本'}
+          {loading ? 'Checking sign-in status' : 'Loading ledger'}
         </Text>
       </View>
     );

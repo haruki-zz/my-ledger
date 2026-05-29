@@ -80,7 +80,7 @@ export default function NewExpenseScreen() {
   if (error || !ledger || !currentUserId) {
     return (
       <View style={styles.center}>
-        <Text style={styles.error}>{error || '无法创建支出'}</Text>
+        <Text style={styles.error}>{error || 'Could not create expense'}</Text>
       </View>
     );
   }

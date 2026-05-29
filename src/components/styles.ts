@@ -1,7 +1,19 @@
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet } from 'react-native';
 
 import { CONTENT_BOTTOM_PADDING } from '@/src/components/layout';
 import { CHART_PALETTE } from '@/src/lib/chartPalette';
+
+export const fontFamilies = {
+  regular: 'JetBrainsMono_400Regular',
+  semiBold: 'JetBrainsMono_600SemiBold',
+  bold: 'JetBrainsMono_700Bold',
+  extraBold: 'JetBrainsMono_800ExtraBold',
+  fallback: Platform.select({
+    ios: 'Menlo',
+    android: 'monospace',
+    default: 'monospace'
+  })
+} as const;
 
 export const theme = {
   colors: {
@@ -62,28 +74,33 @@ export const styles = StyleSheet.create({
   },
   title: {
     color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 30,
     fontWeight: '900',
     letterSpacing: 0
   },
   h1: {
     color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
     fontSize: 24,
     fontWeight: '900',
     letterSpacing: 0
   },
   h2: {
     color: colors.ink,
+    fontFamily: fontFamilies.bold,
     fontSize: 18,
     fontWeight: '700'
   },
   body: {
     color: colors.ink,
+    fontFamily: fontFamilies.regular,
     fontSize: 16,
     lineHeight: 23
   },
   muted: {
     color: colors.muted,
+    fontFamily: fontFamilies.regular,
     fontSize: 14,
     lineHeight: 20
   },
@@ -102,6 +119,7 @@ export const styles = StyleSheet.create({
     borderRadius: theme.radii.control,
     borderWidth: 1,
     color: colors.ink,
+    fontFamily: fontFamilies.regular,
     fontSize: 16,
     minHeight: 48,
     paddingHorizontal: 12,
@@ -127,18 +145,21 @@ export const styles = StyleSheet.create({
   },
   dropdownValue: {
     color: colors.ink,
+    fontFamily: fontFamilies.regular,
     flex: 1,
     fontSize: 16,
     lineHeight: 23
   },
   dropdownPlaceholder: {
     color: colors.muted,
+    fontFamily: fontFamilies.regular,
     flex: 1,
     fontSize: 16,
     lineHeight: 23
   },
   dropdownIndicator: {
     color: colors.muted,
+    fontFamily: fontFamilies.bold,
     fontSize: 18,
     fontWeight: '700',
     lineHeight: 23,
@@ -163,15 +184,18 @@ export const styles = StyleSheet.create({
   },
   dropdownOptionText: {
     color: colors.ink,
+    fontFamily: fontFamilies.regular,
     fontSize: 16,
     lineHeight: 23
   },
   dropdownOptionTextActive: {
     color: colors.primaryDark,
+    fontFamily: fontFamilies.extraBold,
     fontWeight: '800'
   },
   label: {
     color: colors.ink,
+    fontFamily: fontFamilies.bold,
     fontSize: 14,
     fontWeight: '700'
   },
@@ -194,6 +218,7 @@ export const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
+    fontFamily: fontFamilies.extraBold,
     fontSize: 16,
     fontWeight: '800'
   },
@@ -228,12 +253,14 @@ export const styles = StyleSheet.create({
   },
   chipText: {
     color: colors.ink,
+    fontFamily: fontFamilies.bold,
     fontSize: 15,
     fontWeight: '700',
     textAlign: 'center'
   },
   error: {
     color: colors.danger,
+    fontFamily: fontFamilies.regular,
     fontSize: 14,
     lineHeight: 20
   }

@@ -1,7 +1,7 @@
 import { Text, View } from 'react-native';
 import Svg, { Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
-import { colors, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
 import type { DailyStat } from '@/src/lib/stats';
 
@@ -26,7 +26,7 @@ export function DailyChart({ mode, series }: DailyChartProps) {
   if (series.length === 0 || maxAmount <= 0) {
     return (
       <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 180 }}>
-        <Text style={styles.muted}>暂无每日支出趋势</Text>
+        <Text style={styles.muted}>No daily expense trend yet</Text>
       </View>
     );
   }
@@ -47,10 +47,10 @@ export function DailyChart({ mode, series }: DailyChartProps) {
       <Svg height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%">
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={baseline} y2={baseline} />
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={PADDING_TOP} y2={PADDING_TOP} />
-        <SvgText fill={colors.muted} fontSize={10} x={4} y={PADDING_TOP + 4}>
+        <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} x={4} y={PADDING_TOP + 4}>
           {formatYen(maxAmount)}
         </SvgText>
-        <SvgText fill={colors.muted} fontSize={10} x={4} y={baseline + 4}>
+        <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} x={4} y={baseline + 4}>
           {formatYen(0)}
         </SvgText>
 
@@ -71,8 +71,8 @@ export function DailyChart({ mode, series }: DailyChartProps) {
         )}
 
         {labelIndexes.map((index) => (
-          <SvgText fill={colors.muted} fontSize={10} key={series[index].date} textAnchor="middle" x={points[index].x} y={HEIGHT - 10}>
-            {series[index].label}日
+          <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} key={series[index].date} textAnchor="middle" x={points[index].x} y={HEIGHT - 10}>
+            {series[index].label}
           </SvgText>
         ))}
       </Svg>

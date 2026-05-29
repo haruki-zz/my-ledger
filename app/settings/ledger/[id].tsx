@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 
-import { colors, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
@@ -73,7 +73,7 @@ export default function LedgerDetailScreen() {
       await selectLedger(ledgerId);
       router.replace('/(tabs)');
     } catch (selectError) {
-      Alert.alert('切换失败', getErrorMessage(selectError));
+      Alert.alert('Switch Failed', getErrorMessage(selectError));
     } finally {
       setSubmitting(false);
     }
@@ -84,10 +84,10 @@ export default function LedgerDetailScreen() {
       return;
     }
 
-    Alert.alert('退出账本', `退出“${membership.ledger.name}”后，你将无法继续查看这个账本；历史支出和未结清关系仍会保留给账本内其他成员。`, [
-      { text: '取消', style: 'cancel' },
+    Alert.alert('Leave Ledger', `After leaving "${membership.ledger.name}", you will no longer be able to view this ledger. Historical expenses and unsettled balances remain for other members.`, [
+      { text: 'Cancel', style: 'cancel' },
       {
-        text: '退出',
+        text: 'Leave',
         style: 'destructive',
         onPress: async () => {
           setSubmitting(true);
@@ -95,7 +95,7 @@ export default function LedgerDetailScreen() {
             const nextLedger = await leaveLedger(membership.ledger.id);
             router.replace(nextLedger ? '/settings/ledgers' : '/ledger');
           } catch (leaveError) {
-            Alert.alert('退出失败', getErrorMessage(leaveError));
+            Alert.alert('Leave Failed', getErrorMessage(leaveError));
           } finally {
             setSubmitting(false);
           }
@@ -110,12 +110,12 @@ export default function LedgerDetailScreen() {
     }
 
     Alert.alert(
-      '删除账本',
-      `删除“${membership.ledger.name}”后，账本、支出历史、类别和对方可见的数据都会永久删除。`,
+      'Delete Ledger',
+      `After deleting "${membership.ledger.name}", the ledger, expense history, categories, and member-visible data will be permanently deleted.`,
       [
-        { text: '取消', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: '删除',
+          text: 'Delete',
           style: 'destructive',
           onPress: async () => {
             setSubmitting(true);
@@ -123,7 +123,7 @@ export default function LedgerDetailScreen() {
               const nextLedger = await deleteLedger(membership.ledger.id);
               router.replace(nextLedger ? '/settings/ledgers' : '/ledger');
             } catch (deleteError) {
-              Alert.alert('删除失败', getErrorMessage(deleteError));
+              Alert.alert('Delete Failed', getErrorMessage(deleteError));
             } finally {
               setSubmitting(false);
             }
@@ -144,7 +144,7 @@ export default function LedgerDetailScreen() {
   if (!membership) {
     return (
       <View style={styles.center}>
-        <Text style={styles.error}>找不到这个账本，或你已经不在该账本中。</Text>
+        <Text style={styles.error}>This ledger was not found, or you are no longer a member.</Text>
       </View>
     );
   }
@@ -159,30 +159,30 @@ export default function LedgerDetailScreen() {
     >
       <View>
         <Text style={styles.title}>{membership.ledger.name}</Text>
-        <Text style={styles.muted}>{isActive ? '当前账本' : '账本详情'}</Text>
+        <Text style={styles.muted}>{isActive ? 'Current ledger' : 'Ledger details'}</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <BentoCard>
-        <Text style={styles.h2}>邀请码</Text>
-        <Text style={{ color: colors.ink, fontSize: 24, fontWeight: '900' }}>
+        <Text style={styles.h2}>Invite Code</Text>
+        <Text style={{ color: colors.ink, fontFamily: fontFamilies.extraBold, fontSize: 24, fontWeight: '900' }}>
           {membership.ledger.invite_code}
         </Text>
       </BentoCard>
 
       <BentoCard variant="list">
-        <Text style={styles.h2}>成员</Text>
+        <Text style={styles.h2}>Members</Text>
         <View style={{ gap: 8 }}>
           {members.map((member) => {
             const labels = [
-              member.user_id === session?.user.id ? '我' : null,
-              member.user_id === membership.ledger.created_by ? '创建者' : null
+              member.user_id === session?.user.id ? 'Me' : null,
+              member.user_id === membership.ledger.created_by ? 'Owner' : null
             ].filter(Boolean);
 
             return (
               <Text key={member.user_id} style={styles.body}>
-                {member.profile.display_name}{labels.length > 0 ? `（${labels.join('，')}）` : ''}
+                {member.profile.display_name}{labels.length > 0 ? ` (${labels.join(', ')})` : ''}
               </Text>
             );
           })}
@@ -190,20 +190,20 @@ export default function LedgerDetailScreen() {
       </BentoCard>
 
       <BentoCard variant="danger">
-        <Text style={styles.h2}>操作</Text>
+        <Text style={styles.h2}>Actions</Text>
         {!isActive ? (
           <Pressable disabled={submitting} onPress={handleSelect} style={styles.button}>
-            <Text style={styles.buttonText}>{submitting ? '处理中...' : '切换到此账本'}</Text>
+            <Text style={styles.buttonText}>{submitting ? 'Processing...' : 'Switch to This Ledger'}</Text>
           </Pressable>
         ) : null}
 
         {membership.isOwner ? (
           <Pressable disabled={submitting} onPress={confirmDelete} style={[styles.button, styles.dangerButton]}>
-            <Text style={styles.buttonText}>{submitting ? '处理中...' : '删除账本'}</Text>
+            <Text style={styles.buttonText}>{submitting ? 'Processing...' : 'Delete Ledger'}</Text>
           </Pressable>
         ) : (
           <Pressable disabled={submitting} onPress={confirmLeave} style={[styles.button, styles.dangerButton]}>
-            <Text style={styles.buttonText}>{submitting ? '处理中...' : '退出账本'}</Text>
+            <Text style={styles.buttonText}>{submitting ? 'Processing...' : 'Leave Ledger'}</Text>
           </Pressable>
         )}
       </BentoCard>

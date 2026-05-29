@@ -19,12 +19,12 @@ export async function updateMyProfile(displayName: string) {
 
   const userId = userData.user?.id;
   if (!userId) {
-    throw new Error('请先登录');
+    throw new Error('Please sign in first');
   }
 
   const { error } = await supabase
     .from('profiles')
-    .update({ display_name: displayName.trim() || '用户' })
+    .update({ display_name: displayName.trim() || 'User' })
     .eq('id', userId);
 
   if (error) {
@@ -82,7 +82,7 @@ export async function getMyLedgerMemberships(): Promise<LedgerMembership[]> {
 
 export async function createLedger(name: string): Promise<Ledger> {
   const { data, error } = await supabase.rpc('create_ledger', {
-    p_name: name.trim() || '我们的账本'
+    p_name: name.trim() || 'Shared Ledger'
   });
 
   if (error) {
@@ -155,7 +155,7 @@ export async function getLedgerMembers(ledgerId: string): Promise<LedgerMemberPr
     ...member,
     profile: profilesById.get(member.user_id) || {
       id: member.user_id,
-      display_name: '用户',
+      display_name: 'User',
       created_at: member.joined_at,
       updated_at: member.joined_at
     }
