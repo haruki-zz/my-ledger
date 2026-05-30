@@ -1,6 +1,17 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import {
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle
+} from 'react-native';
 
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { BentoCard, MetricTile } from '@/src/components/ui';
@@ -12,8 +23,27 @@ import {
   getLedgerMembers,
   getProfiles
 } from '@/src/lib/ledger';
+import {
+  addMonths,
+  amountForUser,
+  compareMonthKeys,
+  formatMonthLabel,
+  monthKeyFromDateString
+} from '@/src/lib/stats';
 import { supabase } from '@/src/lib/supabase';
 import type { Expense, Ledger, Profile } from '@/src/types/database';
+
+type FilterDropdownKey = 'user' | 'category' | 'startMonth' | 'endMonth';
+
+type FilterOption = {
+  label: string;
+  value: string;
+};
+
+type FilteredExpense = {
+  displayAmountYen: number;
+  expense: Expense;
+};
 
 let realtimeSubscriptionSequence = 0;
 
@@ -28,6 +58,12 @@ export default function HistoryScreen() {
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [startMonth, setStartMonth] = useState<string | null>(null);
+  const [endMonth, setEndMonth] = useState<string | null>(null);
+  const [activeDropdown, setActiveDropdown] = useState<FilterDropdownKey | null>(null);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   useEffect(() => {
     currentLedgerRef.current = currentLedger;
@@ -74,6 +110,12 @@ export default function HistoryScreen() {
     setExpenses([]);
     setProfiles({});
     setActiveMemberIds(new Set());
+    setSelectedUserId(null);
+    setSelectedCategory(null);
+    setStartMonth(null);
+    setEndMonth(null);
+    setActiveDropdown(null);
+    setFiltersExpanded(false);
   }, [activeLedgerId]);
 
   useEffect(() => {
@@ -120,15 +162,154 @@ export default function HistoryScreen() {
     };
   }, [ledgerId, load]);
 
-  const total = useMemo(
-    () => expenses.reduce((sum, expense) => sum + expense.amount_yen, 0),
-    [expenses]
-  );
-
   const profileDisplayName = useCallback((userId: string) => {
     const suffix = activeMemberIds.has(userId) ? '' : ' (left)';
     return `${displayName(profiles[userId]?.display_name)}${suffix}`;
   }, [activeMemberIds, profiles]);
+
+  const userOptionIds = useMemo(() => {
+    const userIds = new Set<string>();
+    activeMemberIds.forEach((userId) => userIds.add(userId));
+
+    for (const expense of expenses) {
+      userIds.add(expense.paid_by);
+      expense.splits.forEach((split) => userIds.add(split.user_id));
+    }
+
+    return [...userIds];
+  }, [activeMemberIds, expenses]);
+
+  const userOptions = useMemo<FilterOption[]>(() => (
+    [...userOptionIds]
+      .sort((a, b) => profileDisplayName(a).localeCompare(profileDisplayName(b)))
+      .map((userId) => ({
+        label: profileDisplayName(userId),
+        value: userId
+      }))
+  ), [profileDisplayName, userOptionIds]);
+
+  const categoryOptions = useMemo<FilterOption[]>(() => (
+    [...new Set(expenses.map((expense) => expense.category).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b))
+      .map((category) => ({
+        label: category,
+        value: category
+      }))
+  ), [expenses]);
+
+  const monthOptions = useMemo<FilterOption[]>(() => {
+    if (expenses.length === 0) {
+      return [];
+    }
+
+    const monthKeys = expenses.map((expense) => monthKeyFromDateString(expense.spent_on));
+    const sortedKeys = [...new Set(monthKeys)].sort(compareMonthKeys);
+    const firstMonth = sortedKeys[0];
+    const lastMonth = sortedKeys[sortedKeys.length - 1];
+    const options: FilterOption[] = [];
+
+    for (
+      let monthKey = firstMonth;
+      compareMonthKeys(monthKey, lastMonth) <= 0;
+      monthKey = addMonths(monthKey, 1)
+    ) {
+      options.push({
+        label: formatMonthLabel(monthKey),
+        value: monthKey
+      });
+    }
+
+    return options;
+  }, [expenses]);
+
+  const filteredExpenses = useMemo<FilteredExpense[]>(() => {
+    const nextFilteredExpenses: FilteredExpense[] = [];
+
+    for (const expense of expenses) {
+      const displayAmountYen = selectedUserId ? amountForUser(expense, selectedUserId) : expense.amount_yen;
+
+      if (selectedUserId && displayAmountYen <= 0) {
+        continue;
+      }
+
+      if (selectedCategory && expense.category !== selectedCategory) {
+        continue;
+      }
+
+      const expenseMonth = monthKeyFromDateString(expense.spent_on);
+      if (startMonth && compareMonthKeys(expenseMonth, startMonth) < 0) {
+        continue;
+      }
+
+      if (endMonth && compareMonthKeys(expenseMonth, endMonth) > 0) {
+        continue;
+      }
+
+      nextFilteredExpenses.push({ displayAmountYen, expense });
+    }
+
+    return nextFilteredExpenses;
+  }, [endMonth, expenses, selectedCategory, selectedUserId, startMonth]);
+
+  const activeFilterCount = [selectedUserId, selectedCategory, startMonth, endMonth].filter(Boolean).length;
+  const hasActiveFilters = activeFilterCount > 0;
+
+  const total = useMemo(
+    () => filteredExpenses.reduce((sum, item) => sum + item.displayAmountYen, 0),
+    [filteredExpenses]
+  );
+
+  function toggleDropdown(dropdown: FilterDropdownKey) {
+    setActiveDropdown((current) => (current === dropdown ? null : dropdown));
+  }
+
+  function toggleFilters() {
+    if (filtersExpanded) {
+      setActiveDropdown(null);
+    }
+
+    setFiltersExpanded((current) => !current);
+  }
+
+  function selectUser(value: string) {
+    setSelectedUserId(value || null);
+    setActiveDropdown(null);
+  }
+
+  function selectCategory(value: string) {
+    setSelectedCategory(value || null);
+    setActiveDropdown(null);
+  }
+
+  function selectStartMonth(value: string) {
+    const nextStartMonth = value || null;
+    setStartMonth(nextStartMonth);
+
+    if (nextStartMonth && endMonth && compareMonthKeys(nextStartMonth, endMonth) > 0) {
+      setEndMonth(nextStartMonth);
+    }
+
+    setActiveDropdown(null);
+  }
+
+  function selectEndMonth(value: string) {
+    const nextEndMonth = value || null;
+    setEndMonth(nextEndMonth);
+
+    if (nextEndMonth && startMonth && compareMonthKeys(nextEndMonth, startMonth) < 0) {
+      setStartMonth(nextEndMonth);
+    }
+
+    setActiveDropdown(null);
+  }
+
+  function resetFilters() {
+    setSelectedUserId(null);
+    setSelectedCategory(null);
+    setStartMonth(null);
+    setEndMonth(null);
+    setActiveDropdown(null);
+  }
 
   async function confirmDelete(expenseId: string) {
     Alert.alert('Delete Expense', 'This cannot be undone.', [
@@ -163,15 +344,81 @@ export default function HistoryScreen() {
 
       <BentoCard variant="hero" style={{ minHeight: 0 }}>
         <MetricTile
-          helper={`${expenses.length} records`}
+          helper={`${filteredExpenses.length} records`}
           icon="receipt-outline"
           label="Total"
           value={formatYen(total)}
         />
       </BentoCard>
 
+      <BentoCard style={localStyles.filterCard}>
+        <View style={localStyles.filterHeader}>
+          <Pressable
+            accessibilityLabel={filtersExpanded ? 'Collapse filters' : 'Expand filters'}
+            accessibilityRole="button"
+            onPress={toggleFilters}
+            style={({ pressed }) => [
+              localStyles.filterToggle,
+              pressed && localStyles.filterTogglePressed
+            ]}
+          >
+            <View style={localStyles.filterToggleText}>
+              <Text style={styles.h2}>Filters</Text>
+              <Text style={styles.muted}>{activeFilterCount > 0 ? `${activeFilterCount} active` : 'No filters'}</Text>
+            </View>
+            <Ionicons color={colors.subtle} name={filtersExpanded ? 'chevron-up' : 'chevron-down'} size={20} />
+          </Pressable>
+
+          {hasActiveFilters ? (
+            <Pressable onPress={resetFilters} style={[styles.button, styles.secondaryButton, localStyles.resetButton]}>
+              <Text style={[styles.buttonText, styles.secondaryButtonText, localStyles.resetButtonText]}>Reset</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {filtersExpanded ? (
+          <View style={localStyles.filterGrid}>
+            <FilterDropdown
+              active={activeDropdown === 'user'}
+              label="User"
+              onChange={selectUser}
+              onToggle={() => toggleDropdown('user')}
+              options={[{ label: 'All users', value: '' }, ...userOptions]}
+              selectedValue={selectedUserId || ''}
+            />
+
+            <FilterDropdown
+              active={activeDropdown === 'category'}
+              label="Category"
+              onChange={selectCategory}
+              onToggle={() => toggleDropdown('category')}
+              options={[{ label: 'All categories', value: '' }, ...categoryOptions]}
+              selectedValue={selectedCategory || ''}
+            />
+
+            <FilterDropdown
+              active={activeDropdown === 'startMonth'}
+              label="From"
+              onChange={selectStartMonth}
+              onToggle={() => toggleDropdown('startMonth')}
+              options={[{ label: 'Any start', value: '' }, ...monthOptions]}
+              selectedValue={startMonth || ''}
+            />
+
+            <FilterDropdown
+              active={activeDropdown === 'endMonth'}
+              label="To"
+              onChange={selectEndMonth}
+              onToggle={() => toggleDropdown('endMonth')}
+              options={[{ label: 'Any end', value: '' }, ...monthOptions]}
+              selectedValue={endMonth || ''}
+            />
+          </View>
+        ) : null}
+      </BentoCard>
+
       <View style={{ gap: 12 }}>
-        {expenses.map((expense) => (
+        {filteredExpenses.map(({ displayAmountYen, expense }) => (
           <BentoCard key={expense.id} variant="list">
             <View style={styles.between}>
               <View style={{ flex: 1 }}>
@@ -181,7 +428,7 @@ export default function HistoryScreen() {
                 </Text>
               </View>
               <Text style={{ color: colors.ink, fontFamily: fontFamilies.extraBold, fontSize: 20, fontWeight: '900' }}>
-                {formatYen(expense.amount_yen)}
+                {formatYen(displayAmountYen)}
               </Text>
             </View>
 
@@ -225,6 +472,138 @@ export default function HistoryScreen() {
           <Text style={styles.muted}>Tap the floating add button to create the first Supabase-backed record.</Text>
         </BentoCard>
       ) : null}
+
+      {!loading && expenses.length > 0 && filteredExpenses.length === 0 ? (
+        <BentoCard>
+          <Text style={styles.h2}>No Matching Expenses</Text>
+          <Text style={styles.muted}>Adjust or reset the filters to show more records.</Text>
+          {hasActiveFilters ? (
+            <Pressable onPress={resetFilters} style={[styles.button, styles.secondaryButton]}>
+              <Text style={[styles.buttonText, styles.secondaryButtonText]}>Reset Filters</Text>
+            </Pressable>
+          ) : null}
+        </BentoCard>
+      ) : null}
     </ScrollView>
   );
 }
+
+type FilterDropdownProps = {
+  active: boolean;
+  label: string;
+  onChange: (value: string) => void;
+  onToggle: () => void;
+  options: FilterOption[];
+  selectedValue: string;
+  style?: StyleProp<ViewStyle>;
+};
+
+function FilterDropdown({
+  active,
+  label,
+  onChange,
+  onToggle,
+  options,
+  selectedValue,
+  style
+}: FilterDropdownProps) {
+  const selectedOption = options.find((option) => option.value === selectedValue) || options[0];
+
+  return (
+    <View style={[localStyles.filterField, style]}>
+      <Text style={styles.label}>{label}</Text>
+      <View style={styles.dropdown}>
+        <Pressable
+          onPress={onToggle}
+          style={[styles.dropdownTrigger, active && styles.dropdownTriggerActive]}
+        >
+          <Text ellipsizeMode="tail" numberOfLines={1} style={styles.dropdownValue}>
+            {selectedOption?.label || 'Any'}
+          </Text>
+          <Text style={styles.dropdownIndicator}>{active ? '⌃' : '⌄'}</Text>
+        </Pressable>
+
+        {active ? (
+          <View style={[styles.dropdownMenu, localStyles.dropdownMenu]}>
+            <ScrollView nestedScrollEnabled style={localStyles.dropdownMenuScroll}>
+              {options.map((option) => {
+                const selected = option.value === selectedValue;
+                return (
+                  <Pressable
+                    key={option.value || `${label}-all`}
+                    onPress={() => onChange(option.value)}
+                    style={[styles.dropdownOption, selected && styles.dropdownOptionActive]}
+                  >
+                    <Text
+                      ellipsizeMode="tail"
+                      numberOfLines={1}
+                      style={[styles.dropdownOptionText, selected && styles.dropdownOptionTextActive]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+const localStyles = StyleSheet.create({
+  dropdownMenu: {
+    maxHeight: 228
+  },
+  dropdownMenuScroll: {
+    maxHeight: 228
+  },
+  filterCard: {
+    gap: 14
+  },
+  filterField: {
+    flex: 1,
+    gap: 6,
+    minWidth: 178
+  },
+  filterGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12
+  },
+  filterHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between'
+  },
+  filterToggle: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    minHeight: 44,
+    minWidth: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 4
+  },
+  filterTogglePressed: {
+    opacity: 0.72
+  },
+  filterToggleText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0
+  },
+  resetButton: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  resetButtonText: {
+    fontSize: 14
+  }
+});

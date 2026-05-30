@@ -184,6 +184,10 @@ export function amountForRange(
     return 0;
   }
 
+  return amountForUser(expense, userId);
+}
+
+export function amountForUser(expense: Expense, userId: string) {
   if (expense.ownership === 'shared') {
     return expense.splits.find((split) => split.user_id === userId)?.amount_yen || 0;
   }
