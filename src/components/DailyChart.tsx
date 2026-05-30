@@ -67,7 +67,10 @@ export function DailyChart({ mode, series }: DailyChartProps) {
             />
           ))
         ) : (
-          <Path d={buildCurvePath(points)} fill="none" stroke={theme.chart.primary} strokeLinecap="round" strokeWidth={3} />
+          <>
+            <Path d={buildAreaPath(points, baseline)} fill="rgba(15,118,110,0.10)" />
+            <Path d={buildCurvePath(points)} fill="none" stroke={theme.chart.primary} strokeLinecap="round" strokeWidth={3} />
+          </>
         )}
 
         {labelIndexes.map((index) => (
@@ -78,6 +81,19 @@ export function DailyChart({ mode, series }: DailyChartProps) {
       </Svg>
     </View>
   );
+}
+
+function buildAreaPath(points: { x: number; y: number }[], baseline: number) {
+  if (points.length === 0) {
+    return '';
+  }
+
+  return [
+    buildCurvePath(points),
+    `L ${points[points.length - 1].x} ${baseline}`,
+    `L ${points[0].x} ${baseline}`,
+    'Z'
+  ].join(' ');
 }
 
 function buildCurvePath(points: { x: number; y: number }[]) {

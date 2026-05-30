@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Animated, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CategoryTrendModal } from '@/src/components/CategoryTrendModal';
 import { DailyChart, type DailyChartMode } from '@/src/components/DailyChart';
 import { PieChart, type AnchorPoint } from '@/src/components/PieChart';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
-import { BentoCard, IconButton, MetricTile, PillTabs, type PillTabOption } from '@/src/components/ui';
+import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   addMonths,
   compareMonthKeys,
   currentMonthKey,
-  formatMonthLabel,
   type CategoryStat,
   type DashboardRange
 } from '@/src/lib/stats';
@@ -37,8 +37,13 @@ const SWIPE_DISTANCE = 36;
 const SWIPE_DIRECTION_RATIO = 2.5;
 const SWIPE_VELOCITY = 0.35;
 const SWIPE_VELOCITY_RATIO = 1.5;
+const monthLabelFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  year: 'numeric'
+});
 
 export default function DashboardScreen() {
+  const insets = useSafeAreaInsets();
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [range, setRange] = useState<DashboardRange>('all');
   const [chartMode, setChartMode] = useState<DailyChartMode>('curve');
@@ -152,18 +157,13 @@ export default function DashboardScreen() {
       <ScrollView
         refreshControl={<RefreshControl refreshing={(loading && !ledger) || refreshing} onRefresh={reload} />}
         style={styles.page}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
       >
-        <View style={localStyles.pageHeader}>
-          <Text style={styles.title}>Dashboard</Text>
-          <Text style={styles.muted}>{ledger ? ledger.name : 'Shared Ledger'}</Text>
-        </View>
+        <View style={localStyles.dashboardContent}>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        <BentoCard variant="hero" style={localStyles.summarySection} {...monthSwipeResponder.panHandlers}>
-          <View style={localStyles.summaryHeader}>
-            <View style={localStyles.monthSwitcher}>
+          <View style={localStyles.monthSwipeArea} {...monthSwipeResponder.panHandlers}>
+            <View style={localStyles.monthAnchor}>
               <IconButton
                 accessibilityLabel="Previous month"
                 disabled={atMinimumMonth}
@@ -174,7 +174,7 @@ export default function DashboardScreen() {
               />
 
               <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthLabel}>
-                {formatMonthLabel(monthKey)}
+                {formatEnglishMonthLabel(monthKey)}
               </Text>
 
               <IconButton
@@ -187,54 +187,62 @@ export default function DashboardScreen() {
               />
             </View>
 
-            <PillTabs
-              accessibilityLabel="Expense range"
-              onChange={selectRange}
-              options={rangeOptions}
-              style={localStyles.rangePillTrack}
-              value={range}
-            />
+            <BentoCard variant="hero" style={localStyles.heroCard}>
+              <Animated.View style={[localStyles.heroContent, drillAnimatedStyle]}>
+                <Text style={styles.upperLabel}>Monthly Total</Text>
+                <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.heroAmount}>
+                  {formatYen(stats.totalYen)}
+                </Text>
+                <Text style={localStyles.recordCount}>
+                  {stats.count > 0 ? `${stats.count} records` : 'No expenses this month'}
+                </Text>
+
+                <PillTabs
+                  accessibilityLabel="Expense range"
+                  onChange={selectRange}
+                  options={rangeOptions}
+                  style={localStyles.rangePillTrack}
+                  value={range}
+                />
+                {refreshing ? (
+                  <View style={localStyles.refreshRow}>
+                    <ActivityIndicator color={colors.primary} size="small" />
+                    <Text style={styles.muted}>{isSwitchingMonth ? 'Updating...' : 'Syncing...'}</Text>
+                  </View>
+                ) : null}
+              </Animated.View>
+            </BentoCard>
           </View>
 
-          <Animated.View style={[localStyles.userDependentSummary, drillAnimatedStyle]}>
-            <MetricTile
-              helper={stats.count > 0 ? `${formatMonthLabel(loadedMonthKey || monthKey)} · ${stats.count} records` : 'No expenses this month'}
-              icon="sparkles-outline"
-              label="Monthly Total"
-              value={formatYen(stats.totalYen)}
+          <BentoCard style={localStyles.categoryCard}>
+            <Text style={styles.h2}>Category share</Text>
+            <PieChart
+              categories={stats.categories}
+              layout="horizontal"
+              onCategoryPress={openCategoryTrend}
+              totalYen={stats.totalYen}
             />
-            {refreshing ? (
-              <View style={localStyles.refreshRow}>
-                <ActivityIndicator color={colors.primary} size="small" />
-                <Text style={styles.muted}>{isSwitchingMonth ? 'Updating...' : 'Syncing...'}</Text>
+          </BentoCard>
+
+          <BentoCard variant="chart" style={localStyles.trendCard}>
+            <View style={localStyles.dailyTrendHeader}>
+              <View style={localStyles.dailyTrendTitle}>
+                <Text style={styles.h2}>Daily trend</Text>
+                {isSwitchingMonth ? <Text style={styles.muted}>Updating</Text> : null}
               </View>
-            ) : null}
 
-            <View style={localStyles.categoryHeader}>
-              <Text style={styles.h2}>Category Share</Text>
-            </View>
-            <PieChart categories={stats.categories} onCategoryPress={openCategoryTrend} totalYen={stats.totalYen} />
-          </Animated.View>
-        </BentoCard>
-
-        <BentoCard variant="chart">
-          <View style={localStyles.dailyTrendHeader}>
-            <View style={localStyles.dailyTrendTitle}>
-              <Text style={styles.h2}>Daily Trend</Text>
-              {isSwitchingMonth ? <Text style={styles.muted}>Updating</Text> : null}
+              <PillTabs
+                accessibilityLabel="Chart type"
+                onChange={setChartMode}
+                options={chartModeOptions}
+                style={localStyles.chartPillTrack}
+                value={chartMode}
+              />
             </View>
 
-            <PillTabs
-              accessibilityLabel="Chart type"
-              onChange={setChartMode}
-              options={chartModeOptions}
-              style={localStyles.chartPillTrack}
-              value={chartMode}
-            />
-          </View>
-
-          <DailyChart mode={chartMode} series={stats.dailySeries} />
-        </BentoCard>
+            <DailyChart mode={chartMode} series={stats.dailySeries} />
+          </BentoCard>
+        </View>
       </ScrollView>
 
       <CategoryTrendModal
@@ -251,6 +259,11 @@ export default function DashboardScreen() {
       />
     </>
   );
+}
+
+function formatEnglishMonthLabel(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number);
+  return monthLabelFormatter.format(new Date(year, month - 1, 1));
 }
 
 function isIntentionalMonthSwipe(dx: number, dy: number, vx: number, vy: number) {
@@ -270,8 +283,8 @@ function isIntentionalMonthSwipe(dx: number, dy: number, vx: number, vy: number)
 }
 
 const localStyles = StyleSheet.create({
-  categoryHeader: {
-    alignItems: 'center'
+  categoryCard: {
+    gap: 18
   },
   chartPillTrack: {
     flex: 1,
@@ -289,43 +302,58 @@ const localStyles = StyleSheet.create({
     gap: 2,
     minWidth: 0
   },
+  dashboardContent: {
+    gap: 18
+  },
+  heroAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 38,
+    fontWeight: '900',
+    letterSpacing: 0,
+    lineHeight: 46
+  },
+  heroCard: {
+    gap: 0,
+    minHeight: 0,
+    padding: 22
+  },
+  heroContent: {
+    gap: 10
+  },
   monthLabel: {
     color: colors.ink,
     fontFamily: fontFamilies.extraBold,
-    fontSize: 15,
-    fontWeight: '800',
-    lineHeight: 21,
-    maxWidth: 82
+    fontSize: 30,
+    fontWeight: '900',
+    lineHeight: 38,
+    textAlign: 'center'
   },
-  monthSwitcher: {
+  monthAnchor: {
     alignItems: 'center',
     flexDirection: 'row',
-    flexShrink: 0,
-    gap: 4
+    justifyContent: 'space-between',
+    minHeight: 54
   },
-  pageHeader: {
-    gap: 4
+  monthSwipeArea: {
+    gap: 18
   },
   rangePillTrack: {
-    flex: 1,
-    maxWidth: 176,
-    minWidth: 104
+    marginTop: 10
+  },
+  recordCount: {
+    color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 22
   },
   refreshRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8
   },
-  summaryHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'space-between'
-  },
-  summarySection: {
-    gap: 18
-  },
-  userDependentSummary: {
-    gap: 18
+  trendCard: {
+    minHeight: 0
   }
 });

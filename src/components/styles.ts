@@ -29,7 +29,8 @@ export const theme = {
     primaryDark: '#115E59',
     subtle: '#98A2B3',
     surface: '#FFFFFF',
-    tint: 'rgba(15,118,110,0.10)'
+    tint: 'rgba(15,118,110,0.10)',
+    warm: '#C2410C'
   },
   radii: {
     control: 16,
@@ -198,6 +199,15 @@ export const styles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 14,
     fontWeight: '700'
+  },
+  upperLabel: {
+    color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    lineHeight: 14,
+    textTransform: 'uppercase'
   },
   button: {
     alignItems: 'center',

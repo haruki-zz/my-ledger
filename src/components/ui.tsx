@@ -1,13 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
+  Alert,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
   View,
   type ColorValue,
   type LayoutChangeEvent,
+  type PanResponderInstance,
+  type AccessibilityActionEvent,
   type StyleProp,
   type TextStyle,
   type ViewProps,
@@ -63,13 +67,45 @@ type MetricTileProps = {
 };
 
 type SettingsActionRowProps = {
+  accent?: ColorValue;
   description?: string;
   disabled?: boolean;
   icon: IoniconName;
   onPress?: () => void;
   title: string;
   trailing?: ReactNode;
+  tone?: 'primary' | 'neutral' | 'danger' | 'accent' | 'warm';
 };
+
+type SettingsSectionProps = {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+};
+
+type InsetActionRowProps = SettingsActionRowProps & {
+  showDivider?: boolean;
+};
+
+type FilterChipProps = {
+  active?: boolean;
+  label: string;
+  onPress: () => void;
+};
+
+type SwipeExpenseRowProps = {
+  amount: string;
+  badgeLabel: string;
+  badgeTone: 'shared' | 'personal';
+  category: string;
+  meta: string;
+  onDelete: () => void;
+  onEdit: () => void;
+};
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const SWIPE_ACTION_WIDTH = 96;
+const SWIPE_TRIGGER_DISTANCE = SWIPE_ACTION_WIDTH * 0.9;
+const SWIPE_MAX_TRANSLATE = SWIPE_ACTION_WIDTH + 20;
 
 export function GlassSurface({ children, style, ...viewProps }: GlassSurfaceProps) {
   return (
@@ -221,13 +257,16 @@ export function MetricTile({ accent = colors.primary, helper, icon, label, style
 }
 
 export function SettingsActionRow({
+  accent,
   description,
   disabled,
   icon,
   onPress,
   title,
-  trailing
+  trailing,
+  tone = 'primary'
 }: SettingsActionRowProps) {
+  const iconColor = accent || actionColorFor(tone);
   return (
     <Pressable
       disabled={disabled}
@@ -238,15 +277,184 @@ export function SettingsActionRow({
         disabled && uiStyles.disabled
       ]}
     >
-      <View style={uiStyles.actionIcon}>
-        <Ionicons color={colors.primaryDark} name={icon} size={20} />
+      <View style={[uiStyles.actionIcon, { backgroundColor: tintFromAccent(iconColor) }]}>
+        <Ionicons color={iconColor} name={icon} size={20} />
       </View>
       <View style={uiStyles.actionText}>
-        <Text style={uiStyles.actionTitle}>{title}</Text>
+        <Text style={[uiStyles.actionTitle, tone === 'danger' && uiStyles.actionTitleDanger]}>{title}</Text>
         {description ? <Text style={styles.muted}>{description}</Text> : null}
       </View>
       {trailing || <Ionicons color={colors.subtle} name="chevron-forward" size={18} />}
     </Pressable>
+  );
+}
+
+export function SettingsSection({ children, style }: SettingsSectionProps) {
+  return <BentoCard style={[uiStyles.settingsSection, style]}>{children}</BentoCard>;
+}
+
+export function InsetActionRow({
+  showDivider,
+  ...props
+}: InsetActionRowProps) {
+  return (
+    <View>
+      <SettingsActionRow {...props} />
+      {showDivider ? <View style={uiStyles.insetDivider} /> : null}
+    </View>
+  );
+}
+
+export function FilterChip({ active, label, onPress }: FilterChipProps) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        uiStyles.filterChip,
+        active && uiStyles.filterChipActive,
+        pressed && uiStyles.pressed
+      ]}
+    >
+      <Ionicons
+        color={active ? colors.primaryDark : colors.ink}
+        name={active ? 'close' : 'chevron-down'}
+        size={16}
+      />
+      <Text
+        ellipsizeMode="tail"
+        numberOfLines={1}
+        style={[uiStyles.filterChipText, active && uiStyles.filterChipTextActive]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+export function SwipeExpenseRow({
+  amount,
+  badgeLabel,
+  badgeTone,
+  category,
+  meta,
+  onDelete,
+  onEdit
+}: SwipeExpenseRowProps) {
+  const [translateX] = useState(() => new Animated.Value(0));
+  const [responder, setResponder] = useState<PanResponderInstance | null>(null);
+  const onDeleteRef = useRef(onDelete);
+  const onEditRef = useRef(onEdit);
+
+  useEffect(() => {
+    onDeleteRef.current = onDelete;
+  }, [onDelete]);
+
+  useEffect(() => {
+    onEditRef.current = onEdit;
+  }, [onEdit]);
+
+  useEffect(() => {
+    setResponder(PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => isIntentionalHorizontalSwipe(
+        gestureState.dx,
+        gestureState.dy,
+        gestureState.vx,
+        gestureState.vy
+      ),
+      onPanResponderGrant: () => {
+        translateX.stopAnimation();
+      },
+      onPanResponderMove: (_, gestureState) => {
+        translateX.setValue(clampSwipe(gestureState.dx));
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > SWIPE_TRIGGER_DISTANCE) {
+          resetSwipe(translateX);
+          onEditRef.current();
+          return;
+        }
+
+        if (gestureState.dx < -SWIPE_TRIGGER_DISTANCE) {
+          resetSwipe(translateX);
+          onDeleteRef.current();
+          return;
+        }
+
+        resetSwipe(translateX);
+      },
+      onPanResponderTerminate: () => {
+        resetSwipe(translateX);
+      },
+      onPanResponderTerminationRequest: () => true
+    }));
+  }, [translateX]);
+
+  function handleLongPress() {
+    Alert.alert(category, 'Choose an action for this expense.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Edit', onPress: () => onEditRef.current() },
+      { text: 'Delete', onPress: () => onDeleteRef.current(), style: 'destructive' }
+    ]);
+  }
+
+  function handleAccessibilityAction(event: AccessibilityActionEvent) {
+    if (event.nativeEvent.actionName === 'edit') {
+      onEditRef.current();
+    }
+
+    if (event.nativeEvent.actionName === 'delete') {
+      onDeleteRef.current();
+    }
+  }
+
+  return (
+    <View style={uiStyles.swipeShell}>
+      <View style={uiStyles.swipeActionLayer}>
+        <View style={[uiStyles.swipeAction, uiStyles.swipeActionEdit]}>
+          <Ionicons color="#FFFFFF" name="create-outline" size={22} />
+        </View>
+        <View style={[uiStyles.swipeAction, uiStyles.swipeActionDelete]}>
+          <Ionicons color="#FFFFFF" name="trash-outline" size={22} />
+        </View>
+      </View>
+      <AnimatedPressable
+        accessibilityActions={[
+          { label: 'Edit', name: 'edit' },
+          { label: 'Delete', name: 'delete' }
+        ]}
+        accessibilityLabel={`${category}, ${meta}, ${amount}, ${badgeLabel}`}
+        accessibilityRole="button"
+        onAccessibilityAction={handleAccessibilityAction}
+        onLongPress={handleLongPress}
+        {...(responder?.panHandlers || {})}
+        style={[
+          uiStyles.swipeCard,
+          {
+            transform: [{ translateX }]
+          }
+        ]}
+      >
+        <View style={uiStyles.swipeContent}>
+          <View style={uiStyles.swipeTextBlock}>
+            <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeCategory}>
+              {category}
+            </Text>
+            <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeMeta}>
+              {meta}
+            </Text>
+            <View style={[uiStyles.expenseBadge, badgeTone === 'personal' && uiStyles.expenseBadgePersonal]}>
+              <Text style={[uiStyles.expenseBadgeText, badgeTone === 'personal' && uiStyles.expenseBadgeTextPersonal]}>
+                {badgeLabel}
+              </Text>
+            </View>
+          </View>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={uiStyles.swipeAmount}>
+            {amount}
+          </Text>
+        </View>
+      </AnimatedPressable>
+    </View>
   );
 }
 
@@ -270,6 +478,26 @@ function iconColorFor(tone: IconButtonProps['tone'], variant: IconButtonProps['v
   return colors.ink;
 }
 
+function actionColorFor(tone: SettingsActionRowProps['tone']) {
+  if (tone === 'danger') {
+    return colors.danger;
+  }
+
+  if (tone === 'accent') {
+    return colors.accent;
+  }
+
+  if (tone === 'warm') {
+    return colors.warm;
+  }
+
+  if (tone === 'neutral') {
+    return colors.muted;
+  }
+
+  return colors.primaryDark;
+}
+
 function tintFromAccent(accent: ColorValue) {
   if (typeof accent !== 'string') {
     return colors.tint;
@@ -287,6 +515,36 @@ function tintFromAccent(accent: ColorValue) {
   return `rgba(${red},${green},${blue},0.10)`;
 }
 
+function isIntentionalHorizontalSwipe(dx: number, dy: number, vx: number, vy: number) {
+  const horizontalDistance = Math.abs(dx);
+  const verticalDistance = Math.abs(dy);
+  const horizontalVelocity = Math.abs(vx);
+  const verticalVelocity = Math.abs(vy);
+
+  if (horizontalDistance < 14) {
+    return false;
+  }
+
+  return (
+    horizontalDistance > verticalDistance * 1.8 ||
+    (horizontalVelocity > 0.35 && horizontalVelocity > verticalVelocity * 1.4)
+  );
+}
+
+function clampSwipe(value: number) {
+  return Math.max(-SWIPE_MAX_TRANSLATE, Math.min(SWIPE_MAX_TRANSLATE, value));
+}
+
+function resetSwipe(value: Animated.Value) {
+  Animated.spring(value, {
+    damping: 18,
+    mass: 0.8,
+    stiffness: 180,
+    toValue: 0,
+    useNativeDriver: true
+  }).start();
+}
+
 const uiStyles = StyleSheet.create({
   actionIcon: {
     alignItems: 'center',
@@ -298,14 +556,13 @@ const uiStyles = StyleSheet.create({
   },
   actionRow: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.58)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.control,
-    borderWidth: 1,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
     flexDirection: 'row',
     gap: 12,
-    minHeight: 72,
-    padding: 12
+    minHeight: 84,
+    paddingHorizontal: 20,
+    paddingVertical: 14
   },
   actionRowPressed: {
     opacity: 0.78,
@@ -323,6 +580,9 @@ const uiStyles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 22
   },
+  actionTitleDanger: {
+    color: colors.danger
+  },
   bentoCard: {
     gap: 14
   },
@@ -339,6 +599,53 @@ const uiStyles = StyleSheet.create({
   bentoCard_hero: {
     minHeight: 320,
     padding: 18
+  },
+  expenseBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(15,118,110,0.10)',
+    borderRadius: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 4
+  },
+  expenseBadgePersonal: {
+    backgroundColor: 'rgba(99,102,241,0.12)'
+  },
+  expenseBadgeText: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 16
+  },
+  expenseBadgeTextPersonal: {
+    color: '#4F46E5'
+  },
+  filterChip: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderColor: colors.line,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 7,
+    height: 44,
+    justifyContent: 'center',
+    minWidth: 112,
+    paddingHorizontal: 16
+  },
+  filterChipActive: {
+    backgroundColor: colors.tint,
+    borderColor: colors.primary
+  },
+  filterChipText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 18
+  },
+  filterChipTextActive: {
+    color: colors.primaryDark
   },
   bentoCard_list: {
     gap: 12
@@ -427,6 +734,11 @@ const uiStyles = StyleSheet.create({
     letterSpacing: 0,
     lineHeight: 40
   },
+  insetDivider: {
+    backgroundColor: colors.line,
+    height: 1,
+    marginLeft: 72
+  },
   pillIndicator: {
     backgroundColor: 'rgba(255,255,255,0.96)',
     borderColor: colors.line,
@@ -473,6 +785,86 @@ const uiStyles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.76
+  },
+  settingsSection: {
+    gap: 0,
+    overflow: 'hidden',
+    padding: 0
+  },
+  swipeAction: {
+    alignItems: 'center',
+    bottom: 0,
+    justifyContent: 'center',
+    position: 'absolute',
+    top: 0,
+    width: SWIPE_ACTION_WIDTH
+  },
+  swipeActionDelete: {
+    backgroundColor: '#EF4444',
+    right: 0
+  },
+  swipeActionEdit: {
+    backgroundColor: colors.primary,
+    left: 0
+  },
+  swipeActionLayer: {
+    borderRadius: theme.radii.surface,
+    bottom: 0,
+    left: 0,
+    overflow: 'hidden',
+    position: 'absolute',
+    right: 0,
+    top: 0
+  },
+  swipeAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 23,
+    fontWeight: '900',
+    letterSpacing: 0,
+    maxWidth: 132,
+    textAlign: 'right'
+  },
+  swipeCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.glassBorder,
+    borderRadius: theme.radii.surface,
+    borderWidth: 1,
+    minHeight: 122,
+    overflow: 'hidden',
+    ...theme.shadow
+  },
+  swipeCategory: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 20,
+    fontWeight: '900',
+    lineHeight: 26
+  },
+  swipeContent: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    paddingBottom: 16,
+    paddingHorizontal: 22,
+    paddingTop: 18
+  },
+  swipeMeta: {
+    color: colors.muted,
+    fontFamily: fontFamilies.bold,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20
+  },
+  swipeShell: {
+    borderRadius: theme.radii.surface,
+    minHeight: 122
+  },
+  swipeTextBlock: {
+    flex: 1,
+    gap: 7,
+    minWidth: 0
   }
 });
 

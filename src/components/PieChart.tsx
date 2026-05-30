@@ -1,5 +1,5 @@
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
@@ -9,6 +9,11 @@ type PieChartProps = {
   categories: CategoryStat[];
   totalYen: number;
   onCategoryPress?: (category: CategoryStat, anchorPoint?: AnchorPoint) => void;
+  layout?: 'vertical' | 'horizontal';
+};
+
+type DisplayCategoryStat = CategoryStat & {
+  aggregate?: boolean;
 };
 
 export type AnchorPoint = {
@@ -16,11 +21,7 @@ export type AnchorPoint = {
   y: number;
 };
 
-const SIZE = 160;
-const CENTER = SIZE / 2;
-const RADIUS = 62;
-
-export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProps) {
+export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vertical' }: PieChartProps) {
   if (totalYen <= 0 || categories.length === 0) {
     return (
       <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 180 }}>
@@ -29,12 +30,31 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
     );
   }
 
-  const slices = categories.reduce<({ startAngle: number; endAngle: number } & CategoryStat)[]>((items, category) => {
-    const startAngle = items.length > 0 ? items[items.length - 1].endAngle : -90;
-    const endAngle = startAngle + (category.amountYen / totalYen) * 360;
-    items.push({ ...category, startAngle, endAngle });
-    return items;
-  }, []);
+  const chartSize = layout === 'horizontal' ? 132 : 160;
+  const center = chartSize / 2;
+  const outerRadius = layout === 'horizontal' ? 52 : 62;
+  const innerRadius = layout === 'horizontal' ? 37 : 47;
+  const strokeWidth = outerRadius - innerRadius;
+  const strokeRadius = (outerRadius + innerRadius) / 2;
+  const circumference = 2 * Math.PI * strokeRadius;
+  const displayCategories = compactCategories(categories);
+  const segments = displayCategories.reduce<{
+    cumulativeLength: number;
+    items: (DisplayCategoryStat & { dashOffset: number; segmentLength: number })[];
+  }>((state, category) => {
+    const segmentLength = (category.amountYen / totalYen) * circumference;
+    return {
+      cumulativeLength: state.cumulativeLength + segmentLength,
+      items: [
+        ...state.items,
+        {
+          ...category,
+          dashOffset: circumference / 4 - state.cumulativeLength,
+          segmentLength
+        }
+      ]
+    };
+  }, { cumulativeLength: 0, items: [] }).items;
 
   function handleCategoryPress(category: CategoryStat, event: GestureResponderEvent) {
     const { pageX, pageY } = event.nativeEvent;
@@ -46,39 +66,55 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
   }
 
   return (
-    <View style={{ gap: 16 }}>
+    <View style={layout === 'horizontal' ? chartStyles.horizontalChart : chartStyles.verticalChart}>
       <View style={{ alignItems: 'center' }}>
-        <Svg height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE}>
-          <Circle cx={CENTER} cy={CENTER} fill="rgba(15,118,110,0.08)" r={RADIUS} />
-          {slices.length === 1 ? (
-            <Circle cx={CENTER} cy={CENTER} fill={slices[0].color} r={RADIUS} />
+        <Svg height={chartSize} viewBox={`0 0 ${chartSize} ${chartSize}`} width={chartSize}>
+          <Circle cx={center} cy={center} fill="rgba(15,118,110,0.08)" r={outerRadius} />
+          {segments.length === 1 ? (
+            <Circle
+              cx={center}
+              cy={center}
+              fill="none"
+              r={strokeRadius}
+              stroke={segments[0].color}
+              strokeWidth={strokeWidth}
+            />
           ) : (
-            slices.map((category) => (
-              <Path
-                d={describeArc(CENTER, CENTER, RADIUS, category.startAngle, category.endAngle)}
-                fill={category.color}
-                key={category.category}
+            segments.map((segment) => (
+              <Circle
+                cx={center}
+                cy={center}
+                fill="none"
+                key={`${segment.category}-${segment.dashOffset}`}
+                r={strokeRadius}
+                stroke={segment.color}
+                strokeDasharray={`${segment.segmentLength} ${circumference - segment.segmentLength}`}
+                strokeDashoffset={segment.dashOffset}
+                strokeLinecap="butt"
+                strokeWidth={strokeWidth}
               />
             ))
           )}
-          <Circle cx={CENTER} cy={CENTER} fill={theme.chart.donutCenter} r={34} />
+          <Circle cx={center} cy={center} fill={theme.chart.donutCenter} r={innerRadius} />
         </Svg>
       </View>
 
-      <View style={{ gap: 10 }}>
-        {categories.map((category) => (
+      <View style={layout === 'horizontal' ? chartStyles.compactLegend : chartStyles.legend}>
+        {displayCategories.map((category) => {
+          const disabled = !onCategoryPress || Boolean(category.aggregate);
+          return (
           <Pressable
-            disabled={!onCategoryPress}
+            disabled={disabled}
             hitSlop={4}
-            key={category.category}
+            key={`${category.category}-${category.color}`}
             onPress={(event) => handleCategoryPress(category, event)}
             style={({ pressed }) => [
               styles.between,
               chartStyles.categoryRow,
-              pressed && onCategoryPress && chartStyles.categoryRowPressed
+              pressed && !disabled && chartStyles.categoryRowPressed
             ]}
           >
-            <View style={{ flex: 1, flexDirection: 'row', gap: 8 }}>
+            <View style={chartStyles.legendName}>
               <View
                 style={{
                   backgroundColor: category.color,
@@ -88,43 +124,51 @@ export function PieChart({ categories, totalYen, onCategoryPress }: PieChartProp
                   width: 12
                 }}
               />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.body}>{category.category}</Text>
-                <Text style={styles.muted}>{category.percentage.toFixed(1)}%</Text>
-              </View>
+              <Text ellipsizeMode="tail" numberOfLines={1} style={layout === 'horizontal' ? chartStyles.compactLegendText : styles.body}>
+                {category.category}
+              </Text>
             </View>
-            <Text style={{ color: colors.ink, fontFamily: fontFamilies.extraBold, fontSize: 16, fontWeight: '800' }}>
-              {formatYen(category.amountYen)}
+            <Text style={layout === 'horizontal' ? chartStyles.compactPercentage : chartStyles.amountText}>
+              {layout === 'horizontal' ? `${category.percentage.toFixed(1)}%` : formatYen(category.amountYen)}
             </Text>
           </Pressable>
-        ))}
+          );
+        })}
       </View>
     </View>
   );
 }
 
-function describeArc(cx: number, cy: number, radius: number, startAngle: number, endAngle: number) {
-  const start = polarToCartesian(cx, cy, radius, endAngle);
-  const end = polarToCartesian(cx, cy, radius, startAngle);
-  const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+function compactCategories(categories: CategoryStat[]): DisplayCategoryStat[] {
+  if (categories.length <= 5) {
+    return categories;
+  }
+
+  const visibleCategories = categories.slice(0, 4);
+  const otherCategories = categories.slice(4);
+  const otherAmount = otherCategories.reduce((sum, category) => sum + category.amountYen, 0);
+  const otherPercentage = otherCategories.reduce((sum, category) => sum + category.percentage, 0);
 
   return [
-    `M ${cx} ${cy}`,
-    `L ${start.x} ${start.y}`,
-    `A ${radius} ${radius} 0 ${largeArcFlag} 0 ${end.x} ${end.y}`,
-    'Z'
-  ].join(' ');
+    ...visibleCategories,
+    {
+      amountYen: otherAmount,
+      aggregate: true,
+      category: 'Other',
+      color: colors.subtle,
+      percentage: otherPercentage
+    }
+  ];
 }
 
-function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
-  const angleInRadians = (angleInDegrees * Math.PI) / 180;
-  return {
-    x: cx + radius * Math.cos(angleInRadians),
-    y: cy + radius * Math.sin(angleInRadians)
-  };
-}
 
 const chartStyles = StyleSheet.create({
+  amountText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 16,
+    fontWeight: '800'
+  },
   categoryRow: {
     alignItems: 'flex-start',
     borderRadius: 8,
@@ -134,5 +178,42 @@ const chartStyles = StyleSheet.create({
   },
   categoryRowPressed: {
     backgroundColor: colors.tint
+  },
+  compactLegend: {
+    flex: 1,
+    gap: 8,
+    minWidth: 0
+  },
+  compactLegendText: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 18
+  },
+  compactPercentage: {
+    color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 18
+  },
+  horizontalChart: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 20
+  },
+  legend: {
+    gap: 10
+  },
+  legendName: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0
+  },
+  verticalChart: {
+    gap: 16
   }
 });

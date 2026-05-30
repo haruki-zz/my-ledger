@@ -6,12 +6,13 @@ import { KEYBOARD_DONE_ACCESSORY_ID } from '@/src/components/KeyboardDoneAccesso
 import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
+import { useAuth } from '@/src/context/AuthContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { getErrorMessage, getLedgerMembers, updateMyProfile } from '@/src/lib/ledger';
-import { supabase } from '@/src/lib/supabase';
 
 export default function AccountSettingsScreen() {
+  const { signOut: signOutSession } = useAuth();
   const {
     error: ledgerError,
     ledger,
@@ -66,9 +67,10 @@ export default function AccountSettingsScreen() {
   }
 
   async function signOut() {
-    const { error: signOutError } = await supabase.auth.signOut();
-    if (signOutError) {
-      Alert.alert('Sign Out Failed', signOutError.message);
+    try {
+      await signOutSession();
+    } catch (signOutError) {
+      Alert.alert('Sign Out Failed', getErrorMessage(signOutError));
       return;
     }
 

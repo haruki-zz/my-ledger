@@ -238,6 +238,7 @@ export default function TabsLayout() {
     <View style={localStyles.container}>
       <Tabs
         screenOptions={{
+          headerShown: false,
           headerStyle: { backgroundColor: colors.bg },
           headerShadowVisible: false,
           headerTitleStyle: { color: colors.ink, fontFamily: fontFamilies.extraBold, fontWeight: '800' },

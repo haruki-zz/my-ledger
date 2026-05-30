@@ -1,12 +1,77 @@
 import { router } from 'expo-router';
-import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, RefreshControl, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { styles } from '@/src/components/styles';
-import { BentoCard, SettingsActionRow } from '@/src/components/ui';
+import { colors, styles } from '@/src/components/styles';
+import { InsetActionRow, SettingsSection } from '@/src/components/ui';
+import { useAuth } from '@/src/context/AuthContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
+import { getErrorMessage, getLedgerMembers } from '@/src/lib/ledger';
 
 export default function SettingsScreen() {
-  const { error, ledger, loading } = useRequiredLedger();
+  const insets = useSafeAreaInsets();
+  const { session, signOut: signOutSession } = useAuth();
+  const { error, ledger, loading, reloadLedger } = useRequiredLedger();
+  const ledgerId = ledger?.id;
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+
+  const loadMembers = useCallback(async () => {
+    if (!ledgerId) {
+      setMemberCount(null);
+      setMembersError(null);
+      return;
+    }
+
+    setMembersLoading(true);
+    setMembersError(null);
+
+    try {
+      const members = await getLedgerMembers(ledgerId);
+      setMemberCount(members.length);
+    } catch (loadError) {
+      setMemberCount(null);
+      setMembersError(getErrorMessage(loadError));
+    } finally {
+      setMembersLoading(false);
+    }
+  }, [ledgerId]);
+
+  useEffect(() => {
+    void loadMembers();
+  }, [loadMembers]);
+
+  async function refresh() {
+    await reloadLedger();
+    await loadMembers();
+  }
+
+  async function shareInviteCode() {
+    if (!ledger) {
+      return;
+    }
+
+    try {
+      await Share.share({
+        message: `Join "${ledger.name}" with invite code: ${ledger.invite_code}`
+      });
+    } catch (shareError) {
+      Alert.alert('Share Failed', getErrorMessage(shareError));
+    }
+  }
+
+  async function signOut() {
+    try {
+      await signOutSession();
+    } catch (signOutError) {
+      Alert.alert('Sign Out Failed', getErrorMessage(signOutError));
+      return;
+    }
+
+    router.replace('/auth');
+  }
 
   if (loading && !ledger) {
     return (
@@ -17,7 +82,11 @@ export default function SettingsScreen() {
   }
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+    <ScrollView
+      refreshControl={<RefreshControl refreshing={loading || membersLoading} onRefresh={refresh} />}
+      style={styles.page}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
+    >
       <View>
         <Text style={styles.title}>Settings</Text>
         <Text style={styles.muted}>Account, ledgers, and shared categories</Text>
@@ -25,26 +94,73 @@ export default function SettingsScreen() {
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <BentoCard variant="list">
-        <SettingsActionRow
-          description="Manage display name, email, and sign-in status."
+      <SettingsSection>
+        <InsetActionRow
+          description="Name, email, sign-in"
           icon="person-circle-outline"
           onPress={() => router.push('/settings/account')}
+          showDivider
           title="Account"
         />
-        <SettingsActionRow
-          description="Create, join, switch, leave, or delete ledgers."
+        <InsetActionRow
+          description="Create, join, switch"
           icon="albums-outline"
           onPress={() => router.push('/settings/ledgers')}
+          showDivider
           title="Ledgers"
         />
-        <SettingsActionRow
-          description="Maintain shared expense categories and default split ratios."
+        <InsetActionRow
+          description="Shared categories, split ratios"
           icon="pricetags-outline"
           onPress={() => router.push('/settings/categories')}
           title="Categories"
         />
-      </BentoCard>
+      </SettingsSection>
+
+      <View style={localStyles.sectionGroup}>
+        <Text style={styles.upperLabel}>Current Ledger</Text>
+        <SettingsSection>
+          <InsetActionRow
+            accent={colors.accent}
+            description={[
+              membersLoading ? 'Loading members...' : membersError ? 'Members unavailable' : `${memberCount ?? 0} members`,
+              ledger?.invite_code || 'No invite code'
+            ].join(' · ')}
+            icon="sparkles-outline"
+            onPress={() => ledger ? router.push(`/settings/ledger/${ledger.id}`) : undefined}
+            title={ledger?.name || 'No ledger selected'}
+            tone="accent"
+          />
+        </SettingsSection>
+      </View>
+
+      <View style={localStyles.sectionGroup}>
+        <Text style={styles.upperLabel}>Quick Actions</Text>
+        <SettingsSection>
+          <InsetActionRow
+            description={ledger?.invite_code || 'No active ledger'}
+            disabled={!ledger}
+            icon="share-social-outline"
+            onPress={shareInviteCode}
+            showDivider
+            title="Share invite code"
+            tone="warm"
+          />
+          <InsetActionRow
+            description={session?.user.email || 'Current session'}
+            icon="log-out-outline"
+            onPress={signOut}
+            title="Sign out"
+            tone="danger"
+          />
+        </SettingsSection>
+      </View>
     </ScrollView>
   );
 }
+
+const localStyles = StyleSheet.create({
+  sectionGroup: {
+    gap: 10
+  }
+});

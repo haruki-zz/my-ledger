@@ -1,13 +1,24 @@
 import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Keyboard,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type LayoutChangeEvent
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   AndroidKeyboardDoneButton,
   KEYBOARD_DONE_ACCESSORY_ID
 } from '@/src/components/KeyboardDoneAccessory';
 import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
-import { colors, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { BentoCard, PillTabs } from '@/src/components/ui';
 import {
   DEFAULT_EXPENSE_CATEGORY_SPLIT_RATIO,
@@ -38,6 +49,7 @@ type Props = {
 
 type SplitMode = 'amount' | 'ratio';
 type SplitTextValues = Record<string, string>;
+const MIN_SAVE_BAR_HEIGHT = 92;
 
 function formatSplitNumber(value: number) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
@@ -99,6 +111,7 @@ export function ExpenseForm({
   profilesById,
   categories
 }: Props) {
+  const insets = useSafeAreaInsets();
   const sortedMembers = useMemo(() => members.slice(0, 2), [members]);
   const categoryRatiosByName = useMemo(
     () => new Map(categories?.map((item) => [
@@ -130,6 +143,8 @@ export function ExpenseForm({
   const [note, setNote] = useState(expense?.note || '');
   const [splitMode, setSplitMode] = useState<SplitMode>('amount');
   const [submitting, setSubmitting] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [saveBarHeight, setSaveBarHeight] = useState(MIN_SAVE_BAR_HEIGHT);
 
   const [amountSplitValues, setAmountSplitValues] = useState<SplitTextValues>(() => {
     if (expense?.splits?.length) {
@@ -172,6 +187,25 @@ export function ExpenseForm({
   );
   const hasSavedSharedSplits = expense?.ownership === 'shared' && Boolean(expense.splits.length);
   const canApplyPresetSplits = !splitValuesTouched && !hasSavedSharedSplits;
+  const saveBarBottom = Platform.OS === 'web' ? 0 : keyboardHeight;
+  const saveBarPaddingBottom = Math.max(insets.bottom, 12);
+  const formBottomPadding = Math.max(saveBarHeight, MIN_SAVE_BAR_HEIGHT) + 24;
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   function currentRatios() {
     if (sortedMembers.length !== 2) {
@@ -419,23 +453,31 @@ export function ExpenseForm({
     }
   }
 
+  function handleSaveBarLayout(event: LayoutChangeEvent) {
+    setSaveBarHeight(event.nativeEvent.layout.height);
+  }
+
   return (
-    <KeyboardAwareScrollView style={styles.page} contentContainerStyle={styles.content}>
-      <BentoCard variant="form">
-        <Text style={styles.label}>Amount (JPY)</Text>
+    <View style={styles.page}>
+      <KeyboardAwareScrollView
+        style={styles.page}
+        contentContainerStyle={[styles.content, { paddingBottom: formBottomPadding }]}
+      >
+      <BentoCard variant="form" style={localStyles.formCard}>
+        <Text style={styles.upperLabel}>Amount (JPY)</Text>
         <TextInput
           inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           inputMode="numeric"
           keyboardType="number-pad"
           onChangeText={handleAmountChange}
-          placeholder="Example: 1200"
+          placeholder="¥0"
           returnKeyType="done"
-          style={styles.input}
+          style={[styles.input, localStyles.amountInput]}
           submitBehavior="blurAndSubmit"
           value={amount}
         />
 
-        <Text style={styles.label}>Category</Text>
+        <Text style={styles.upperLabel}>Category</Text>
         <View style={styles.dropdown}>
           <Pressable
             onPress={() => runAfterKeyboardDismiss(toggleCategoryMenu, { delayMs: 80 })}
@@ -471,7 +513,7 @@ export function ExpenseForm({
           ) : null}
         </View>
 
-        <Text style={styles.label}>Paid By</Text>
+        <Text style={styles.upperLabel}>Paid By</Text>
         <PillTabs
           accessibilityLabel="Paid by"
           onChange={(nextPaidBy) => runAfterKeyboardDismiss(() => setPaidBy(nextPaidBy))}
@@ -482,12 +524,12 @@ export function ExpenseForm({
           value={paidBy}
         />
 
-        <Text style={styles.label}>Recorded By</Text>
+        <Text style={styles.upperLabel}>Recorded By</Text>
         <View style={[styles.input, { justifyContent: 'center' }]}>
           <Text style={styles.body}>{recordedByName}</Text>
         </View>
 
-        <Text style={styles.label}>Ownership</Text>
+        <Text style={styles.upperLabel}>Ownership</Text>
         <PillTabs
           accessibilityLabel="Expense ownership"
           onChange={(nextOwnership) => runAfterKeyboardDismiss(() => selectOwnership(nextOwnership))}
@@ -500,7 +542,7 @@ export function ExpenseForm({
 
         {ownership === 'shared' ? (
           <View style={{ gap: 12 }}>
-            <Text style={styles.label}>Split Method</Text>
+            <Text style={styles.upperLabel}>Split</Text>
             <PillTabs
               accessibilityLabel="Split method"
               onChange={(nextMode) => runAfterKeyboardDismiss(() => selectSplitMode(nextMode))}
@@ -512,11 +554,9 @@ export function ExpenseForm({
             />
 
             {sortedMembers.map((member) => (
-              <View key={member.user_id} style={{ gap: 6 }}>
-                <Text style={styles.label}>
-                  {splitMode === 'amount'
-                    ? `Amount for ${displayName(member.profile.display_name)}`
-                    : `Ratio for ${displayName(member.profile.display_name)} (%)`}
+              <View key={member.user_id} style={localStyles.splitRow}>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.splitName}>
+                  {displayName(member.profile.display_name)}
                 </Text>
                 <TextInput
                   inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
@@ -529,7 +569,7 @@ export function ExpenseForm({
                   }
                   placeholder={splitMode === 'amount' ? 'Example: 600' : 'Example: 50'}
                   returnKeyType="done"
-                  style={styles.input}
+                  style={[styles.input, localStyles.splitInput]}
                   submitBehavior="blurAndSubmit"
                   value={
                     splitMode === 'amount'
@@ -544,7 +584,7 @@ export function ExpenseForm({
 
         <AndroidKeyboardDoneButton />
 
-        <Text style={styles.label}>Date</Text>
+        <Text style={styles.upperLabel}>Date</Text>
         <TextInput
           inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           onChangeText={setSpentOn}
@@ -555,7 +595,7 @@ export function ExpenseForm({
           value={spentOn}
         />
 
-        <Text style={styles.label}>Note</Text>
+        <Text style={styles.upperLabel}>Note</Text>
         <TextInput
           inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           multiline
@@ -564,13 +604,75 @@ export function ExpenseForm({
           style={[styles.input, { minHeight: 84, textAlignVertical: 'top' }]}
           value={note}
         />
-
-        <Pressable disabled={submitting} onPress={() => runAfterKeyboardDismiss(submit)} style={styles.button}>
-          <Text style={styles.buttonText}>{submitting ? 'Saving...' : 'Save'}</Text>
-        </Pressable>
       </BentoCard>
 
       <Text style={[styles.muted, { color: colors.muted }]}>Data is written directly to Supabase. Editing does not change the original recorder.</Text>
-    </KeyboardAwareScrollView>
+      </KeyboardAwareScrollView>
+
+      <View
+        onLayout={handleSaveBarLayout}
+        style={[
+          localStyles.saveBar,
+          {
+            bottom: saveBarBottom,
+            paddingBottom: saveBarPaddingBottom
+          }
+        ]}
+      >
+        <Pressable
+          disabled={submitting}
+          onPress={() => runAfterKeyboardDismiss(submit)}
+          style={[styles.button, localStyles.saveButton]}
+        >
+          <Text style={styles.buttonText}>{submitting ? 'Saving...' : 'Save'}</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
+
+const localStyles = StyleSheet.create({
+  amountInput: {
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 28,
+    fontWeight: '900',
+    minHeight: 96,
+    textAlign: 'center'
+  },
+  formCard: {
+    gap: 18,
+    padding: 20
+  },
+  saveBar: {
+    backgroundColor: colors.glass,
+    borderColor: colors.glassBorder,
+    borderTopWidth: 1,
+    left: 0,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    position: 'absolute',
+    right: 0,
+    ...theme.shadow
+  },
+  saveButton: {
+    minHeight: 56
+  },
+  splitInput: {
+    flex: 1,
+    fontFamily: fontFamilies.extraBold,
+    fontWeight: '800',
+    textAlign: 'right'
+  },
+  splitName: {
+    color: colors.ink,
+    flex: 0.45,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  splitRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12
+  }
+});
