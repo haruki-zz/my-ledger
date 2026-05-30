@@ -1,7 +1,12 @@
 import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 
+import {
+  AndroidKeyboardDoneButton,
+  KEYBOARD_DONE_ACCESSORY_ID
+} from '@/src/components/KeyboardDoneAccessory';
+import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { colors, styles } from '@/src/components/styles';
 import { BentoCard, PillTabs } from '@/src/components/ui';
 import {
@@ -10,6 +15,7 @@ import {
   getExpenseCategorySplitRatio
 } from '@/src/lib/categories';
 import { displayName, todayDateString } from '@/src/lib/format';
+import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { saveExpense } from '@/src/lib/ledger';
 import type {
   Expense,
@@ -233,6 +239,10 @@ export function ExpenseForm({
     }
   }
 
+  function toggleCategoryMenu() {
+    setCategoryMenuOpen((current) => !current);
+  }
+
   function handleAmountChange(value: string) {
     setAmount(value);
 
@@ -410,21 +420,25 @@ export function ExpenseForm({
   }
 
   return (
-    <ScrollView style={styles.page} contentContainerStyle={styles.content}>
+    <KeyboardAwareScrollView style={styles.page} contentContainerStyle={styles.content}>
       <BentoCard variant="form">
         <Text style={styles.label}>Amount (JPY)</Text>
         <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           inputMode="numeric"
+          keyboardType="number-pad"
           onChangeText={handleAmountChange}
           placeholder="Example: 1200"
+          returnKeyType="done"
           style={styles.input}
+          submitBehavior="blurAndSubmit"
           value={amount}
         />
 
         <Text style={styles.label}>Category</Text>
         <View style={styles.dropdown}>
           <Pressable
-            onPress={() => setCategoryMenuOpen((current) => !current)}
+            onPress={() => runAfterKeyboardDismiss(toggleCategoryMenu, { delayMs: 80 })}
             style={[styles.dropdownTrigger, categoryMenuOpen && styles.dropdownTriggerActive]}
           >
             <Text style={category ? styles.dropdownValue : styles.dropdownPlaceholder}>
@@ -444,7 +458,7 @@ export function ExpenseForm({
                 return (
                   <Pressable
                     key={option}
-                    onPress={() => selectCategory(option)}
+                    onPress={() => runAfterKeyboardDismiss(() => selectCategory(option))}
                     style={[styles.dropdownOption, selected && styles.dropdownOptionActive]}
                   >
                     <Text style={[styles.dropdownOptionText, selected && styles.dropdownOptionTextActive]}>
@@ -460,7 +474,7 @@ export function ExpenseForm({
         <Text style={styles.label}>Paid By</Text>
         <PillTabs
           accessibilityLabel="Paid by"
-          onChange={setPaidBy}
+          onChange={(nextPaidBy) => runAfterKeyboardDismiss(() => setPaidBy(nextPaidBy))}
           options={sortedMembers.map((member) => ({
             label: displayName(member.profile.display_name),
             value: member.user_id
@@ -476,7 +490,7 @@ export function ExpenseForm({
         <Text style={styles.label}>Ownership</Text>
         <PillTabs
           accessibilityLabel="Expense ownership"
-          onChange={selectOwnership}
+          onChange={(nextOwnership) => runAfterKeyboardDismiss(() => selectOwnership(nextOwnership))}
           options={[
             { label: 'Personal', value: 'personal' },
             { label: 'Shared', value: 'shared' }
@@ -489,7 +503,7 @@ export function ExpenseForm({
             <Text style={styles.label}>Split Method</Text>
             <PillTabs
               accessibilityLabel="Split method"
-              onChange={selectSplitMode}
+              onChange={(nextMode) => runAfterKeyboardDismiss(() => selectSplitMode(nextMode))}
               options={[
                 { label: 'Amount', value: 'amount' },
                 { label: 'Ratio', value: 'ratio' }
@@ -505,14 +519,18 @@ export function ExpenseForm({
                     : `Ratio for ${displayName(member.profile.display_name)} (%)`}
                 </Text>
                 <TextInput
+                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                   inputMode="numeric"
+                  keyboardType={splitMode === 'amount' ? 'number-pad' : 'decimal-pad'}
                   onChangeText={(value) =>
                     splitMode === 'amount'
                       ? setAmountSplitValue(member.user_id, value)
                       : setRatioValue(member.user_id, value)
                   }
                   placeholder={splitMode === 'amount' ? 'Example: 600' : 'Example: 50'}
+                  returnKeyType="done"
                   style={styles.input}
+                  submitBehavior="blurAndSubmit"
                   value={
                     splitMode === 'amount'
                       ? amountSplitValues[member.user_id] || ''
@@ -524,11 +542,22 @@ export function ExpenseForm({
           </View>
         ) : null}
 
+        <AndroidKeyboardDoneButton />
+
         <Text style={styles.label}>Date</Text>
-        <TextInput onChangeText={setSpentOn} placeholder="YYYY-MM-DD" style={styles.input} value={spentOn} />
+        <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+          onChangeText={setSpentOn}
+          placeholder="YYYY-MM-DD"
+          returnKeyType="done"
+          style={styles.input}
+          submitBehavior="blurAndSubmit"
+          value={spentOn}
+        />
 
         <Text style={styles.label}>Note</Text>
         <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           multiline
           onChangeText={setNote}
           placeholder="Optional"
@@ -536,12 +565,12 @@ export function ExpenseForm({
           value={note}
         />
 
-        <Pressable disabled={submitting} onPress={submit} style={styles.button}>
+        <Pressable disabled={submitting} onPress={() => runAfterKeyboardDismiss(submit)} style={styles.button}>
           <Text style={styles.buttonText}>{submitting ? 'Saving...' : 'Save'}</Text>
         </Pressable>
       </BentoCard>
 
       <Text style={[styles.muted, { color: colors.muted }]}>Data is written directly to Supabase. Editing does not change the original recorder.</Text>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

@@ -1,10 +1,13 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 
+import { KEYBOARD_DONE_ACCESSORY_ID } from '@/src/components/KeyboardDoneAccessory';
+import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { colors, styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useLedgerContext } from '@/src/context/LedgerContext';
+import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { getErrorMessage } from '@/src/lib/ledger';
 
 export default function LedgerManagementScreen() {
@@ -64,7 +67,7 @@ export default function LedgerManagementScreen() {
   }
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => reloadLedgers()} />}
       style={styles.page}
       contentContainerStyle={styles.content}
@@ -103,7 +106,7 @@ export default function LedgerManagementScreen() {
                     </Text>
                   </View>
                   <Pressable
-                    onPress={() => router.push(`/settings/ledger/${membership.ledger.id}`)}
+                    onPress={() => runAfterKeyboardDismiss(() => router.push(`/settings/ledger/${membership.ledger.id}`))}
                     style={[styles.button, styles.secondaryButton, { minHeight: 40 }]}
                   >
                     <Text style={[styles.buttonText, styles.secondaryButtonText]}>Details</Text>
@@ -111,7 +114,7 @@ export default function LedgerManagementScreen() {
                 </View>
 
                 {!isActive ? (
-                  <Pressable onPress={() => handleSelect(membership.ledger.id)} style={styles.button}>
+                  <Pressable onPress={() => runAfterKeyboardDismiss(() => handleSelect(membership.ledger.id))} style={styles.button}>
                     <Text style={styles.buttonText}>Switch to This Ledger</Text>
                   </Pressable>
                 ) : null}
@@ -126,8 +129,15 @@ export default function LedgerManagementScreen() {
       <BentoCard variant="form">
         <Text style={styles.h2}>Create Ledger</Text>
         <Text style={styles.label}>Ledger Name</Text>
-        <TextInput onChangeText={setLedgerName} style={styles.input} value={ledgerName} />
-        <Pressable disabled={submitting} onPress={handleCreate} style={styles.button}>
+        <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+          onChangeText={setLedgerName}
+          returnKeyType="done"
+          style={styles.input}
+          submitBehavior="blurAndSubmit"
+          value={ledgerName}
+        />
+        <Pressable disabled={submitting} onPress={() => runAfterKeyboardDismiss(handleCreate)} style={styles.button}>
           <Text style={styles.buttonText}>{submitting ? 'Processing...' : 'Create and Switch'}</Text>
         </Pressable>
       </BentoCard>
@@ -137,17 +147,20 @@ export default function LedgerManagementScreen() {
         <Text style={styles.label}>Invite Code</Text>
         <TextInput
           autoCapitalize="characters"
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           onChangeText={setInviteCode}
           placeholder="Example: A1B2C3D4"
+          returnKeyType="done"
           style={styles.input}
+          submitBehavior="blurAndSubmit"
           value={inviteCode}
         />
-        <Pressable disabled={submitting} onPress={handleJoin} style={[styles.button, styles.secondaryButton]}>
+        <Pressable disabled={submitting} onPress={() => runAfterKeyboardDismiss(handleJoin)} style={[styles.button, styles.secondaryButton]}>
           <Text style={[styles.buttonText, styles.secondaryButtonText]}>
             {submitting ? 'Processing...' : 'Join and Switch'}
           </Text>
         </Pressable>
       </BentoCard>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

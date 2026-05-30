@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 
+import {
+  AndroidKeyboardDoneButton,
+  KEYBOARD_DONE_ACCESSORY_ID
+} from '@/src/components/KeyboardDoneAccessory';
+import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { colors, styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
+import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import {
   deleteLedgerCategory,
   getErrorMessage,
@@ -241,7 +247,7 @@ export default function CategorySettingsScreen() {
   }
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       refreshControl={<RefreshControl refreshing={ledgerLoading || loading} onRefresh={refresh} />}
       style={styles.page}
       contentContainerStyle={styles.content}
@@ -278,7 +284,10 @@ export default function CategorySettingsScreen() {
                       {memberNames[0]} {category.split_ratio_a}% · {memberNames[1]} {category.split_ratio_b}%
                     </Text>
                   </View>
-                  <Pressable onPress={() => beginEditCategory(category)} style={[styles.button, { minHeight: 40 }]}>
+                  <Pressable
+                    onPress={() => runAfterKeyboardDismiss(() => beginEditCategory(category))}
+                    style={[styles.button, { minHeight: 40 }]}
+                  >
                     <Text style={styles.buttonText}>Edit</Text>
                   </Pressable>
                 </View>
@@ -289,7 +298,9 @@ export default function CategorySettingsScreen() {
                       <View style={{ flex: 1, gap: 6 }}>
                         <Text style={styles.label}>{memberNames[0]} Ratio</Text>
                         <TextInput
+                          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                           inputMode="numeric"
+                          keyboardType="number-pad"
                           onChangeText={(value) => {
                             setEditingRatioA(value);
                             const ratioA = parseRatio(value);
@@ -297,14 +308,18 @@ export default function CategorySettingsScreen() {
                               setEditingRatioB(String(100 - ratioA));
                             }
                           }}
+                          returnKeyType="done"
                           style={styles.input}
+                          submitBehavior="blurAndSubmit"
                           value={editingRatioA}
                         />
                       </View>
                       <View style={{ flex: 1, gap: 6 }}>
                         <Text style={styles.label}>{memberNames[1]} Ratio</Text>
                         <TextInput
+                          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                           inputMode="numeric"
+                          keyboardType="number-pad"
                           onChangeText={(value) => {
                             setEditingRatioB(value);
                             const ratioB = parseRatio(value);
@@ -312,22 +327,26 @@ export default function CategorySettingsScreen() {
                               setEditingRatioA(String(100 - ratioB));
                             }
                           }}
+                          returnKeyType="done"
                           style={styles.input}
+                          submitBehavior="blurAndSubmit"
                           value={editingRatioB}
                         />
                       </View>
                     </View>
 
+                    <AndroidKeyboardDoneButton />
+
                     <View style={styles.row}>
                       <Pressable
                         disabled={savingCategory}
-                        onPress={() => saveCategory(category)}
+                        onPress={() => runAfterKeyboardDismiss(() => saveCategory(category))}
                         style={[styles.button, { flex: 1 }]}
                       >
                         <Text style={styles.buttonText}>{savingCategory ? 'Saving...' : 'Save'}</Text>
                       </Pressable>
                       <Pressable
-                        onPress={() => setEditingCategoryName(null)}
+                        onPress={() => runAfterKeyboardDismiss(() => setEditingCategoryName(null))}
                         style={[styles.button, styles.secondaryButton, { flex: 1 }]}
                       >
                         <Text style={[styles.buttonText, styles.secondaryButtonText]}>Cancel</Text>
@@ -336,7 +355,10 @@ export default function CategorySettingsScreen() {
                   </View>
                 ) : null}
 
-                <Pressable onPress={() => confirmDeleteCategory(category)} style={[styles.button, styles.dangerButton]}>
+                <Pressable
+                  onPress={() => runAfterKeyboardDismiss(() => confirmDeleteCategory(category))}
+                  style={[styles.button, styles.dangerButton]}
+                >
                   <Text style={styles.buttonText}>Delete</Text>
                 </Pressable>
               </View>
@@ -349,16 +371,19 @@ export default function CategorySettingsScreen() {
         <View style={{ gap: 10 }}>
           <Text style={styles.label}>New Category</Text>
           <TextInput
+            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             onChangeText={setNewCategoryName}
             placeholder="Example: Coffee"
+            returnKeyType="done"
             style={styles.input}
+            submitBehavior="blurAndSubmit"
             value={newCategoryName}
           />
-          <Pressable disabled={savingCategory} onPress={addCategory} style={styles.button}>
+          <Pressable disabled={savingCategory} onPress={() => runAfterKeyboardDismiss(addCategory)} style={styles.button}>
             <Text style={styles.buttonText}>{savingCategory ? 'Adding...' : 'Add'}</Text>
           </Pressable>
         </View>
       </BentoCard>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

@@ -40,6 +40,8 @@
 
 ## 本地运行
 
+`npm run ios` 和 `npm run android` 会执行 native build，需要本机已配置 Xcode 或 Android Studio。只想用 Expo Go 预览时使用 `npm start`。
+
 ```bash
 npm install
 npm run typecheck
@@ -58,3 +60,4 @@ npm start
 - 当前版本仅支持日元，不做多币种。
 - 当前删除为硬删除。
 - 为避开当前依赖中的 Hermes 动态 import 编译问题，App 显式使用 JSC：见 `app.json` 的 `jsEngine` 配置。
+- `postinstall` 会在已知受影响的 `@supabase/supabase-js` 版本中移除可选 OTEL dynamic import；升级 Supabase 后应复查并删除该 workaround。

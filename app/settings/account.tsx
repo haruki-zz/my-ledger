@@ -1,10 +1,13 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 
+import { KEYBOARD_DONE_ACCESSORY_ID } from '@/src/components/KeyboardDoneAccessory';
+import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
+import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { getErrorMessage, getLedgerMembers, updateMyProfile } from '@/src/lib/ledger';
 import { supabase } from '@/src/lib/supabase';
 
@@ -81,7 +84,7 @@ export default function AccountSettingsScreen() {
   }
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollView
       refreshControl={<RefreshControl refreshing={ledgerLoading || loadingProfile} onRefresh={refresh} />}
       style={styles.page}
       contentContainerStyle={styles.content}
@@ -96,8 +99,15 @@ export default function AccountSettingsScreen() {
       <BentoCard variant="form">
         <Text style={styles.h2}>Profile</Text>
         <Text style={styles.label}>Display Name</Text>
-        <TextInput onChangeText={setDisplayNameInput} style={styles.input} value={displayNameInput} />
-        <Pressable disabled={savingProfile} onPress={saveProfile} style={styles.button}>
+        <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+          onChangeText={setDisplayNameInput}
+          returnKeyType="done"
+          style={styles.input}
+          submitBehavior="blurAndSubmit"
+          value={displayNameInput}
+        />
+        <Pressable disabled={savingProfile} onPress={() => runAfterKeyboardDismiss(saveProfile)} style={styles.button}>
           <Text style={styles.buttonText}>{savingProfile ? 'Saving...' : 'Save Name'}</Text>
         </Pressable>
 
@@ -106,7 +116,7 @@ export default function AccountSettingsScreen() {
           <Text style={styles.body}>{user?.email || 'Not set'}</Text>
         </View>
 
-        <Pressable onPress={signOut} style={[styles.button, styles.secondaryButton]}>
+        <Pressable onPress={() => runAfterKeyboardDismiss(signOut)} style={[styles.button, styles.secondaryButton]}>
           <Text style={[styles.buttonText, styles.secondaryButtonText]}>Sign Out</Text>
         </Pressable>
       </BentoCard>
@@ -115,10 +125,10 @@ export default function AccountSettingsScreen() {
         <Text style={styles.h2}>Current Ledger</Text>
         <Text style={styles.body}>{ledger?.name || 'No ledger selected'}</Text>
         <Text style={styles.muted}>Use ledger management to create, join, switch, or delete ledgers.</Text>
-        <Pressable onPress={() => router.push('/settings/ledgers')} style={styles.button}>
+        <Pressable onPress={() => runAfterKeyboardDismiss(() => router.push('/settings/ledgers'))} style={styles.button}>
           <Text style={styles.buttonText}>Open Ledger Management</Text>
         </Pressable>
       </BentoCard>
-    </ScrollView>
+    </KeyboardAwareScrollView>
   );
 }

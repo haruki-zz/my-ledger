@@ -1,10 +1,13 @@
 import { router, Redirect } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from 'react-native';
 
+import { KEYBOARD_DONE_ACCESSORY_ID } from '@/src/components/KeyboardDoneAccessory';
+import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { styles } from '@/src/components/styles';
 import { BentoCard, PillTabs } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
+import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { supabase } from '@/src/lib/supabase';
 
 export default function AuthScreen() {
@@ -73,66 +76,70 @@ export default function AuthScreen() {
   }
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.page}
-    >
-      <View style={styles.content}>
-        <View>
-          <Text style={styles.title}>Shared Expense Ledger</Text>
-          <Text style={styles.muted}>Sync daily expenses with Supabase.</Text>
-        </View>
+    <KeyboardAwareScrollView style={styles.page} contentContainerStyle={styles.content}>
+      <View>
+        <Text style={styles.title}>Shared Expense Ledger</Text>
+        <Text style={styles.muted}>Sync daily expenses with Supabase.</Text>
+      </View>
 
-        <PillTabs
-          accessibilityLabel="Auth mode"
-          onChange={setMode}
-          options={[
-            { label: 'Sign In', value: 'signIn' },
-            { label: 'Sign Up', value: 'signUp' }
-          ]}
-          value={mode}
+      <PillTabs
+        accessibilityLabel="Auth mode"
+        onChange={(nextMode) => runAfterKeyboardDismiss(() => setMode(nextMode))}
+        options={[
+          { label: 'Sign In', value: 'signIn' },
+          { label: 'Sign Up', value: 'signUp' }
+        ]}
+        value={mode}
+      />
+
+      <BentoCard variant="form">
+        {mode === 'signUp' ? (
+          <>
+            <Text style={styles.label}>Display Name</Text>
+            <TextInput
+              autoCapitalize="none"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+              onChangeText={setDisplayName}
+              placeholder="Example: Alex"
+              returnKeyType="done"
+              style={styles.input}
+              submitBehavior="blurAndSubmit"
+              value={displayName}
+            />
+          </>
+        ) : null}
+
+        <Text style={styles.label}>Email</Text>
+        <TextInput
+          autoCapitalize="none"
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+          inputMode="email"
+          onChangeText={setEmail}
+          placeholder="you@example.com"
+          returnKeyType="done"
+          style={styles.input}
+          submitBehavior="blurAndSubmit"
+          value={email}
         />
 
-        <BentoCard variant="form">
-          {mode === 'signUp' ? (
-            <>
-              <Text style={styles.label}>Display Name</Text>
-              <TextInput
-                autoCapitalize="none"
-                onChangeText={setDisplayName}
-                placeholder="Example: Alex"
-                style={styles.input}
-                value={displayName}
-              />
-            </>
-          ) : null}
+        <Text style={styles.label}>Password</Text>
+        <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+          onChangeText={setPassword}
+          placeholder="At least 6 characters"
+          returnKeyType="done"
+          secureTextEntry
+          style={styles.input}
+          submitBehavior="blurAndSubmit"
+          value={password}
+        />
 
-          <Text style={styles.label}>Email</Text>
-          <TextInput
-            autoCapitalize="none"
-            inputMode="email"
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            style={styles.input}
-            value={email}
-          />
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            onChangeText={setPassword}
-            placeholder="At least 6 characters"
-            secureTextEntry
-            style={styles.input}
-            value={password}
-          />
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <Pressable disabled={submitting} onPress={submit} style={styles.button}>
-            <Text style={styles.buttonText}>{submitting ? 'Submitting...' : mode === 'signIn' ? 'Sign In' : 'Sign Up'}</Text>
-          </Pressable>
-        </BentoCard>
-      </View>
-    </KeyboardAvoidingView>
+        <Pressable disabled={submitting} onPress={() => runAfterKeyboardDismiss(submit)} style={styles.button}>
+          <Text style={styles.buttonText}>{submitting ? 'Submitting...' : mode === 'signIn' ? 'Sign In' : 'Sign Up'}</Text>
+        </Pressable>
+      </BentoCard>
+    </KeyboardAwareScrollView>
   );
 }
