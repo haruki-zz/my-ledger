@@ -1,5 +1,5 @@
 import { Text, View } from 'react-native';
-import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
@@ -7,8 +7,11 @@ import type { MonthlyCategoryTrendStat } from '@/src/lib/stats';
 
 type CategoryMonthlyTrendChartProps = {
   color: string;
+  mode: CategoryMonthlyTrendChartMode;
   series: MonthlyCategoryTrendStat[];
 };
+
+export type CategoryMonthlyTrendChartMode = 'curve' | 'bar';
 
 const WIDTH = 320;
 const HEIGHT = 210;
@@ -19,7 +22,7 @@ const PADDING_BOTTOM = 38;
 const PLOT_WIDTH = WIDTH - PADDING_LEFT - PADDING_RIGHT;
 const PLOT_HEIGHT = HEIGHT - PADDING_TOP - PADDING_BOTTOM;
 
-export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTrendChartProps) {
+export function CategoryMonthlyTrendChart({ color, mode, series }: CategoryMonthlyTrendChartProps) {
   const maxAmount = Math.max(0, ...series.map((item) => item.amountYen));
   if (series.length === 0 || maxAmount <= 0) {
     return (
@@ -29,15 +32,14 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
     );
   }
 
-  const points = series.map((item, index) => {
-    const x = PADDING_LEFT + (series.length === 1 ? PLOT_WIDTH / 2 : (index / (series.length - 1)) * PLOT_WIDTH);
-    const ratio = item.amountYen / maxAmount;
-    const y = clamp(PADDING_TOP + PLOT_HEIGHT - ratio * PLOT_HEIGHT, PADDING_TOP, PADDING_TOP + PLOT_HEIGHT);
-    return { ...item, x, y };
-  });
   const baseline = PADDING_TOP + PLOT_HEIGHT;
+  const points = mode === 'bar'
+    ? buildBarPoints(series, maxAmount)
+    : buildCurvePoints(series, maxAmount);
   const labelIndexes = labelIndexSet(series.length);
-  const valueIndexes = valueIndexSet(points, labelIndexes, maxAmount);
+  const valueIndexes = mode === 'curve' ? valueIndexSet(points, labelIndexes, maxAmount) : [];
+  const barSlotWidth = mode === 'bar' ? PLOT_WIDTH / series.length : 0;
+  const barWidth = Math.max(3, Math.min(18, barSlotWidth * 0.58));
 
   return (
     <View style={{ gap: 8 }}>
@@ -51,19 +53,35 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
           ¥0
         </SvgText>
 
-        <Path d={buildCurvePath(points)} fill="none" stroke={color} strokeLinecap="round" strokeWidth={3} />
+        {mode === 'bar' ? (
+          points.map((point) => (
+            <Rect
+              fill={color}
+              height={baseline - point.y}
+              key={point.monthKey}
+              rx={3}
+              width={barWidth}
+              x={point.x - barWidth / 2}
+              y={point.y}
+            />
+          ))
+        ) : (
+          <>
+            <Path d={buildCurvePath(points)} fill="none" stroke={color} strokeLinecap="round" strokeWidth={3} />
 
-        {points.map((point) => (
-          <Circle
-            cx={point.x}
-            cy={point.y}
-            fill={colors.surface}
-            key={point.monthKey}
-            r={4}
-            stroke={color}
-            strokeWidth={2}
-          />
-        ))}
+            {points.map((point) => (
+              <Circle
+                cx={point.x}
+                cy={point.y}
+                fill={colors.surface}
+                key={point.monthKey}
+                r={4}
+                stroke={color}
+                strokeWidth={2}
+              />
+            ))}
+          </>
+        )}
 
         {valueIndexes.map((index) => (
           <SvgText
@@ -95,6 +113,26 @@ export function CategoryMonthlyTrendChart({ color, series }: CategoryMonthlyTren
       </Svg>
     </View>
   );
+}
+
+function buildCurvePoints(series: MonthlyCategoryTrendStat[], maxAmount: number) {
+  return series.map((item, index) => {
+    const x = PADDING_LEFT + (series.length === 1 ? PLOT_WIDTH / 2 : (index / (series.length - 1)) * PLOT_WIDTH);
+    const ratio = item.amountYen / maxAmount;
+    const y = clamp(PADDING_TOP + PLOT_HEIGHT - ratio * PLOT_HEIGHT, PADDING_TOP, PADDING_TOP + PLOT_HEIGHT);
+    return { ...item, x, y };
+  });
+}
+
+function buildBarPoints(series: MonthlyCategoryTrendStat[], maxAmount: number) {
+  const barSlotWidth = PLOT_WIDTH / series.length;
+
+  return series.map((item, index) => {
+    const x = PADDING_LEFT + barSlotWidth * index + barSlotWidth / 2;
+    const ratio = item.amountYen / maxAmount;
+    const y = clamp(PADDING_TOP + PLOT_HEIGHT - ratio * PLOT_HEIGHT, PADDING_TOP, PADDING_TOP + PLOT_HEIGHT);
+    return { ...item, x, y };
+  });
 }
 
 function buildCurvePath(points: { x: number; y: number }[]) {

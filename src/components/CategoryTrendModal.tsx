@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Animated, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
-import { CategoryMonthlyTrendChart } from '@/src/components/CategoryMonthlyTrendChart';
+import {
+  CategoryMonthlyTrendChart,
+  type CategoryMonthlyTrendChartMode
+} from '@/src/components/CategoryMonthlyTrendChart';
 import type { AnchorPoint } from '@/src/components/PieChart';
 import { colors, styles, theme } from '@/src/components/styles';
+import { PillTabs } from '@/src/components/ui';
 import { useCategoryTrend } from '@/src/hooks/useCategoryTrend';
 import { currentMonthKey, formatMonthLabel, type CategoryStat, type DashboardRange } from '@/src/lib/stats';
 
-type TrendMonths = 3 | 6 | 12;
+type TrendMonths = '3' | '6' | '12';
 
 type CategoryTrendModalProps = {
   visible: boolean;
@@ -23,10 +27,21 @@ type CategoryTrendModalProps = {
 };
 
 const TREND_RANGE_OPTIONS: { label: string; value: TrendMonths }[] = [
-  { label: 'Last 3 Months', value: 3 },
-  { label: 'Last 6 Months', value: 6 },
-  { label: 'Last 12 Months', value: 12 }
+  { label: '3M', value: '3' },
+  { label: '6M', value: '6' },
+  { label: '12M', value: '12' }
 ];
+
+const TREND_MODE_OPTIONS: { label: string; value: CategoryMonthlyTrendChartMode }[] = [
+  { label: 'Curve', value: 'curve' },
+  { label: 'Bar', value: 'bar' }
+];
+
+const TREND_MONTH_COUNTS: Record<TrendMonths, 3 | 6 | 12> = {
+  3: 3,
+  6: 6,
+  12: 12
+};
 
 export function CategoryTrendModal({
   visible,
@@ -41,13 +56,12 @@ export function CategoryTrendModal({
   onClose
 }: CategoryTrendModalProps) {
   const { height, width } = useWindowDimensions();
-  const [trendMonths, setTrendMonths] = useState<TrendMonths>(3);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [trendMonths, setTrendMonths] = useState<TrendMonths>('3');
+  const [trendChartMode, setTrendChartMode] = useState<CategoryMonthlyTrendChartMode>('curve');
   const [rendered, setRendered] = useState(visible);
   const [displayCategory, setDisplayCategory] = useState<CategoryStat | null>(category);
   const [displayAnchorPoint, setDisplayAnchorPoint] = useState<AnchorPoint | undefined>(anchorPoint);
   const [transitionProgress] = useState(() => new Animated.Value(0));
-  const selectedOption = TREND_RANGE_OPTIONS.find((option) => option.value === trendMonths) || TREND_RANGE_OPTIONS[0];
   const isCurrentMonthTrend = endMonthKey === currentMonthKey();
   const originOffset = useMemo(
     () => modalOriginOffset(displayAnchorPoint, width, height),
@@ -57,7 +71,7 @@ export function CategoryTrendModal({
     ledgerId,
     category: rendered ? displayCategory?.category || null : null,
     endMonthKey,
-    months: trendMonths,
+    months: TREND_MONTH_COUNTS[trendMonths],
     range,
     currentUserId,
     otherUserId,
@@ -72,8 +86,8 @@ export function CategoryTrendModal({
     transitionProgress.stopAnimation();
     setDisplayCategory(category);
     setDisplayAnchorPoint(anchorPoint);
-    setTrendMonths(3);
-    setMenuOpen(false);
+    setTrendMonths('3');
+    setTrendChartMode('curve');
     setRendered(true);
     transitionProgress.setValue(0);
     Animated.timing(transitionProgress, {
@@ -101,11 +115,6 @@ export function CategoryTrendModal({
       }
     });
   }, [rendered, transitionProgress, visible]);
-
-  function selectTrendMonths(nextMonths: TrendMonths) {
-    setTrendMonths(nextMonths);
-    setMenuOpen(false);
-  }
 
   const overlayAnimatedStyle = {
     opacity: transitionProgress
@@ -146,34 +155,28 @@ export function CategoryTrendModal({
                 {isCurrentMonthTrend ? <Text style={styles.muted}>Current month data is through today</Text> : null}
               </View>
 
-              <View style={styles.dropdown}>
-                <Text style={styles.label}>Time Range</Text>
-                <Pressable
-                  onPress={() => setMenuOpen((current) => !current)}
-                  style={[styles.dropdownTrigger, menuOpen && styles.dropdownTriggerActive]}
-                >
-                  <Text style={styles.dropdownValue}>{selectedOption.label}</Text>
-                  <Text style={styles.dropdownIndicator}>{menuOpen ? '⌃' : '⌄'}</Text>
-                </Pressable>
+              <View style={modalStyles.controls}>
+                <View style={modalStyles.controlGroup}>
+                  <Text style={styles.label}>Time Range</Text>
+                  <PillTabs
+                    accessibilityLabel="Trend time range"
+                    onChange={setTrendMonths}
+                    options={TREND_RANGE_OPTIONS}
+                    style={modalStyles.rangePillTrack}
+                    value={trendMonths}
+                  />
+                </View>
 
-                {menuOpen ? (
-                  <View style={styles.dropdownMenu}>
-                    {TREND_RANGE_OPTIONS.map((option) => {
-                      const selected = option.value === trendMonths;
-                      return (
-                        <Pressable
-                          key={option.value}
-                          onPress={() => selectTrendMonths(option.value)}
-                          style={[styles.dropdownOption, selected && styles.dropdownOptionActive]}
-                        >
-                          <Text style={[styles.dropdownOptionText, selected && styles.dropdownOptionTextActive]}>
-                            {option.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                ) : null}
+                <View style={modalStyles.controlGroup}>
+                  <Text style={styles.label}>Chart</Text>
+                  <PillTabs
+                    accessibilityLabel="Trend chart type"
+                    onChange={setTrendChartMode}
+                    options={TREND_MODE_OPTIONS}
+                    style={modalStyles.modePillTrack}
+                    value={trendChartMode}
+                  />
+                </View>
               </View>
 
               {trend.error ? <Text style={styles.error}>{trend.error}</Text> : null}
@@ -186,7 +189,11 @@ export function CategoryTrendModal({
                   </View>
                 ) : null}
                 <View style={trend.loading ? modalStyles.chartRefreshing : null}>
-                  <CategoryMonthlyTrendChart color={displayCategory?.color || colors.primary} series={trend.series} />
+                  <CategoryMonthlyTrendChart
+                    color={displayCategory?.color || colors.primary}
+                    mode={trendChartMode}
+                    series={trend.series}
+                  />
                 </View>
               </View>
             </Animated.View>
@@ -226,11 +233,24 @@ const modalStyles = StyleSheet.create({
   chartRefreshing: {
     opacity: 0.4
   },
+  controlGroup: {
+    flex: 1,
+    gap: 8,
+    minWidth: 150
+  },
+  controls: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12
+  },
   loading: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
     marginBottom: 8
+  },
+  modePillTrack: {
+    minWidth: 132,
   },
   overlay: {
     backgroundColor: 'rgba(23, 32, 42, 0.36)',
@@ -250,5 +270,8 @@ const modalStyles = StyleSheet.create({
   panelHitArea: {
     maxWidth: 440,
     width: '100%'
+  },
+  rangePillTrack: {
+    minWidth: 150,
   }
 });
