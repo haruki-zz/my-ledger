@@ -46,7 +46,7 @@ export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [range, setRange] = useState<DashboardRange>('all');
-  const [chartMode, setChartMode] = useState<DailyChartMode>('curve');
+  const [chartMode, setChartMode] = useState<DailyChartMode>('bar');
   const [selectedCategory, setSelectedCategory] = useState<SelectedCategoryState | null>(null);
   const [drillProgress] = useState(() => new Animated.Value(1));
   const {

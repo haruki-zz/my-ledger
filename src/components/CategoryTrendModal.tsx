@@ -57,7 +57,7 @@ export function CategoryTrendModal({
 }: CategoryTrendModalProps) {
   const { height, width } = useWindowDimensions();
   const [trendMonths, setTrendMonths] = useState<TrendMonths>('3');
-  const [trendChartMode, setTrendChartMode] = useState<CategoryMonthlyTrendChartMode>('curve');
+  const [trendChartMode, setTrendChartMode] = useState<CategoryMonthlyTrendChartMode>('bar');
   const [rendered, setRendered] = useState(visible);
   const [displayCategory, setDisplayCategory] = useState<CategoryStat | null>(category);
   const [displayAnchorPoint, setDisplayAnchorPoint] = useState<AnchorPoint | undefined>(anchorPoint);
@@ -87,7 +87,7 @@ export function CategoryTrendModal({
     setDisplayCategory(category);
     setDisplayAnchorPoint(anchorPoint);
     setTrendMonths('3');
-    setTrendChartMode('curve');
+    setTrendChartMode('bar');
     setRendered(true);
     transitionProgress.setValue(0);
     Animated.timing(transitionProgress, {

@@ -12,14 +12,18 @@ type PieChartProps = {
   layout?: 'vertical' | 'horizontal';
 };
 
-type DisplayCategoryStat = CategoryStat & {
-  aggregate?: boolean;
+type PieSegment = CategoryStat & {
+  dashOffset: number;
+  segmentLength: number;
 };
 
 export type AnchorPoint = {
   x: number;
   y: number;
 };
+
+const MAX_LEGEND_CATEGORIES = 5;
+const SEGMENT_GAP_LENGTH = 2;
 
 export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vertical' }: PieChartProps) {
   if (totalYen <= 0 || categories.length === 0) {
@@ -37,24 +41,9 @@ export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vert
   const strokeWidth = outerRadius - innerRadius;
   const strokeRadius = (outerRadius + innerRadius) / 2;
   const circumference = 2 * Math.PI * strokeRadius;
-  const displayCategories = compactCategories(categories);
-  const segments = displayCategories.reduce<{
-    cumulativeLength: number;
-    items: (DisplayCategoryStat & { dashOffset: number; segmentLength: number })[];
-  }>((state, category) => {
-    const segmentLength = (category.amountYen / totalYen) * circumference;
-    return {
-      cumulativeLength: state.cumulativeLength + segmentLength,
-      items: [
-        ...state.items,
-        {
-          ...category,
-          dashOffset: circumference / 4 - state.cumulativeLength,
-          segmentLength
-        }
-      ]
-    };
-  }, { cumulativeLength: 0, items: [] }).items;
+  const legendCategories = categories.slice(0, MAX_LEGEND_CATEGORIES);
+  const hiddenCategoryCount = categories.length - legendCategories.length;
+  const segments = buildSegments(categories, totalYen, circumference);
 
   function handleCategoryPress(category: CategoryStat, event: GestureResponderEvent) {
     const { pageX, pageY } = event.nativeEvent;
@@ -90,7 +79,7 @@ export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vert
                 stroke={segment.color}
                 strokeDasharray={`${segment.segmentLength} ${circumference - segment.segmentLength}`}
                 strokeDashoffset={segment.dashOffset}
-                strokeLinecap="butt"
+                strokeLinecap="round"
                 strokeWidth={strokeWidth}
               />
             ))
@@ -100,67 +89,69 @@ export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vert
       </View>
 
       <View style={layout === 'horizontal' ? chartStyles.compactLegend : chartStyles.legend}>
-        {displayCategories.map((category) => {
-          const disabled = !onCategoryPress || Boolean(category.aggregate);
+        {legendCategories.map((category) => {
+          const disabled = !onCategoryPress;
           return (
-          <Pressable
-            disabled={disabled}
-            hitSlop={4}
-            key={`${category.category}-${category.color}`}
-            onPress={(event) => handleCategoryPress(category, event)}
-            style={({ pressed }) => [
-              styles.between,
-              chartStyles.categoryRow,
-              pressed && !disabled && chartStyles.categoryRowPressed
-            ]}
-          >
-            <View style={chartStyles.legendName}>
-              <View
-                style={{
-                  backgroundColor: category.color,
-                  borderRadius: 4,
-                  height: 12,
-                  marginTop: 4,
-                  width: 12
-                }}
-              />
-              <Text ellipsizeMode="tail" numberOfLines={1} style={layout === 'horizontal' ? chartStyles.compactLegendText : styles.body}>
-                {category.category}
+            <Pressable
+              disabled={disabled}
+              hitSlop={4}
+              key={`${category.category}-${category.color}`}
+              onPress={(event) => handleCategoryPress(category, event)}
+              style={({ pressed }) => [
+                styles.between,
+                chartStyles.categoryRow,
+                pressed && !disabled && chartStyles.categoryRowPressed
+              ]}
+            >
+              <View style={chartStyles.legendName}>
+                <View
+                  style={{
+                    backgroundColor: category.color,
+                    borderRadius: 4,
+                    height: 12,
+                    marginTop: 4,
+                    width: 12
+                  }}
+                />
+                <Text ellipsizeMode="tail" numberOfLines={1} style={layout === 'horizontal' ? chartStyles.compactLegendText : styles.body}>
+                  {category.category}
+                </Text>
+              </View>
+              <Text style={layout === 'horizontal' ? chartStyles.compactPercentage : chartStyles.amountText}>
+                {layout === 'horizontal' ? `${category.percentage.toFixed(1)}%` : formatYen(category.amountYen)}
               </Text>
-            </View>
-            <Text style={layout === 'horizontal' ? chartStyles.compactPercentage : chartStyles.amountText}>
-              {layout === 'horizontal' ? `${category.percentage.toFixed(1)}%` : formatYen(category.amountYen)}
-            </Text>
-          </Pressable>
+            </Pressable>
           );
         })}
+        {hiddenCategoryCount > 0 ? (
+          <View style={chartStyles.moreRow}>
+            <Text style={layout === 'horizontal' ? chartStyles.compactMoreText : chartStyles.moreText}>
+              +{hiddenCategoryCount} more
+            </Text>
+          </View>
+        ) : null}
       </View>
     </View>
   );
 }
 
-function compactCategories(categories: CategoryStat[]): DisplayCategoryStat[] {
-  if (categories.length <= 5) {
-    return categories;
+function buildSegments(categories: CategoryStat[], totalYen: number, circumference: number): PieSegment[] {
+  const segments: PieSegment[] = [];
+  const gapLength = categories.length > 1 ? SEGMENT_GAP_LENGTH : 0;
+  let cumulativeLength = 0;
+
+  for (const category of categories) {
+    const rawSegmentLength = (category.amountYen / totalYen) * circumference;
+    segments.push({
+      ...category,
+      dashOffset: circumference / 4 - cumulativeLength,
+      segmentLength: Math.max(0, rawSegmentLength - gapLength)
+    });
+    cumulativeLength += rawSegmentLength;
   }
 
-  const visibleCategories = categories.slice(0, 4);
-  const otherCategories = categories.slice(4);
-  const otherAmount = otherCategories.reduce((sum, category) => sum + category.amountYen, 0);
-  const otherPercentage = otherCategories.reduce((sum, category) => sum + category.percentage, 0);
-
-  return [
-    ...visibleCategories,
-    {
-      amountYen: otherAmount,
-      aggregate: true,
-      category: 'Other',
-      color: colors.subtle,
-      percentage: otherPercentage
-    }
-  ];
+  return segments;
 }
-
 
 const chartStyles = StyleSheet.create({
   amountText: {
@@ -192,6 +183,13 @@ const chartStyles = StyleSheet.create({
     fontWeight: '800',
     lineHeight: 18
   },
+  compactMoreText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18
+  },
   compactPercentage: {
     color: colors.muted,
     fontFamily: fontFamilies.extraBold,
@@ -212,6 +210,16 @@ const chartStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     minWidth: 0
+  },
+  moreRow: {
+    paddingHorizontal: 6,
+    paddingVertical: 2
+  },
+  moreText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 14,
+    fontWeight: '800'
   },
   verticalChart: {
     gap: 16
