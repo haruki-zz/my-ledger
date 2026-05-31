@@ -9,6 +9,7 @@ import type { AnchorPoint } from '@/src/components/PieChart';
 import { colors, styles, theme } from '@/src/components/styles';
 import { PillTabs } from '@/src/components/ui';
 import { useCategoryTrend } from '@/src/hooks/useCategoryTrend';
+import { clamp } from '@/src/lib/math';
 import { currentMonthKey, formatMonthLabel, type CategoryStat, type DashboardRange } from '@/src/lib/stats';
 
 type TrendMonths = '3' | '6' | '12';
@@ -216,10 +217,6 @@ function modalOriginOffset(anchorPoint: AnchorPoint | undefined, width: number, 
     x: clamp(offsetX, -36, 36),
     y: clamp(offsetY, -44, 44)
   };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(value, min));
 }
 
 const modalStyles = StyleSheet.create({

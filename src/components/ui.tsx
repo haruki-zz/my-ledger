@@ -2,13 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
-  Alert,
   PanResponder,
   Pressable,
   StyleSheet,
   Text,
   View,
-  type ColorValue,
+  type GestureResponderEvent,
   type LayoutChangeEvent,
   type PanResponderInstance,
   type AccessibilityActionEvent,
@@ -18,7 +17,21 @@ import {
   type ViewStyle
 } from 'react-native';
 
+import {
+  ExpenseContextMenu,
+  type ExpenseContextMenuCard,
+  type ExpenseContextMenuPoint,
+  type ExpenseContextMenuRect
+} from '@/src/components/ExpenseContextMenu';
+import {
+  EXPENSE_ROW_CARD_MIN_HEIGHT,
+  ExpenseRowCardContent,
+  type ExpenseBadge
+} from '@/src/components/ExpenseRowCardContent';
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { tintFromAccent } from '@/src/lib/color';
+
+export type { ExpenseBadge } from '@/src/components/ExpenseRowCardContent';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -58,7 +71,7 @@ type IconButtonProps = {
 };
 
 type MetricTileProps = {
-  accent?: ColorValue;
+  accent?: string;
   helper?: string;
   icon?: IoniconName;
   label: string;
@@ -67,7 +80,7 @@ type MetricTileProps = {
 };
 
 type SettingsActionRowProps = {
-  accent?: ColorValue;
+  accent?: string;
   description?: string;
   disabled?: boolean;
   icon: IoniconName;
@@ -92,12 +105,6 @@ type FilterChipProps = {
   onPress: () => void;
 };
 
-export type ExpenseBadge = {
-  accent: string;
-  id: string;
-  label: string;
-};
-
 type SwipeExpenseRowProps = {
   amount: string;
   badges: ExpenseBadge[];
@@ -107,10 +114,17 @@ type SwipeExpenseRowProps = {
   onEdit: () => void;
 };
 
+type ExpenseContextMenuState = {
+  card: ExpenseContextMenuCard;
+  rowRect: ExpenseContextMenuRect;
+  touchPoint: ExpenseContextMenuPoint;
+};
+
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const SWIPE_ACTION_WIDTH = 96;
 const SWIPE_TRIGGER_DISTANCE = SWIPE_ACTION_WIDTH * 0.9;
 const SWIPE_MAX_TRANSLATE = SWIPE_ACTION_WIDTH + 20;
+const LONG_PRESS_DELAY_MS = 360;
 
 export function GlassSurface({ children, style, ...viewProps }: GlassSurfaceProps) {
   return (
@@ -347,6 +361,8 @@ export function SwipeExpenseRow({
 }: SwipeExpenseRowProps) {
   const [translateX] = useState(() => new Animated.Value(0));
   const [responder, setResponder] = useState<PanResponderInstance | null>(null);
+  const [contextMenu, setContextMenu] = useState<ExpenseContextMenuState | null>(null);
+  const rowRef = useRef<View | null>(null);
   const onDeleteRef = useRef(onDelete);
   const onEditRef = useRef(onEdit);
 
@@ -394,12 +410,36 @@ export function SwipeExpenseRow({
     }));
   }, [translateX]);
 
-  function handleLongPress() {
-    Alert.alert(`${category} · ${dateLabel}`, 'Choose an action for this expense.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Edit', onPress: () => onEditRef.current() },
-      { text: 'Delete', onPress: () => onDeleteRef.current(), style: 'destructive' }
-    ]);
+  function handleLongPress(event: GestureResponderEvent) {
+    const touchPoint = {
+      x: event.nativeEvent.pageX,
+      y: event.nativeEvent.pageY
+    };
+    const card = { amount, badges, category, dateLabel };
+    const row = rowRef.current;
+
+    if (!row) {
+      resetSwipe(translateX);
+      setContextMenu({
+        card,
+        rowRect: fallbackRect(touchPoint),
+        touchPoint
+      });
+      return;
+    }
+
+    row.measureInWindow((x, y, width, height) => {
+      const measuredRect = isValidRect(x, y, width, height)
+        ? { height, width, x, y }
+        : fallbackRect(touchPoint);
+
+      resetSwipe(translateX);
+      setContextMenu({
+        card,
+        rowRect: measuredRect,
+        touchPoint
+      });
+    });
   }
 
   function handleAccessibilityAction(event: AccessibilityActionEvent) {
@@ -415,7 +455,7 @@ export function SwipeExpenseRow({
   const badgeLabels = badges.map((badge) => badge.label).join(', ');
 
   return (
-    <View style={uiStyles.swipeShell}>
+    <View collapsable={false} ref={rowRef} style={uiStyles.swipeShell}>
       <View style={uiStyles.swipeActionLayer}>
         <View style={[uiStyles.swipeAction, uiStyles.swipeActionEdit]}>
           <Ionicons color="#FFFFFF" name="create-outline" size={22} />
@@ -432,6 +472,7 @@ export function SwipeExpenseRow({
         accessibilityLabel={`${category}, ${dateLabel}, ${amount}, ${badgeLabels}`}
         accessibilityRole="button"
         onAccessibilityAction={handleAccessibilityAction}
+        delayLongPress={LONG_PRESS_DELAY_MS}
         onLongPress={handleLongPress}
         {...(responder?.panHandlers || {})}
         style={[
@@ -441,39 +482,23 @@ export function SwipeExpenseRow({
           }
         ]}
       >
-        <View style={uiStyles.swipeContent}>
-          <View style={uiStyles.swipeTextBlock}>
-            <View style={uiStyles.swipeTitleRow}>
-              <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeCategory}>
-                {category}
-              </Text>
-              <Text style={uiStyles.swipeDateSeparator}>·</Text>
-              <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeDate}>
-                {dateLabel}
-              </Text>
-            </View>
-            <View style={uiStyles.expenseBadgeRow}>
-              {badges.map((badge) => (
-                <View
-                  key={badge.id}
-                  style={[uiStyles.expenseBadge, { backgroundColor: tintFromAccent(badge.accent) }]}
-                >
-                  <Text
-                    ellipsizeMode="tail"
-                    numberOfLines={1}
-                    style={[uiStyles.expenseBadgeText, { color: badge.accent }]}
-                  >
-                    {badge.label}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={uiStyles.swipeAmount}>
-            {amount}
-          </Text>
-        </View>
+        <ExpenseRowCardContent
+          amount={amount}
+          badges={badges}
+          category={category}
+          dateLabel={dateLabel}
+        />
       </AnimatedPressable>
+      {contextMenu ? (
+        <ExpenseContextMenu
+          card={contextMenu.card}
+          onClose={() => setContextMenu(null)}
+          onDelete={() => onDeleteRef.current()}
+          onEdit={() => onEditRef.current()}
+          rowRect={contextMenu.rowRect}
+          touchPoint={contextMenu.touchPoint}
+        />
+      ) : null}
     </View>
   );
 }
@@ -518,23 +543,6 @@ function actionColorFor(tone: SettingsActionRowProps['tone']) {
   return colors.primaryDark;
 }
 
-function tintFromAccent(accent: ColorValue) {
-  if (typeof accent !== 'string') {
-    return colors.tint;
-  }
-
-  const match = /^#([0-9a-fA-F]{6})$/.exec(accent);
-  if (!match) {
-    return colors.tint;
-  }
-
-  const [, hex] = match;
-  const red = Number.parseInt(hex.slice(0, 2), 16);
-  const green = Number.parseInt(hex.slice(2, 4), 16);
-  const blue = Number.parseInt(hex.slice(4, 6), 16);
-  return `rgba(${red},${green},${blue},0.10)`;
-}
-
 function isIntentionalHorizontalSwipe(dx: number, dy: number, vx: number, vy: number) {
   const horizontalDistance = Math.abs(dx);
   const verticalDistance = Math.abs(dy);
@@ -563,6 +571,19 @@ function resetSwipe(value: Animated.Value) {
     toValue: 0,
     useNativeDriver: true
   }).start();
+}
+
+function isValidRect(x: number, y: number, width: number, height: number) {
+  return Number.isFinite(x) && Number.isFinite(y) && width > 0 && height > 0;
+}
+
+function fallbackRect(touchPoint: ExpenseContextMenuPoint): ExpenseContextMenuRect {
+  return {
+    height: 0,
+    width: 0,
+    x: 20,
+    y: Math.max(16, touchPoint.y - EXPENSE_ROW_CARD_MIN_HEIGHT / 2)
+  };
 }
 
 const uiStyles = StyleSheet.create({
@@ -619,27 +640,6 @@ const uiStyles = StyleSheet.create({
   bentoCard_hero: {
     minHeight: 320,
     padding: 18
-  },
-  expenseBadge: {
-    flexShrink: 1,
-    backgroundColor: 'rgba(15,118,110,0.10)',
-    borderRadius: 8,
-    maxWidth: 116,
-    paddingHorizontal: 8,
-    paddingVertical: 3
-  },
-  expenseBadgeRow: {
-    flexDirection: 'row',
-    gap: 6,
-    minWidth: 0,
-    overflow: 'hidden'
-  },
-  expenseBadgeText: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 11,
-    fontWeight: '800',
-    lineHeight: 15
   },
   filterChip: {
     alignItems: 'center',
@@ -837,16 +837,6 @@ const uiStyles = StyleSheet.create({
     right: 0,
     top: 0
   },
-  swipeAmount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: 0,
-    lineHeight: 28,
-    maxWidth: 132,
-    textAlign: 'right'
-  },
   swipeCard: {
     backgroundColor: colors.surface,
     borderColor: colors.glassBorder,
@@ -856,53 +846,8 @@ const uiStyles = StyleSheet.create({
     overflow: 'hidden',
     ...theme.shadow
   },
-  swipeCategory: {
-    color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
-    flexShrink: 1,
-    fontSize: 17,
-    fontWeight: '900',
-    lineHeight: 23,
-    minWidth: 0
-  },
-  swipeContent: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between',
-    minHeight: 82,
-    paddingHorizontal: 18,
-    paddingVertical: 13
-  },
-  swipeDate: {
-    color: colors.muted,
-    fontFamily: fontFamilies.bold,
-    flexShrink: 0,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18
-  },
-  swipeDateSeparator: {
-    color: colors.muted,
-    fontFamily: fontFamilies.bold,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18
-  },
   swipeShell: {
     borderRadius: theme.radii.surface
-  },
-  swipeTextBlock: {
-    flex: 1,
-    gap: 7,
-    justifyContent: 'center',
-    minWidth: 0
-  },
-  swipeTitleRow: {
-    alignItems: 'baseline',
-    flexDirection: 'row',
-    gap: 6,
-    minWidth: 0
   }
 });
 
