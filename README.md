@@ -2,14 +2,6 @@
 
 A shared expense tracker for couples. Built with Expo React Native and Supabase.
 
-<p align="center">
-  <img src="dashboard.png" width="220" alt="Dashboard" />
-  &nbsp;&nbsp;
-  <img src="history.png" width="220" alt="History" />
-  &nbsp;&nbsp;
-  <img src="new_expense_and_settings .png" width="220" alt="New expense & Settings" />
-</p>
-
 ## Features
 
 - **Shared ledgers** - create a ledger and invite your partner with an 8-character code (max 2 members)
