@@ -92,12 +92,17 @@ type FilterChipProps = {
   onPress: () => void;
 };
 
+export type ExpenseBadge = {
+  accent: string;
+  id: string;
+  label: string;
+};
+
 type SwipeExpenseRowProps = {
   amount: string;
-  badgeLabel: string;
-  badgeTone: 'shared' | 'personal';
+  badges: ExpenseBadge[];
   category: string;
-  meta: string;
+  dateLabel: string;
   onDelete: () => void;
   onEdit: () => void;
 };
@@ -334,10 +339,9 @@ export function FilterChip({ active, label, onPress }: FilterChipProps) {
 
 export function SwipeExpenseRow({
   amount,
-  badgeLabel,
-  badgeTone,
+  badges,
   category,
-  meta,
+  dateLabel,
   onDelete,
   onEdit
 }: SwipeExpenseRowProps) {
@@ -391,7 +395,7 @@ export function SwipeExpenseRow({
   }, [translateX]);
 
   function handleLongPress() {
-    Alert.alert(category, 'Choose an action for this expense.', [
+    Alert.alert(`${category} · ${dateLabel}`, 'Choose an action for this expense.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Edit', onPress: () => onEditRef.current() },
       { text: 'Delete', onPress: () => onDeleteRef.current(), style: 'destructive' }
@@ -408,6 +412,8 @@ export function SwipeExpenseRow({
     }
   }
 
+  const badgeLabels = badges.map((badge) => badge.label).join(', ');
+
   return (
     <View style={uiStyles.swipeShell}>
       <View style={uiStyles.swipeActionLayer}>
@@ -423,7 +429,7 @@ export function SwipeExpenseRow({
           { label: 'Edit', name: 'edit' },
           { label: 'Delete', name: 'delete' }
         ]}
-        accessibilityLabel={`${category}, ${meta}, ${amount}, ${badgeLabel}`}
+        accessibilityLabel={`${category}, ${dateLabel}, ${amount}, ${badgeLabels}`}
         accessibilityRole="button"
         onAccessibilityAction={handleAccessibilityAction}
         onLongPress={handleLongPress}
@@ -437,16 +443,30 @@ export function SwipeExpenseRow({
       >
         <View style={uiStyles.swipeContent}>
           <View style={uiStyles.swipeTextBlock}>
-            <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeCategory}>
-              {category}
-            </Text>
-            <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeMeta}>
-              {meta}
-            </Text>
-            <View style={[uiStyles.expenseBadge, badgeTone === 'personal' && uiStyles.expenseBadgePersonal]}>
-              <Text style={[uiStyles.expenseBadgeText, badgeTone === 'personal' && uiStyles.expenseBadgeTextPersonal]}>
-                {badgeLabel}
+            <View style={uiStyles.swipeTitleRow}>
+              <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeCategory}>
+                {category}
               </Text>
+              <Text style={uiStyles.swipeDateSeparator}>·</Text>
+              <Text ellipsizeMode="tail" numberOfLines={1} style={uiStyles.swipeDate}>
+                {dateLabel}
+              </Text>
+            </View>
+            <View style={uiStyles.expenseBadgeRow}>
+              {badges.map((badge) => (
+                <View
+                  key={badge.id}
+                  style={[uiStyles.expenseBadge, { backgroundColor: tintFromAccent(badge.accent) }]}
+                >
+                  <Text
+                    ellipsizeMode="tail"
+                    numberOfLines={1}
+                    style={[uiStyles.expenseBadgeText, { color: badge.accent }]}
+                  >
+                    {badge.label}
+                  </Text>
+                </View>
+              ))}
             </View>
           </View>
           <Text adjustsFontSizeToFit numberOfLines={1} style={uiStyles.swipeAmount}>
@@ -601,24 +621,25 @@ const uiStyles = StyleSheet.create({
     padding: 18
   },
   expenseBadge: {
-    alignSelf: 'flex-start',
+    flexShrink: 1,
     backgroundColor: 'rgba(15,118,110,0.10)',
-    borderRadius: 9,
-    paddingHorizontal: 10,
-    paddingVertical: 4
+    borderRadius: 8,
+    maxWidth: 116,
+    paddingHorizontal: 8,
+    paddingVertical: 3
   },
-  expenseBadgePersonal: {
-    backgroundColor: 'rgba(99,102,241,0.12)'
+  expenseBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0,
+    overflow: 'hidden'
   },
   expenseBadgeText: {
     color: colors.primaryDark,
     fontFamily: fontFamilies.extraBold,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
-    lineHeight: 16
-  },
-  expenseBadgeTextPersonal: {
-    color: '#4F46E5'
+    lineHeight: 15
   },
   filterChip: {
     alignItems: 'center',
@@ -819,9 +840,10 @@ const uiStyles = StyleSheet.create({
   swipeAmount: {
     color: colors.ink,
     fontFamily: fontFamilies.extraBold,
-    fontSize: 23,
+    fontSize: 22,
     fontWeight: '900',
     letterSpacing: 0,
+    lineHeight: 28,
     maxWidth: 132,
     textAlign: 'right'
   },
@@ -830,40 +852,56 @@ const uiStyles = StyleSheet.create({
     borderColor: colors.glassBorder,
     borderRadius: theme.radii.surface,
     borderWidth: 1,
-    minHeight: 122,
+    minHeight: 82,
     overflow: 'hidden',
     ...theme.shadow
   },
   swipeCategory: {
     color: colors.ink,
     fontFamily: fontFamilies.extraBold,
-    fontSize: 20,
+    flexShrink: 1,
+    fontSize: 17,
     fontWeight: '900',
-    lineHeight: 26
+    lineHeight: 23,
+    minWidth: 0
   },
   swipeContent: {
-    alignItems: 'flex-start',
+    alignItems: 'center',
     flexDirection: 'row',
     gap: 12,
     justifyContent: 'space-between',
-    paddingBottom: 16,
-    paddingHorizontal: 22,
-    paddingTop: 18
+    minHeight: 82,
+    paddingHorizontal: 18,
+    paddingVertical: 13
   },
-  swipeMeta: {
+  swipeDate: {
+    color: colors.muted,
+    fontFamily: fontFamilies.bold,
+    flexShrink: 0,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18
+  },
+  swipeDateSeparator: {
     color: colors.muted,
     fontFamily: fontFamilies.bold,
     fontSize: 14,
     fontWeight: '700',
-    lineHeight: 20
+    lineHeight: 18
   },
   swipeShell: {
-    borderRadius: theme.radii.surface,
-    minHeight: 122
+    borderRadius: theme.radii.surface
   },
   swipeTextBlock: {
     flex: 1,
     gap: 7,
+    justifyContent: 'center',
+    minWidth: 0
+  },
+  swipeTitleRow: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 6,
     minWidth: 0
   }
 });

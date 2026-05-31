@@ -16,8 +16,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles } from '@/src/components/styles';
-import { BentoCard, FilterChip, SwipeExpenseRow } from '@/src/components/ui';
+import { BentoCard, FilterChip, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
 import { useLedgerContext } from '@/src/context/LedgerContext';
+import { CHART_PALETTE } from '@/src/lib/chartPalette';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
@@ -188,14 +189,42 @@ export default function HistoryScreen() {
     return [...userIds];
   }, [activeMemberIds, expenses]);
 
+  const sortedUserIds = useMemo(() => (
+    [...userOptionIds].sort((a, b) => {
+      const nameComparison = profileDisplayName(a).localeCompare(profileDisplayName(b));
+      return nameComparison || a.localeCompare(b);
+    })
+  ), [profileDisplayName, userOptionIds]);
+
+  const userSortOrderById = useMemo(() => (
+    new Map(sortedUserIds.map((userId, index) => [userId, index]))
+  ), [sortedUserIds]);
+
+  const userColorById = useMemo(() => {
+    const usedPaletteIndexes = new Set<number>();
+    const colorsById = new Map<string, string>();
+
+    for (const userId of [...userOptionIds].sort((a, b) => a.localeCompare(b))) {
+      let paletteIndex = hashString(userId) % CHART_PALETTE.length;
+
+      for (let attempt = 0; attempt < CHART_PALETTE.length && usedPaletteIndexes.has(paletteIndex); attempt += 1) {
+        paletteIndex = (paletteIndex + 1) % CHART_PALETTE.length;
+      }
+
+      usedPaletteIndexes.add(paletteIndex);
+      colorsById.set(userId, CHART_PALETTE[paletteIndex]);
+    }
+
+    return colorsById;
+  }, [userOptionIds]);
+
   const userOptions = useMemo<FilterOption[]>(() => (
-    [...userOptionIds]
-      .sort((a, b) => profileDisplayName(a).localeCompare(profileDisplayName(b)))
+    sortedUserIds
       .map((userId) => ({
         label: profileDisplayName(userId),
         value: userId
       }))
-  ), [profileDisplayName, userOptionIds]);
+  ), [profileDisplayName, sortedUserIds]);
 
   const categoryOptions = useMemo<FilterOption[]>(() => (
     [...new Set(expenses.map((expense) => expense.category).filter(Boolean))]
@@ -373,6 +402,44 @@ export default function HistoryScreen() {
     toggleDropdown(filter);
   }
 
+  const compareBadgeUserIds = useCallback((a: string, b: string) => {
+    const orderComparison = (userSortOrderById.get(a) ?? Number.MAX_SAFE_INTEGER) -
+      (userSortOrderById.get(b) ?? Number.MAX_SAFE_INTEGER);
+
+    if (orderComparison !== 0) {
+      return orderComparison;
+    }
+
+    const nameComparison = profileDisplayName(a).localeCompare(profileDisplayName(b));
+    return nameComparison || a.localeCompare(b);
+  }, [profileDisplayName, userSortOrderById]);
+
+  const expenseBadges = useCallback((expense: Expense): ExpenseBadge[] => {
+    let userIds: string[];
+
+    if (expense.ownership === 'shared') {
+      const splitUserIds: string[] = [];
+
+      for (const split of expense.splits) {
+        if (!splitUserIds.includes(split.user_id)) {
+          splitUserIds.push(split.user_id);
+        }
+      }
+
+      userIds = splitUserIds.sort(compareBadgeUserIds).slice(0, 2);
+    } else {
+      userIds = [expense.paid_by];
+    }
+
+    const badgeUserIds = userIds.length > 0 ? userIds : [expense.paid_by];
+
+    return badgeUserIds.map((userId) => ({
+      accent: userColorById.get(userId) || colors.primary,
+      id: userId,
+      label: profileDisplayName(userId)
+    }));
+  }, [compareBadgeUserIds, profileDisplayName, userColorById]);
+
   async function confirmDelete(expenseId: string) {
     Alert.alert('Delete Expense', 'This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
@@ -505,10 +572,9 @@ export default function HistoryScreen() {
       renderItem={({ item }) => (
         <SwipeExpenseRow
           amount={formatYen(item.displayAmountYen)}
-          badgeLabel={item.expense.ownership === 'shared' ? 'Shared' : 'Personal'}
-          badgeTone={item.expense.ownership === 'shared' ? 'shared' : 'personal'}
+          badges={expenseBadges(item.expense)}
           category={item.expense.category}
-          meta={`${formatHistoryDate(item.expense.spent_on)} · Paid by ${profileDisplayName(item.expense.paid_by)}`}
+          dateLabel={formatHistoryDate(item.expense.spent_on)}
           onDelete={() => confirmDelete(item.expense.id)}
           onEdit={() => router.push(`/expenses/${item.expense.id}`)}
         />
@@ -526,6 +592,16 @@ function formatHistoryDate(dateString: string) {
 function formatShortMonthLabel(monthKey: string) {
   const [year, month] = monthKey.split('-').map(Number);
   return shortMonthFormatter.format(new Date(year, month - 1, 1));
+}
+
+function hashString(value: string) {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+
+  return Math.abs(hash);
 }
 
 type FilterDropdownProps = {
