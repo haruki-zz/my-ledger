@@ -120,10 +120,17 @@ type ExpenseContextMenuState = {
   touchPoint: ExpenseContextMenuPoint;
 };
 
+type GestureCoordinationState = {
+  longPressHandled: boolean;
+  panResponderActive: boolean;
+  swipeActionHandled: boolean;
+};
+
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const SWIPE_ACTION_WIDTH = 96;
 const SWIPE_TRIGGER_DISTANCE = SWIPE_ACTION_WIDTH * 0.9;
 const SWIPE_MAX_TRANSLATE = SWIPE_ACTION_WIDTH + 20;
+const SWIPE_IDLE_THRESHOLD = 1;
 const LONG_PRESS_DELAY_MS = 360;
 
 export function GlassSurface({ children, style, ...viewProps }: GlassSurfaceProps) {
@@ -363,6 +370,11 @@ export function SwipeExpenseRow({
   const [responder, setResponder] = useState<PanResponderInstance | null>(null);
   const [contextMenu, setContextMenu] = useState<ExpenseContextMenuState | null>(null);
   const rowRef = useRef<View | null>(null);
+  const gestureStateRef = useRef<GestureCoordinationState>({
+    longPressHandled: false,
+    panResponderActive: false,
+    swipeActionHandled: false
+  });
   const onDeleteRef = useRef(onDelete);
   const onEditRef = useRef(onEdit);
 
@@ -383,6 +395,7 @@ export function SwipeExpenseRow({
         gestureState.vy
       ),
       onPanResponderGrant: () => {
+        gestureStateRef.current.panResponderActive = true;
         translateX.stopAnimation();
       },
       onPanResponderMove: (_, gestureState) => {
@@ -390,27 +403,55 @@ export function SwipeExpenseRow({
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dx > SWIPE_TRIGGER_DISTANCE) {
+          gestureStateRef.current.swipeActionHandled = true;
+          gestureStateRef.current.panResponderActive = false;
           resetSwipe(translateX);
           onEditRef.current();
           return;
         }
 
         if (gestureState.dx < -SWIPE_TRIGGER_DISTANCE) {
+          gestureStateRef.current.swipeActionHandled = true;
+          gestureStateRef.current.panResponderActive = false;
           resetSwipe(translateX);
           onDeleteRef.current();
           return;
         }
 
+        gestureStateRef.current.panResponderActive = false;
         resetSwipe(translateX);
       },
       onPanResponderTerminate: () => {
+        gestureStateRef.current.panResponderActive = false;
         resetSwipe(translateX);
       },
       onPanResponderTerminationRequest: () => true
     }));
   }, [translateX]);
 
+  function handlePressIn() {
+    gestureStateRef.current.longPressHandled = false;
+    gestureStateRef.current.swipeActionHandled = false;
+  }
+
+  function handlePress() {
+    const gestureState = gestureStateRef.current;
+    if (gestureState.longPressHandled || gestureState.panResponderActive || gestureState.swipeActionHandled) {
+      return;
+    }
+
+    const currentTranslateX = currentAnimatedValue(translateX);
+    translateX.stopAnimation();
+    if (Math.abs(currentTranslateX) > SWIPE_IDLE_THRESHOLD) {
+      resetSwipe(translateX);
+    }
+
+    onEditRef.current();
+  }
+
   function handleLongPress(event: GestureResponderEvent) {
+    gestureStateRef.current.longPressHandled = true;
+
     const touchPoint = {
       x: event.nativeEvent.pageX,
       y: event.nativeEvent.pageY
@@ -474,6 +515,8 @@ export function SwipeExpenseRow({
         onAccessibilityAction={handleAccessibilityAction}
         delayLongPress={LONG_PRESS_DELAY_MS}
         onLongPress={handleLongPress}
+        onPress={handlePress}
+        onPressIn={handlePressIn}
         {...(responder?.panHandlers || {})}
         style={[
           uiStyles.swipeCard,
@@ -571,6 +614,19 @@ function resetSwipe(value: Animated.Value) {
     toValue: 0,
     useNativeDriver: true
   }).start();
+}
+
+function currentAnimatedValue(value: Animated.Value) {
+  const readableValue = value as Animated.Value & {
+    __getValue?: () => number;
+    _value?: number;
+  };
+
+  if (typeof readableValue.__getValue === 'function') {
+    return readableValue.__getValue();
+  }
+
+  return typeof readableValue._value === 'number' ? readableValue._value : 0;
 }
 
 function isValidRect(x: number, y: number, width: number, height: number) {
