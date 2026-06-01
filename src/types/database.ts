@@ -158,6 +158,23 @@ export type Database = {
           amount_yen?: number;
         };
       };
+      transfer_checklist_completions: {
+        Row: {
+          expense_id: string;
+          user_id: string;
+          completed_at: string;
+        };
+        Insert: {
+          expense_id: string;
+          user_id: string;
+          completed_at?: string;
+        };
+        Update: {
+          expense_id?: string;
+          user_id?: string;
+          completed_at?: string;
+        };
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -213,6 +230,26 @@ export type Database = {
         Args: { p_expense_id: string };
         Returns: undefined;
       };
+      get_open_transfer_items: {
+        Args: { p_ledger_id: string };
+        Returns: {
+          expense_id: string;
+          ledger_id: string;
+          category: string;
+          spent_on: string;
+          expense_created_at: string;
+          expense_updated_at: string;
+          payer_user_id: string;
+          payee_user_id: string;
+          amount_yen: number;
+          payer_completed_at: string | null;
+          payee_completed_at: string | null;
+        }[];
+      };
+      set_transfer_confirmations: {
+        Args: { p_updates: { expense_id: string; confirmed: boolean }[] };
+        Returns: undefined;
+      };
     };
     Enums: {
       expense_ownership: ExpenseOwnership;
@@ -227,6 +264,8 @@ export type LedgerMember = Database['public']['Tables']['ledger_members']['Row']
 export type LedgerCategory = Database['public']['Tables']['ledger_categories']['Row'];
 export type ExpenseRow = Database['public']['Tables']['expenses']['Row'];
 export type ExpenseSplitRow = Database['public']['Tables']['expense_splits']['Row'];
+export type TransferChecklistCompletionRow = Database['public']['Tables']['transfer_checklist_completions']['Row'];
+export type TransferChecklistItemRow = Database['public']['Functions']['get_open_transfer_items']['Returns'][number];
 
 export type LedgerMemberProfile = LedgerMember & {
   profile: Profile;

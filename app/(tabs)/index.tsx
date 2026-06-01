@@ -6,8 +6,10 @@ import { CategoryTrendModal } from '@/src/components/CategoryTrendModal';
 import { DailyChart, type DailyChartMode } from '@/src/components/DailyChart';
 import { PieChart, type AnchorPoint } from '@/src/components/PieChart';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
+import { TransferChecklistCard } from '@/src/components/TransferChecklistCard';
 import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
+import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   addMonths,
@@ -63,6 +65,15 @@ export default function DashboardScreen() {
     error,
     reload
   } = useDashboardData(monthKey, range);
+  const {
+    items: transferItems,
+    loading: transferLoading,
+    refreshing: transferRefreshing,
+    saving: transferSaving,
+    error: transferError,
+    reload: reloadTransfers,
+    setConfirmations
+  } = useTransferChecklist(ledger?.id || null);
 
   const currentUserName = displayName(members.find((member) => member.user_id === currentUserId)?.profile.display_name);
   const otherUserName = displayName(members.find((member) => member.user_id === otherUserId)?.profile.display_name);
@@ -102,6 +113,10 @@ export default function DashboardScreen() {
   const moveMonth = useCallback((amount: number) => {
     setMonthKey((current) => addMonths(current, amount));
   }, []);
+
+  const refreshDashboard = useCallback(() => {
+    void Promise.all([reload(), reloadTransfers()]);
+  }, [reload, reloadTransfers]);
 
   const runDrillTransition = useCallback(() => {
     drillProgress.stopAnimation();
@@ -155,7 +170,12 @@ export default function DashboardScreen() {
   return (
     <>
       <ScrollView
-        refreshControl={<RefreshControl refreshing={(loading && !ledger) || refreshing} onRefresh={reload} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={(loading && !ledger) || refreshing || transferRefreshing}
+            onRefresh={refreshDashboard}
+          />
+        }
         style={styles.page}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
       >
@@ -213,6 +233,17 @@ export default function DashboardScreen() {
               </Animated.View>
             </BentoCard>
           </View>
+
+          <TransferChecklistCard
+            currentUserId={currentUserId}
+            error={transferError}
+            items={transferItems}
+            loading={transferLoading}
+            members={members}
+            onSetConfirmations={setConfirmations}
+            refreshing={transferRefreshing}
+            saving={transferSaving}
+          />
 
           <BentoCard style={localStyles.categoryCard}>
             <Text style={styles.h2}>Category share</Text>

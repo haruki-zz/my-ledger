@@ -8,7 +8,8 @@ import type {
   LedgerCategory,
   LedgerMember,
   LedgerMemberProfile,
-  Profile
+  Profile,
+  TransferChecklistItemRow
 } from '@/src/types/database';
 
 export async function updateMyProfile(displayName: string) {
@@ -397,6 +398,43 @@ export async function saveExpense(input: SaveExpenseInput): Promise<ExpenseRow> 
 export async function deleteExpense(expenseId: string) {
   const { error } = await supabase.rpc('delete_expense', {
     p_expense_id: expenseId
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+export type TransferConfirmationUpdate = {
+  expense_id: string;
+  confirmed: boolean;
+};
+
+function assertTransferConfirmationUpdates(updates: TransferConfirmationUpdate[]) {
+  for (const update of updates) {
+    if (!update.expense_id || typeof update.expense_id !== 'string' || typeof update.confirmed !== 'boolean') {
+      throw new Error('Transfer confirmation updates require expense_id and confirmed');
+    }
+  }
+}
+
+export async function getOpenTransferItems(ledgerId: string): Promise<TransferChecklistItemRow[]> {
+  const { data, error } = await supabase.rpc('get_open_transfer_items', {
+    p_ledger_id: ledgerId
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+export async function setTransferConfirmations(updates: TransferConfirmationUpdate[]) {
+  assertTransferConfirmationUpdates(updates);
+
+  const { error } = await supabase.rpc('set_transfer_confirmations', {
+    p_updates: updates
   });
 
   if (error) {
