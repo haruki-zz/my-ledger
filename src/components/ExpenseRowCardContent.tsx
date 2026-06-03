@@ -65,9 +65,9 @@ export function ExpenseRowCardContent({
 const rowCardStyles = StyleSheet.create({
   amount: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 22,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 0,
     lineHeight: 28,
     maxWidth: 132,
@@ -89,17 +89,17 @@ const rowCardStyles = StyleSheet.create({
   },
   badgeText: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 15
   },
   category: {
     color: colors.ink,
     flexShrink: 1,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '700',
     lineHeight: 23,
     minWidth: 0
   },
@@ -115,16 +115,16 @@ const rowCardStyles = StyleSheet.create({
   date: {
     color: colors.muted,
     flexShrink: 0,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 18
   },
   dateSeparator: {
     color: colors.muted,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 18
   },
   textBlock: {

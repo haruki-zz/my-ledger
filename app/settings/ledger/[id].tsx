@@ -166,7 +166,7 @@ export default function LedgerDetailScreen() {
 
       <BentoCard>
         <Text style={styles.h2}>Invite Code</Text>
-        <Text style={{ color: colors.ink, fontFamily: fontFamilies.extraBold, fontSize: 24, fontWeight: '900' }}>
+        <Text style={{ color: colors.ink, fontFamily: fontFamilies.bold, fontSize: 24, fontWeight: '700' }}>
           {membership.ledger.invite_code}
         </Text>
       </BentoCard>

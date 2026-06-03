@@ -163,9 +163,9 @@ function formatTransferDate(dateString: string) {
 export const sharedStyles = StyleSheet.create({
   itemAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 24,
     maxWidth: 128,
     textAlign: 'right'
@@ -178,9 +178,9 @@ export const sharedStyles = StyleSheet.create({
   itemTitle: {
     color: colors.ink,
     flex: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 21,
     minWidth: 0
   },

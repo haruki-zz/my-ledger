@@ -57,6 +57,7 @@ type PillTabsProps<T extends string> = {
   options: PillTabOption<T>[];
   value: T;
   onChange: (value: T) => void;
+  size?: 'md' | 'sm';
   style?: StyleProp<ViewStyle>;
 };
 
@@ -152,6 +153,7 @@ export function BentoCard({ children, style, variant = 'default', ...viewProps }
 export function PillTabs<T extends string>({
   accessibilityLabel,
   options,
+  size = 'md',
   value,
   onChange,
   style
@@ -186,7 +188,11 @@ export function PillTabs<T extends string>({
   }
 
   return (
-    <View accessibilityLabel={accessibilityLabel} onLayout={handleLayout} style={[uiStyles.pillTrack, style]}>
+    <View
+      accessibilityLabel={accessibilityLabel}
+      onLayout={handleLayout}
+      style={[uiStyles.pillTrack, size === 'sm' && uiStyles.pillTrackSmall, style]}
+    >
       {segmentWidth > 0 ? (
         <Animated.View
           pointerEvents="none"
@@ -218,6 +224,7 @@ export function PillTabs<T extends string>({
               numberOfLines={1}
               style={[
                 uiStyles.pillText,
+                size === 'sm' && uiStyles.pillTextSmall,
                 selected && uiStyles.pillTextActive,
                 option.disabled && uiStyles.disabledText
               ]}
@@ -672,9 +679,9 @@ const uiStyles = StyleSheet.create({
   },
   actionTitle: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 22
   },
   actionTitleDanger: {
@@ -716,9 +723,9 @@ const uiStyles = StyleSheet.create({
   },
   filterChipText: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 18
   },
   filterChipTextActive: {
@@ -805,9 +812,9 @@ const uiStyles = StyleSheet.create({
   },
   metricValue: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 34,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 0,
     lineHeight: 40
   },
@@ -839,16 +846,20 @@ const uiStyles = StyleSheet.create({
   },
   pillText: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 17,
     textAlign: 'center'
   } satisfies TextStyle,
   pillTextActive: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
-    fontWeight: '900'
+    fontFamily: fontFamilies.bold,
+    fontWeight: '700'
+  },
+  pillTextSmall: {
+    fontSize: 10,
+    lineHeight: 14
   },
   pillTrack: {
     backgroundColor: 'rgba(15,118,110,0.08)',
@@ -859,6 +870,10 @@ const uiStyles = StyleSheet.create({
     height: 38,
     overflow: 'hidden',
     position: 'relative'
+  },
+  pillTrackSmall: {
+    borderRadius: 15,
+    height: 30
   },
   pressed: {
     opacity: 0.76

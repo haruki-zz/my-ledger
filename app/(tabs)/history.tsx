@@ -665,9 +665,9 @@ const localStyles = StyleSheet.create({
   },
   ledgerKicker: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 24
   },
   listContent: {
@@ -675,17 +675,17 @@ const localStyles = StyleSheet.create({
   },
   summaryAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 38,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 0,
     lineHeight: 46
   },
   summaryCount: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 22
   },
   summaryStrip: {

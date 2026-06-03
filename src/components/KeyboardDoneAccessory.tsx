@@ -60,9 +60,9 @@ const accessoryStyles = StyleSheet.create({
   },
   androidButtonText: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 13,
-    fontWeight: '700'
+    fontWeight: '600'
   },
   button: {
     borderRadius: theme.radii.compact,
@@ -72,9 +72,9 @@ const accessoryStyles = StyleSheet.create({
   },
   buttonText: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 16,
-    fontWeight: '800'
+    fontWeight: '700'
   },
   pressed: {
     opacity: 0.7

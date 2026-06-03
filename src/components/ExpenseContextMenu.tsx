@@ -356,9 +356,9 @@ const contextMenuStyles = StyleSheet.create({
   },
   quickActionText: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 20
   },
   quickActionTextDanger: {

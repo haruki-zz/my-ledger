@@ -164,7 +164,7 @@ const syncStyles = StyleSheet.create({
     color: '#fff',
     fontFamily: 'System',
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
     textTransform: 'uppercase'
   },
   action: {

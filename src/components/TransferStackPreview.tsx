@@ -102,9 +102,9 @@ const stackStyles = StyleSheet.create({
   },
   countBadgeText: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 15
   },
   stackLayer: {

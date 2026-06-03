@@ -633,9 +633,9 @@ export function ExpenseForm({
 
 const localStyles = StyleSheet.create({
   amountInput: {
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 28,
-    fontWeight: '900',
+    fontWeight: '700',
     minHeight: 96,
     textAlign: 'center'
   },
@@ -659,16 +659,16 @@ const localStyles = StyleSheet.create({
   },
   splitInput: {
     flex: 1,
-    fontFamily: fontFamilies.extraBold,
-    fontWeight: '800',
+    fontFamily: fontFamilies.bold,
+    fontWeight: '700',
     textAlign: 'right'
   },
   splitName: {
     color: colors.ink,
     flex: 0.45,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 16,
-    fontWeight: '800'
+    fontWeight: '700'
   },
   splitRow: {
     alignItems: 'center',

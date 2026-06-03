@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getExpensesByMonth } from '@/src/lib/ledger';
 import {
   addMonths,
-  buildCategoryMonthlyTrend,
+  buildCategoryMonthlyTrendForCategories,
   dashboardEndDateString,
   monthStartDateString,
   type DashboardRange,
@@ -14,6 +14,7 @@ import type { Expense } from '@/src/types/database';
 type UseCategoryTrendInput = {
   ledgerId: string | null;
   category: string | null;
+  categoryNames?: string[];
   endMonthKey: string;
   months: number;
   range: DashboardRange;
@@ -34,8 +35,9 @@ export function useCategoryTrend(input: UseCategoryTrendInput) {
 
     const ledgerId = input.ledgerId;
     const category = input.category;
+    const categoryNames = input.categoryNames && input.categoryNames.length > 0 ? input.categoryNames : category ? [category] : [];
 
-    if (!ledgerId || !category) {
+    if (!ledgerId || categoryNames.length === 0) {
       setExpenses([]);
       setError(null);
       setLoading(false);
@@ -75,6 +77,7 @@ export function useCategoryTrend(input: UseCategoryTrendInput) {
     void load();
   }, [
     input.category,
+    input.categoryNames,
     input.dataVersion,
     input.endMonthKey,
     input.ledgerId,
@@ -82,13 +85,18 @@ export function useCategoryTrend(input: UseCategoryTrendInput) {
   ]);
 
   const series = useMemo<MonthlyCategoryTrendStat[]>(() => {
-    if (!input.category) {
+    const categoryNames = input.categoryNames && input.categoryNames.length > 0
+      ? input.categoryNames
+      : input.category
+        ? [input.category]
+        : [];
+    if (categoryNames.length === 0) {
       return [];
     }
 
-    return buildCategoryMonthlyTrend({
+    return buildCategoryMonthlyTrendForCategories({
       expenses,
-      category: input.category,
+      categories: categoryNames,
       endMonthKey: input.endMonthKey,
       months: input.months,
       range: input.range,
@@ -98,6 +106,7 @@ export function useCategoryTrend(input: UseCategoryTrendInput) {
   }, [
     expenses,
     input.category,
+    input.categoryNames,
     input.currentUserId,
     input.endMonthKey,
     input.months,

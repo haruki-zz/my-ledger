@@ -11,16 +11,15 @@ import {
 } from '@/src/lib/ledger';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
-  buildDashboardStats,
+  buildDashboardPeriodStats,
   compareMonthKeys,
-  dashboardEndDateString,
   monthKeyFromDateString,
-  monthStartDateString,
-  type DashboardRange
+  resolveDashboardDateRange,
+  type DashboardPeriod
 } from '@/src/lib/stats';
 import type { Expense, Ledger, LedgerMemberProfile, Profile } from '@/src/types/database';
 
-export function useDashboardData(monthKey: string, range: DashboardRange) {
+export function useDashboardData(monthKey: string, period: DashboardPeriod) {
   const { session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const currentLedger = activeLedger?.ledger || null;
@@ -34,7 +33,6 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
   const [minimumMonthKey, setMinimumMonthKey] = useState<string | null>(null);
   const [loadedMonthKey, setLoadedMonthKey] = useState<string | null>(null);
-  const [loadedEndDateString, setLoadedEndDateString] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,11 +71,13 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
         return;
       }
 
-      const endDateString = dashboardEndDateString(monthKey);
+      const dateRange = resolveDashboardDateRange(period, monthKey);
       const [nextMembers, firstExpenseSpentOn, nextExpenses] = await Promise.all([
         getLedgerMembers(activeLedger.id),
         getFirstExpenseSpentOn(activeLedger.id),
-        getExpensesByMonth(activeLedger.id, monthStartDateString(monthKey), endDateString)
+        getExpensesByMonth(activeLedger.id, dateRange.comparisonStartDateString, dateRange.endDateString, {
+          refreshFirst: true
+        })
       ]);
 
       const nextOtherUserId = nextMembers.find((member) => member.user_id !== userId)?.user_id || null;
@@ -105,8 +105,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
       setCurrentUserId(userId);
       setOtherUserId(nextOtherUserId);
       setMinimumMonthKey(nextMinimumMonthKey);
-      setLoadedMonthKey(monthKey);
-      setLoadedEndDateString(endDateString);
+      setLoadedMonthKey(dateRange.effectiveMonthKey);
       setDataVersion((current) => current + 1);
       hasLoadedData.current = true;
     } catch (loadError) {
@@ -119,7 +118,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
         setRefreshing(false);
       }
     }
-  }, [ledgerLoading, monthKey, session?.user.id]);
+  }, [ledgerLoading, monthKey, period, session?.user.id]);
 
   useEffect(() => {
     requestSequence.current += 1;
@@ -132,7 +131,6 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
     setOtherUserId(null);
     setMinimumMonthKey(null);
     setLoadedMonthKey(null);
-    setLoadedEndDateString(null);
     setDataVersion((current) => current + 1);
   }, [ledgerId]);
 
@@ -155,20 +153,20 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
   }, [ledgerId]);
 
   const stats = useMemo(
-    () => buildDashboardStats({
+    () => buildDashboardPeriodStats({
       expenses,
       monthKey: loadedMonthKey || monthKey,
-      endDateString: loadedEndDateString || dashboardEndDateString(monthKey),
-      range,
+      period,
       currentUserId,
       otherUserId
     }),
-    [currentUserId, expenses, loadedEndDateString, loadedMonthKey, monthKey, otherUserId, range]
+    [currentUserId, expenses, loadedMonthKey, monthKey, otherUserId, period]
   );
 
   return {
     ledger,
     members,
+    expenses,
     profiles,
     currentUserId,
     otherUserId,

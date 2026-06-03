@@ -169,8 +169,8 @@ const syncStyles = StyleSheet.create({
   },
   text: {
     color: '#fff',
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 12,
-    fontWeight: '700'
+    fontWeight: '600'
   }
 });

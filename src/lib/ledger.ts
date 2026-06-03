@@ -306,8 +306,19 @@ export async function getExpenses(ledgerId: string): Promise<Expense[]> {
 export async function getExpensesByMonth(
   ledgerId: string,
   startDate: string,
-  endDate: string
+  endDate: string,
+  options: { refreshFirst?: boolean } = {}
 ): Promise<Expense[]> {
+  if (options.refreshFirst) {
+    try {
+      await refreshExpenses(ledgerId);
+    } catch (error) {
+      if (!isOfflineError(error)) {
+        throw error;
+      }
+    }
+  }
+
   const cachedExpenses = await getCachedExpensesByMonth(ledgerId, startDate, endDate);
   if (cachedExpenses.length > 0 || await hasCachedExpensesSnapshot(ledgerId)) {
     return cachedExpenses;

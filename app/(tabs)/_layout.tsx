@@ -241,14 +241,14 @@ export default function TabsLayout() {
           headerShown: false,
           headerStyle: { backgroundColor: colors.bg },
           headerShadowVisible: false,
-          headerTitleStyle: { color: colors.ink, fontFamily: fontFamilies.extraBold, fontWeight: '800' },
+          headerTitleStyle: { color: colors.ink, fontFamily: fontFamilies.bold, fontWeight: '700' },
           sceneStyle,
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.muted,
           tabBarLabelStyle: {
-            fontFamily: fontFamilies.bold,
+            fontFamily: fontFamilies.semiBold,
             fontSize: 12,
-            fontWeight: '700'
+            fontWeight: '600'
           },
           tabBarStyle: { display: 'none' }
         }}
@@ -392,9 +392,9 @@ const localStyles = StyleSheet.create({
   },
   bottomTabItemText: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 15
   },
   bottomTabShell: {
@@ -462,9 +462,9 @@ const localStyles = StyleSheet.create({
   },
   sidebarItemText: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
     lineHeight: 15,
     textAlign: 'center'
   },

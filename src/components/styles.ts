@@ -75,23 +75,23 @@ export const styles = StyleSheet.create({
   },
   title: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 30,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 0
   },
   h1: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 24,
-    fontWeight: '900',
+    fontWeight: '700',
     letterSpacing: 0
   },
   h2: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 18,
-    fontWeight: '700'
+    fontWeight: '600'
   },
   body: {
     color: colors.ink,
@@ -160,9 +160,9 @@ export const styles = StyleSheet.create({
   },
   dropdownIndicator: {
     color: colors.muted,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '600',
     lineHeight: 23,
     marginLeft: 10
   },
@@ -191,20 +191,20 @@ export const styles = StyleSheet.create({
   },
   dropdownOptionTextActive: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.extraBold,
-    fontWeight: '800'
+    fontFamily: fontFamilies.bold,
+    fontWeight: '700'
   },
   label: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 14,
-    fontWeight: '700'
+    fontWeight: '600'
   },
   upperLabel: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '700',
     letterSpacing: 1.4,
     lineHeight: 14,
     textTransform: 'uppercase'
@@ -228,9 +228,9 @@ export const styles = StyleSheet.create({
   },
   buttonText: {
     color: '#FFFFFF',
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.bold,
     fontSize: 16,
-    fontWeight: '800'
+    fontWeight: '700'
   },
   secondaryButtonText: {
     color: colors.primaryDark
@@ -263,9 +263,9 @@ export const styles = StyleSheet.create({
   },
   chipText: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.semiBold,
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     textAlign: 'center'
   },
   error: {

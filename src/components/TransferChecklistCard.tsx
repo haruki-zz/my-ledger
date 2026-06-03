@@ -1,22 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import {
-  ChecklistToggle,
   completedAtForUser,
-  isParticipant,
-  sharedStyles
+  isParticipant
 } from '@/src/components/TransferChecklistShared';
 import { TransferItemsOverlay } from '@/src/components/TransferItemsOverlay';
-import { TransferStackPreview } from '@/src/components/TransferStackPreview';
-import { BentoCard, PillTabs, type PillTabOption } from '@/src/components/ui';
+import { BentoCard } from '@/src/components/ui';
 import { displayName, formatYen } from '@/src/lib/format';
 import type { TransferConfirmationUpdate } from '@/src/lib/ledger';
 import type { LedgerMemberProfile, TransferChecklistItemRow } from '@/src/types/database';
-
-type TransferChecklistMode = 'items' | 'net';
 
 type TransferChecklistCardProps = {
   currentUserId: string | null;
@@ -36,11 +31,6 @@ type NetSummary = {
   payeeUserId: string | null;
 };
 
-const MODE_OPTIONS: PillTabOption<TransferChecklistMode>[] = [
-  { label: 'Items', value: 'items' },
-  { label: 'Net', value: 'net' }
-];
-
 export function TransferChecklistCard({
   currentUserId,
   error,
@@ -51,25 +41,12 @@ export function TransferChecklistCard({
   refreshing,
   saving
 }: TransferChecklistCardProps) {
-  const [mode, setMode] = useState<TransferChecklistMode>('net');
   const [overlayVisible, setOverlayVisible] = useState(false);
   const nameByUserId = useMemo(() => (
     new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]))
   ), [members]);
   const netSummary = useMemo(() => buildNetSummary(items, members), [items, members]);
-  const participantItems = useMemo(
-    () => items.filter((item) => isParticipant(item, currentUserId)),
-    [currentUserId, items]
-  );
-  const allCurrentConfirmationsDone = participantItems.length > 0 && participantItems.every((item) => (
-    Boolean(completedAtForUser(item, currentUserId))
-  ));
-
-  useEffect(() => {
-    if ((mode !== 'items' || items.length === 0) && overlayVisible) {
-      setOverlayVisible(false);
-    }
-  }, [items.length, mode, overlayVisible]);
+  const canOpenDetails = items.length > 0 && !loading;
 
   function userName(userId: string | null) {
     if (!userId) {
@@ -79,11 +56,24 @@ export function TransferChecklistCard({
     return nameByUserId.get(userId) || 'Unnamed user';
   }
 
-  function handleModeChange(nextMode: TransferChecklistMode) {
-    setMode(nextMode);
-    if (nextMode === 'net') {
-      setOverlayVisible(false);
+  function directionLabel() {
+    if (loading) {
+      return 'Loading transfers';
     }
+
+    if (netSummary.amountYen === 0) {
+      return 'Net balance settled';
+    }
+
+    if (netSummary.payerUserId === currentUserId) {
+      return `You owe ${userName(netSummary.payeeUserId)}`;
+    }
+
+    if (netSummary.payeeUserId === currentUserId) {
+      return `${userName(netSummary.payerUserId)} owes you`;
+    }
+
+    return `${userName(netSummary.payerUserId)} to ${userName(netSummary.payeeUserId)}`;
   }
 
   function toggleItem(item: TransferChecklistItemRow) {
@@ -97,91 +87,48 @@ export function TransferChecklistCard({
     }]);
   }
 
-  function toggleNetSummary() {
-    if (!currentUserId || saving || participantItems.length === 0) {
-      return;
-    }
-
-    void onSetConfirmations(participantItems.map((item) => ({
-      expense_id: item.expense_id,
-      confirmed: !allCurrentConfirmationsDone
-    })));
-  }
-
   return (
     <>
-      <BentoCard style={localStyles.card}>
-        <View style={localStyles.header}>
-          <View style={localStyles.titleGroup}>
-            <Text style={styles.h2}>Transfers</Text>
-            {refreshing ? <Text style={styles.muted}>Syncing</Text> : null}
-          </View>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!canOpenDetails}
+        onPress={() => setOverlayVisible(true)}
+      >
+        {({ pressed }) => (
+          <BentoCard style={[localStyles.card, pressed && canOpenDetails && localStyles.cardPressed]}>
+            <View style={localStyles.iconWrap}>
+              <Ionicons color={colors.primaryDark} name="swap-horizontal" size={28} />
+            </View>
 
-          <PillTabs
-            accessibilityLabel="Transfer checklist mode"
-            onChange={handleModeChange}
-            options={MODE_OPTIONS}
-            style={localStyles.modeTabs}
-            value={mode}
-          />
-        </View>
+            <View style={localStyles.textGroup}>
+              <Text style={styles.upperLabel}>Transfers (Net)</Text>
+              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.directionText}>
+                {directionLabel()}
+              </Text>
+              <Text style={styles.muted}>
+                {loading
+                  ? 'Checking open items'
+                  : netSummary.count > 0
+                    ? `${netSummary.count} open ${netSummary.count === 1 ? 'item' : 'items'}`
+                    : 'All transfers settled'}
+              </Text>
+              {error ? <Text style={styles.error}>{error}</Text> : null}
+              {refreshing ? <Text style={styles.muted}>Syncing</Text> : null}
+            </View>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        {loading ? (
-          <View style={localStyles.loadingRow}>
-            <ActivityIndicator color={colors.primary} size="small" />
-            <Text style={styles.muted}>Loading transfers</Text>
-          </View>
-        ) : null}
-
-        {!loading && items.length === 0 ? (
-          <View style={localStyles.emptyState}>
-            <Ionicons color={colors.primaryDark} name="checkmark-done-circle-outline" size={24} />
-            <Text style={localStyles.emptyTitle}>All transfers settled</Text>
-          </View>
-        ) : null}
-
-        {!loading && items.length > 0 && mode === 'items' ? (
-          <TransferStackPreview
-            currentUserId={currentUserId}
-            items={items}
-            onPress={() => setOverlayVisible(true)}
-            userName={userName}
-          />
-        ) : null}
-
-        {!loading && items.length > 0 && mode === 'net' ? (
-          <View style={localStyles.netRow}>
-            <ChecklistToggle
-              checked={allCurrentConfirmationsDone}
-              disabled={participantItems.length === 0 || saving}
-              onPress={toggleNetSummary}
-            />
-
-            <View style={sharedStyles.itemText}>
-              <View style={sharedStyles.itemTitleRow}>
-                <Text ellipsizeMode="tail" numberOfLines={1} style={sharedStyles.itemTitle}>
-                  {netSummary.amountYen === 0
-                    ? 'Net balance'
-                    : `${userName(netSummary.payerUserId)} to ${userName(netSummary.payeeUserId)}`}
-                </Text>
-                <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.netAmount}>
+            <View style={localStyles.amountGroup}>
+              {loading ? (
+                <ActivityIndicator color={colors.primary} size="small" />
+              ) : (
+                <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.amountText}>
                   {formatYen(netSummary.amountYen)}
                 </Text>
-              </View>
-
-              <Text style={styles.muted}>
-                {netSummary.count} open {netSummary.count === 1 ? 'item' : 'items'}
-              </Text>
-
-              <Text ellipsizeMode="tail" numberOfLines={1} style={sharedStyles.statusText}>
-                {allCurrentConfirmationsDone ? 'Your confirmations are done' : 'Tap to confirm your side'}
-              </Text>
+              )}
+              <Ionicons color={canOpenDetails ? colors.ink : colors.subtle} name="chevron-forward" size={20} />
             </View>
-          </View>
-        ) : null}
-      </BentoCard>
+          </BentoCard>
+        )}
+      </Pressable>
 
       <TransferItemsOverlay
         currentUserId={currentUserId}
@@ -256,59 +203,47 @@ function buildNetSummary(items: TransferChecklistItemRow[], members: LedgerMembe
 }
 
 const localStyles = StyleSheet.create({
-  card: {
-    gap: 14
-  },
-  emptyState: {
-    alignItems: 'center',
+  amountGroup: {
+    alignItems: 'flex-end',
     flexDirection: 'row',
-    gap: 10,
-    minHeight: 44
+    gap: 10
   },
-  emptyTitle: {
+  amountText: {
     color: colors.primaryDark,
     fontFamily: fontFamilies.bold,
-    fontSize: 15,
+    fontSize: 26,
     fontWeight: '700',
-    lineHeight: 21
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between'
-  },
-  loadingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    minHeight: 44
-  },
-  modeTabs: {
-    flex: 1,
-    maxWidth: 148,
-    minWidth: 128
-  },
-  netAmount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 22,
-    fontWeight: '900',
-    lineHeight: 28,
-    maxWidth: 136,
+    lineHeight: 32,
+    maxWidth: 150,
     textAlign: 'right'
   },
-  netRow: {
-    alignItems: 'flex-start',
-    borderTopColor: colors.line,
-    borderTopWidth: 1,
+  card: {
+    alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
-    paddingTop: 12
+    gap: 14,
+    minHeight: 94,
+    padding: 16
   },
-  titleGroup: {
+  cardPressed: {
+    opacity: 0.78
+  },
+  directionText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.regular,
+    fontSize: 15,
+    lineHeight: 21
+  },
+  iconWrap: {
+    alignItems: 'center',
+    backgroundColor: colors.tint,
+    borderRadius: 28,
+    height: 56,
+    justifyContent: 'center',
+    width: 56
+  },
+  textGroup: {
     flex: 1,
-    gap: 2,
+    gap: 3,
     minWidth: 0
   }
 });

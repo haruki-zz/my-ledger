@@ -1,15 +1,16 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
+import Svg, { Circle, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { formatYen } from '@/src/lib/format';
+import { formatCompactYen, formatYen } from '@/src/lib/format';
 import type { CategoryStat } from '@/src/lib/stats';
 
 type PieChartProps = {
   categories: CategoryStat[];
   totalYen: number;
   onCategoryPress?: (category: CategoryStat, anchorPoint?: AnchorPoint) => void;
-  layout?: 'vertical' | 'horizontal';
+  selectedCategoryName?: string | null;
 };
 
 type PieSegment = CategoryStat & {
@@ -22,10 +23,14 @@ export type AnchorPoint = {
   y: number;
 };
 
-const MAX_LEGEND_CATEGORIES = 5;
 const SEGMENT_GAP_LENGTH = 2;
 
-export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vertical' }: PieChartProps) {
+export function PieChart({
+  categories,
+  totalYen,
+  onCategoryPress,
+  selectedCategoryName
+}: PieChartProps) {
   if (totalYen <= 0 || categories.length === 0) {
     return (
       <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 180 }}>
@@ -34,15 +39,13 @@ export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vert
     );
   }
 
-  const chartSize = layout === 'horizontal' ? 132 : 160;
+  const chartSize = 170;
   const center = chartSize / 2;
-  const outerRadius = layout === 'horizontal' ? 52 : 62;
-  const innerRadius = layout === 'horizontal' ? 37 : 47;
+  const outerRadius = 68;
+  const innerRadius = 48;
   const strokeWidth = outerRadius - innerRadius;
   const strokeRadius = (outerRadius + innerRadius) / 2;
   const circumference = 2 * Math.PI * strokeRadius;
-  const legendCategories = categories.slice(0, MAX_LEGEND_CATEGORIES);
-  const hiddenCategoryCount = categories.length - legendCategories.length;
   const segments = buildSegments(categories, totalYen, circumference);
 
   function handleCategoryPress(category: CategoryStat, event: GestureResponderEvent) {
@@ -55,8 +58,8 @@ export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vert
   }
 
   return (
-    <View style={layout === 'horizontal' ? chartStyles.horizontalChart : chartStyles.verticalChart}>
-      <View style={{ alignItems: 'center' }}>
+    <View style={chartStyles.chart}>
+      <View style={chartStyles.donutWrap}>
         <Svg height={chartSize} viewBox={`0 0 ${chartSize} ${chartSize}`} width={chartSize}>
           <Circle cx={center} cy={center} fill="rgba(15,118,110,0.08)" r={outerRadius} />
           {segments.length === 1 ? (
@@ -85,12 +88,34 @@ export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vert
             ))
           )}
           <Circle cx={center} cy={center} fill={theme.chart.donutCenter} r={innerRadius} />
+          <SvgText
+            fill={colors.ink}
+            fontFamily={fontFamilies.bold}
+            fontSize={16}
+            fontWeight="600"
+            textAnchor="middle"
+            x={center}
+            y={center - 2}
+          >
+            {formatCompactYen(totalYen)}
+          </SvgText>
+          <SvgText
+            fill={colors.muted}
+            fontFamily={fontFamilies.regular}
+            fontSize={11}
+            textAnchor="middle"
+            x={center}
+            y={center + 18}
+          >
+            Total
+          </SvgText>
         </Svg>
       </View>
 
-      <View style={layout === 'horizontal' ? chartStyles.compactLegend : chartStyles.legend}>
-        {legendCategories.map((category) => {
+      <View style={chartStyles.legend}>
+        {categories.map((category) => {
           const disabled = !onCategoryPress;
+          const selected = selectedCategoryName === category.category;
           return (
             <Pressable
               disabled={disabled}
@@ -98,38 +123,25 @@ export function PieChart({ categories, totalYen, onCategoryPress, layout = 'vert
               key={`${category.category}-${category.color}`}
               onPress={(event) => handleCategoryPress(category, event)}
               style={({ pressed }) => [
-                styles.between,
                 chartStyles.categoryRow,
+                selected && chartStyles.categoryRowSelected,
                 pressed && !disabled && chartStyles.categoryRowPressed
               ]}
             >
               <View style={chartStyles.legendName}>
-                <View
-                  style={{
-                    backgroundColor: category.color,
-                    borderRadius: 4,
-                    height: 12,
-                    marginTop: 4,
-                    width: 12
-                  }}
-                />
-                <Text ellipsizeMode="tail" numberOfLines={1} style={layout === 'horizontal' ? chartStyles.compactLegendText : styles.body}>
+                <View style={[chartStyles.legendDot, { backgroundColor: category.color }]} />
+                <Ionicons color={colors.ink} name={iconForCategory(category.category)} size={18} />
+                <Text ellipsizeMode="tail" numberOfLines={1} style={chartStyles.legendText}>
                   {category.category}
                 </Text>
               </View>
-              <Text style={layout === 'horizontal' ? chartStyles.compactPercentage : chartStyles.amountText}>
-                {layout === 'horizontal' ? `${category.percentage.toFixed(1)}%` : formatYen(category.amountYen)}
+              <Text style={chartStyles.percentageText}>{category.percentage.toFixed(1)}%</Text>
+              <Text adjustsFontSizeToFit numberOfLines={1} style={chartStyles.amountText}>
+                {formatYen(category.amountYen)}
               </Text>
             </Pressable>
           );
         })}
-        {hiddenCategoryCount > 0 ? (
-          <View style={chartStyles.moreRow}>
-            <Text style={layout === 'horizontal' ? chartStyles.compactMoreText : chartStyles.moreText}>
-              +{hiddenCategoryCount} more
-            </Text>
-          </View>
-        ) : null}
       </View>
     </View>
   );
@@ -153,75 +165,110 @@ function buildSegments(categories: CategoryStat[], totalYen: number, circumferen
   return segments;
 }
 
+function iconForCategory(category: string): keyof typeof Ionicons.glyphMap {
+  const normalized = category.toLowerCase();
+  if (normalized.includes('housing') || normalized.includes('house') || normalized.includes('rent')) {
+    return 'home-outline';
+  }
+  if (
+    normalized.includes('food') ||
+    normalized.includes('dining') ||
+    normalized.includes('grocery') ||
+    normalized.includes('groceries') ||
+    normalized.includes('meal') ||
+    normalized.includes('restaurant')
+  ) {
+    return 'restaurant-outline';
+  }
+  if (normalized.includes('transport') || normalized.includes('train') || normalized.includes('taxi') || normalized.includes('commute')) {
+    return 'bus-outline';
+  }
+  if (normalized.includes('utilities') || normalized.includes('electric') || normalized.includes('power') || normalized.includes('gas')) {
+    return 'flash-outline';
+  }
+  if (normalized.includes('shopping') || normalized.includes('store') || normalized.includes('clothes')) {
+    return 'bag-outline';
+  }
+  if (normalized.includes('travel')) {
+    return 'airplane-outline';
+  }
+  if (normalized.includes('health')) {
+    return 'medkit-outline';
+  }
+  if (normalized.includes('entertainment')) {
+    return 'film-outline';
+  }
+  return 'ellipsis-horizontal';
+}
+
 const chartStyles = StyleSheet.create({
   amountText: {
-    color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 16,
-    fontWeight: '800'
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 18,
+    maxWidth: 92,
+    minWidth: 76,
+    textAlign: 'right'
   },
   categoryRow: {
-    alignItems: 'flex-start',
+    alignItems: 'center',
     borderRadius: 8,
+    flexDirection: 'row',
+    gap: 8,
     marginHorizontal: -6,
+    minHeight: 36,
     paddingHorizontal: 6,
-    paddingVertical: 2
+    paddingVertical: 3
   },
   categoryRowPressed: {
     backgroundColor: colors.tint
   },
-  compactLegend: {
-    flex: 1,
-    gap: 8,
-    minWidth: 0
+  categoryRowSelected: {
+    backgroundColor: 'rgba(15,118,110,0.08)'
   },
-  compactLegendText: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 18
-  },
-  compactMoreText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 13,
-    fontWeight: '800',
-    lineHeight: 18
-  },
-  compactPercentage: {
-    color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 18
-  },
-  horizontalChart: {
+  chart: {
     alignItems: 'center',
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 20
   },
+  donutWrap: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    justifyContent: 'center',
+    width: '100%'
+  },
   legend: {
-    gap: 10
+    gap: 5,
+    width: '100%'
+  },
+  legendDot: {
+    borderRadius: 6,
+    height: 12,
+    width: 12
   },
   legendName: {
+    alignItems: 'center',
     flex: 1,
     flexDirection: 'row',
     gap: 8,
     minWidth: 0
   },
-  moreRow: {
-    paddingHorizontal: 6,
-    paddingVertical: 2
+  legendText: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18
   },
-  moreText: {
+  percentageText: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 14,
-    fontWeight: '800'
-  },
-  verticalChart: {
-    gap: 16
+    fontFamily: fontFamilies.bold,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    minWidth: 46,
+    textAlign: 'right'
   }
 });

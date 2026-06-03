@@ -71,6 +71,7 @@ export function CategoryTrendModal({
   const trend = useCategoryTrend({
     ledgerId,
     category: rendered ? displayCategory?.category || null : null,
+    categoryNames: rendered ? displayCategory?.sourceCategories : undefined,
     endMonthKey,
     months: TREND_MONTH_COUNTS[trendMonths],
     range,

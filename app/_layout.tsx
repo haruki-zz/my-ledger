@@ -45,8 +45,8 @@ export default function RootLayout() {
   }
 
   const resolvedRegularFont = fontError ? fontFamilies.fallback : fontFamilies.regular;
-  const resolvedBoldFont = fontError ? fontFamilies.fallback : fontFamilies.bold;
-  const resolvedHeaderFont = fontError ? fontFamilies.fallback : fontFamilies.extraBold;
+  const resolvedBoldFont = fontError ? fontFamilies.fallback : fontFamilies.semiBold;
+  const resolvedHeaderFont = fontError ? fontFamilies.fallback : fontFamilies.bold;
 
   return (
     <AuthProvider>
@@ -60,7 +60,7 @@ export default function RootLayout() {
               headerTitleStyle: {
                 color: colors.ink,
                 fontFamily: resolvedHeaderFont,
-                fontWeight: '800'
+                fontWeight: '700'
               },
               headerBackTitleStyle: {
                 fontFamily: resolvedRegularFont
@@ -87,7 +87,7 @@ export default function RootLayout() {
                       color: colors.primaryDark,
                       fontFamily: resolvedBoldFont,
                       fontSize: 16,
-                      fontWeight: '700'
+                      fontWeight: '600'
                     }}>
                       Cancel
                     </Text>
