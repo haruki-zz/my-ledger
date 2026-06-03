@@ -4,6 +4,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 
 import { ExpenseForm } from '@/src/components/ExpenseForm';
 import { styles } from '@/src/components/styles';
+import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   getExpense,
@@ -12,11 +13,11 @@ import {
   getLedgerMembers,
   getProfiles
 } from '@/src/lib/ledger';
-import { supabase } from '@/src/lib/supabase';
 import type { Expense, Ledger, LedgerCategory, LedgerMemberProfile, Profile } from '@/src/types/database';
 
 export default function EditExpenseScreen() {
   const params = useLocalSearchParams<{ id: string }>();
+  const { loading: authLoading, session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
@@ -28,7 +29,7 @@ export default function EditExpenseScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (ledgerLoading) {
+    if (authLoading || ledgerLoading) {
       return;
     }
 
@@ -38,9 +39,8 @@ export default function EditExpenseScreen() {
         throw new Error('Missing expense ID');
       }
 
-      const { data: userData } = await supabase.auth.getUser();
-
-      if (!userData.user) {
+      const user = session?.user || null;
+      if (!user) {
         router.replace('/auth');
         return;
       }
@@ -73,7 +73,7 @@ export default function EditExpenseScreen() {
       ];
       const nextProfiles = await getProfiles(profileIds);
 
-      setCurrentUserId(userData.user.id);
+      setCurrentUserId(user.id);
       setLedger(currentLedger);
       setMembers(nextMembers);
       setCategories(nextCategories);
@@ -84,7 +84,7 @@ export default function EditExpenseScreen() {
     } finally {
       setLoading(false);
     }
-  }, [activeLedger?.ledger, ledgerLoading, params.id]);
+  }, [activeLedger?.ledger, authLoading, ledgerLoading, params.id, session?.user]);
 
   useEffect(() => {
     load();

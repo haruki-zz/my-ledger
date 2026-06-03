@@ -4,6 +4,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 
 import { ExpenseForm } from '@/src/components/ExpenseForm';
 import { styles } from '@/src/components/styles';
+import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   getLedgerCategories,
@@ -11,10 +12,10 @@ import {
   getErrorMessage,
   getProfiles
 } from '@/src/lib/ledger';
-import { supabase } from '@/src/lib/supabase';
 import type { Ledger, LedgerCategory, LedgerMemberProfile, Profile } from '@/src/types/database';
 
 export default function NewExpenseScreen() {
+  const { loading: authLoading, session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
@@ -25,14 +26,13 @@ export default function NewExpenseScreen() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (ledgerLoading) {
+    if (authLoading || ledgerLoading) {
       return;
     }
 
     try {
-      const { data: userData } = await supabase.auth.getUser();
-
-      if (!userData.user) {
+      const user = session?.user || null;
+      if (!user) {
         router.replace('/auth');
         return;
       }
@@ -53,7 +53,7 @@ export default function NewExpenseScreen() {
       }
       const nextProfiles = await getProfiles(nextMembers.map((member) => member.user_id));
 
-      setCurrentUserId(userData.user.id);
+      setCurrentUserId(user.id);
       setLedger(currentLedger);
       setMembers(nextMembers);
       setCategories(nextCategories);
@@ -63,7 +63,7 @@ export default function NewExpenseScreen() {
     } finally {
       setLoading(false);
     }
-  }, [activeLedger?.ledger, ledgerLoading]);
+  }, [activeLedger?.ledger, authLoading, ledgerLoading, session?.user]);
 
   useEffect(() => {
     load();

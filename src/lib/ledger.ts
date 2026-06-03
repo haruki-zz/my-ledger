@@ -86,7 +86,13 @@ export async function getMyLedgerMemberships(currentUserId?: string | null): Pro
     return mapLedgerMemberships(cachedMemberships as LedgerMembershipRow[], userId);
   }
 
-  await refreshMemberships(userId);
+  try {
+    await refreshMemberships(userId);
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
   return mapLedgerMemberships((await getCachedLedgerMemberships(userId)) as LedgerMembershipRow[], userId);
 }
 
@@ -157,7 +163,13 @@ export async function getLedgerMembers(ledgerId: string): Promise<LedgerMemberPr
     return cachedMembers;
   }
 
-  await refreshLedgerMembers(ledgerId);
+  try {
+    await refreshLedgerMembers(ledgerId);
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
   return getCachedLedgerMembers(ledgerId);
 }
 
@@ -167,7 +179,13 @@ export async function getLedgerCategories(ledgerId: string): Promise<LedgerCateg
     return cachedCategories;
   }
 
-  await refreshLedgerCategories(ledgerId);
+  try {
+    await refreshLedgerCategories(ledgerId);
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
   return getCachedLedgerCategories(ledgerId);
 }
 
@@ -212,6 +230,17 @@ export function getErrorMessage(error: unknown) {
   return String(error);
 }
 
+function isOfflineError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes('fetch failed') ||
+    message.includes('offline') ||
+    message.includes('internet connection') ||
+    message.includes('network request failed') ||
+    message.includes('network error')
+  );
+}
+
 export type SaveLedgerCategoryInput = {
   ledgerId: string;
   categoryName: string;
@@ -244,7 +273,14 @@ export async function getProfiles(userIds: string[]): Promise<Record<string, Pro
     return cachedProfiles;
   }
 
-  const refreshedProfiles = await refreshProfiles(missingIds);
+  let refreshedProfiles: Record<string, Profile> = {};
+  try {
+    refreshedProfiles = await refreshProfiles(missingIds);
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
   return {
     ...cachedProfiles,
     ...refreshedProfiles
@@ -257,7 +293,13 @@ export async function getExpenses(ledgerId: string): Promise<Expense[]> {
     return cachedExpenses;
   }
 
-  await refreshExpenses(ledgerId);
+  try {
+    await refreshExpenses(ledgerId);
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
   return getCachedExpenses(ledgerId);
 }
 
@@ -271,7 +313,13 @@ export async function getExpensesByMonth(
     return cachedExpenses;
   }
 
-  await refreshExpenses(ledgerId);
+  try {
+    await refreshExpenses(ledgerId);
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
   return getCachedExpensesByMonth(ledgerId, startDate, endDate);
 }
 
@@ -285,7 +333,13 @@ export async function getFirstExpenseSpentOn(ledgerId: string): Promise<string |
     return null;
   }
 
-  await refreshExpenses(ledgerId);
+  try {
+    await refreshExpenses(ledgerId);
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
   return getCachedFirstExpenseSpentOn(ledgerId);
 }
 
@@ -378,16 +432,23 @@ export async function getOpenTransferItems(ledgerId: string): Promise<TransferCh
     return cachedItems;
   }
 
-  const { data, error } = await supabase.rpc('get_open_transfer_items', {
-    p_ledger_id: ledgerId
-  });
+  try {
+    const { data, error } = await supabase.rpc('get_open_transfer_items', {
+      p_ledger_id: ledgerId
+    });
 
-  if (error) {
-    throw error;
+    if (error) {
+      throw error;
+    }
+
+    await cacheTransferItems(ledgerId, data || []);
+    return data || cachedItems;
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+    return cachedItems;
   }
-
-  await cacheTransferItems(ledgerId, data || []);
-  return data || cachedItems;
 }
 
 export async function setTransferConfirmations(updates: TransferConfirmationUpdate[]) {

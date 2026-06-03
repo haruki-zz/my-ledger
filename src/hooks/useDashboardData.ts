@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   getExpensesByMonth,
@@ -17,10 +18,10 @@ import {
   monthStartDateString,
   type DashboardRange
 } from '@/src/lib/stats';
-import { supabase } from '@/src/lib/supabase';
 import type { Expense, Ledger, LedgerMemberProfile, Profile } from '@/src/types/database';
 
 export function useDashboardData(monthKey: string, range: DashboardRange) {
+  const { session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const currentLedger = activeLedger?.ledger || null;
   const ledgerId = currentLedger?.id || null;
@@ -60,12 +61,12 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
     setRefreshing(shouldKeepCurrentData);
 
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError) {
-        throw userError;
+      const userId = session?.user.id || null;
+      if (!userId) {
+        router.replace('/auth');
+        return;
       }
 
-      const userId = userData.user?.id || null;
       const activeLedger = currentLedgerRef.current;
       if (!activeLedger) {
         router.replace('/ledger');
@@ -118,7 +119,7 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
         setRefreshing(false);
       }
     }
-  }, [ledgerLoading, monthKey]);
+  }, [ledgerLoading, monthKey, session?.user.id]);
 
   useEffect(() => {
     requestSequence.current += 1;
