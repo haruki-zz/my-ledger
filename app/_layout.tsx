@@ -13,6 +13,7 @@ import { Pressable, Text } from 'react-native';
 import { colors, fontFamilies } from '@/src/components/styles';
 import { AuthProvider } from '@/src/context/AuthContext';
 import { LedgerProvider } from '@/src/context/LedgerContext';
+import { SyncProvider } from '@/src/context/SyncContext';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -49,54 +50,57 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <LedgerProvider>
-        <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerStyle: { backgroundColor: colors.bg },
-            headerShadowVisible: false,
-            headerTitleStyle: {
-              color: colors.ink,
-              fontFamily: resolvedHeaderFont,
-              fontWeight: '800'
-            },
-            headerBackTitleStyle: {
-              fontFamily: resolvedRegularFont
-            }
-          }}
-        >
-          <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="auth" options={{ title: 'Sign In' }} />
-          <Stack.Screen name="ledger" options={{ title: 'Shared Ledger' }} />
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          {/* Settings detail screens */}
-          <Stack.Screen name="settings/account" options={{ headerBackTitle: 'Settings', title: 'Account' }} />
-          <Stack.Screen name="settings/categories" options={{ headerBackTitle: 'Settings', title: 'Categories' }} />
-          <Stack.Screen name="settings/ledgers" options={{ headerBackTitle: 'Settings', title: 'Ledgers' }} />
-          <Stack.Screen name="settings/ledger/[id]" options={{ headerBackTitle: 'Ledgers', title: 'Ledger Details' }} />
-          {/* Expense detail screens */}
-          <Stack.Screen
-            name="expenses/new"
-            options={{
-              headerLeft: () => (
-                <Pressable onPress={dismissNewExpense}>
-                  <Text style={{
-                    color: colors.primaryDark,
-                    fontFamily: resolvedBoldFont,
-                    fontSize: 16,
-                    fontWeight: '700'
-                  }}>
-                    Cancel
-                  </Text>
-                </Pressable>
-              ),
-              presentation: 'modal',
-              title: 'New Expense'
+      <SyncProvider>
+        <LedgerProvider>
+          <StatusBar style="dark" />
+          <Stack
+            screenOptions={{
+              headerStyle: { backgroundColor: colors.bg },
+              headerShadowVisible: false,
+              headerTitleStyle: {
+                color: colors.ink,
+                fontFamily: resolvedHeaderFont,
+                fontWeight: '800'
+              },
+              headerBackTitleStyle: {
+                fontFamily: resolvedRegularFont
+              }
             }}
-          />
-          <Stack.Screen name="expenses/[id]" options={{ headerBackTitle: 'History', title: 'Edit Expense' }} />
-        </Stack>
-      </LedgerProvider>
+          >
+            <Stack.Screen name="index" options={{ headerShown: false }} />
+            <Stack.Screen name="auth" options={{ title: 'Sign In' }} />
+            <Stack.Screen name="ledger" options={{ title: 'Shared Ledger' }} />
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            {/* Settings detail screens */}
+            <Stack.Screen name="settings/account" options={{ headerBackTitle: 'Settings', title: 'Account' }} />
+            <Stack.Screen name="settings/categories" options={{ headerBackTitle: 'Settings', title: 'Categories' }} />
+            <Stack.Screen name="settings/ledgers" options={{ headerBackTitle: 'Settings', title: 'Ledgers' }} />
+            <Stack.Screen name="settings/sync" options={{ headerBackTitle: 'Settings', title: 'Sync Status' }} />
+            <Stack.Screen name="settings/ledger/[id]" options={{ headerBackTitle: 'Ledgers', title: 'Ledger Details' }} />
+            {/* Expense detail screens */}
+            <Stack.Screen
+              name="expenses/new"
+              options={{
+                headerLeft: () => (
+                  <Pressable onPress={dismissNewExpense}>
+                    <Text style={{
+                      color: colors.primaryDark,
+                      fontFamily: resolvedBoldFont,
+                      fontSize: 16,
+                      fontWeight: '700'
+                    }}>
+                      Cancel
+                    </Text>
+                  </Pressable>
+                ),
+                presentation: 'modal',
+                title: 'New Expense'
+              }}
+            />
+            <Stack.Screen name="expenses/[id]" options={{ headerBackTitle: 'History', title: 'Edit Expense' }} />
+          </Stack>
+        </LedgerProvider>
+      </SyncProvider>
     </AuthProvider>
   );
 }

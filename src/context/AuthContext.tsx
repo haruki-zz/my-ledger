@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { supabase } from '@/src/lib/supabase';
+import { clearLocalBusinessData } from '@/src/lib/localDb';
+import { setLocalRepositoryUserId } from '@/src/lib/localRepository';
 
 type AuthState = {
   session: Session | null;
@@ -28,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      setLocalRepositoryUserId(data.session?.user.id || null);
       setSession(data.session);
       setLoading(false);
     });
@@ -35,6 +38,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription }
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setLocalRepositoryUserId(nextSession?.user.id || null);
       setSession(nextSession);
       setLoading(false);
     });
@@ -51,6 +55,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw error;
     }
 
+    await clearLocalBusinessData();
+    setLocalRepositoryUserId(null);
     setSession(null);
   }, []);
 

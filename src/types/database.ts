@@ -212,6 +212,27 @@ export type Database = {
         Args: { p_ledger_id: string; p_category_name: string };
         Returns: undefined;
       };
+      save_ledger_category_offline: {
+        Args: {
+          p_category_id: string;
+          p_ledger_id: string;
+          p_category_name: string;
+          p_split_ratio_a: number;
+          p_split_ratio_b: number;
+          p_sort_order: number;
+          p_base_updated_at: string | null;
+        };
+        Returns: Database['public']['Tables']['ledger_categories']['Row'];
+      };
+      delete_ledger_category_offline: {
+        Args: {
+          p_category_id: string;
+          p_ledger_id: string;
+          p_category_name: string;
+          p_base_updated_at: string | null;
+        };
+        Returns: undefined;
+      };
       save_expense: {
         Args: {
           p_expense_id: string | null;
@@ -226,8 +247,27 @@ export type Database = {
         };
         Returns: Database['public']['Tables']['expenses']['Row'];
       };
+      save_expense_offline: {
+        Args: {
+          p_expense_id: string;
+          p_ledger_id: string;
+          p_amount_yen: number;
+          p_category: string;
+          p_paid_by: string;
+          p_ownership: ExpenseOwnership;
+          p_spent_on: string;
+          p_note: string | null;
+          p_splits: Json;
+          p_base_updated_at: string | null;
+        };
+        Returns: Database['public']['Tables']['expenses']['Row'];
+      };
       delete_expense: {
         Args: { p_expense_id: string };
+        Returns: undefined;
+      };
+      delete_expense_offline: {
+        Args: { p_expense_id: string; p_ledger_id: string; p_base_updated_at: string | null };
         Returns: undefined;
       };
       get_open_transfer_items: {

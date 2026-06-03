@@ -7,12 +7,14 @@ import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollVie
 import { styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
+import { useSyncContext } from '@/src/context/SyncContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { getErrorMessage, getLedgerMembers, updateMyProfile } from '@/src/lib/ledger';
 
 export default function AccountSettingsScreen() {
   const { signOut: signOutSession } = useAuth();
+  const sync = useSyncContext();
   const {
     error: ledgerError,
     ledger,
@@ -67,6 +69,28 @@ export default function AccountSettingsScreen() {
   }
 
   async function signOut() {
+    if (sync.hasUnsyncedChanges) {
+      Alert.alert(
+        'Unsynced Changes',
+        'There are local changes that have not synced yet. Signing out now will discard them from this device.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Force Sign Out',
+            style: 'destructive',
+            onPress: () => {
+              void forceSignOut();
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    await forceSignOut();
+  }
+
+  async function forceSignOut() {
     try {
       await signOutSession();
     } catch (signOutError) {

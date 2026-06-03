@@ -18,7 +18,7 @@ import {
   seedDefaultLedgerCategories,
   saveLedgerCategory
 } from '@/src/lib/ledger';
-import { supabase } from '@/src/lib/supabase';
+import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import type { LedgerCategory, LedgerMemberProfile } from '@/src/types/database';
 
 function parseRatio(value: string) {
@@ -44,7 +44,6 @@ export default function CategorySettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const categoryLoadSequenceRef = useRef(0);
   const legacySeedPromisesRef = useRef(new Map<string, Promise<void>>());
-  const realtimeSubscriptionSequenceRef = useRef(0);
 
   async function seedLegacyCategories(ledgerId: string) {
     const existingPromise = legacySeedPromisesRef.current.get(ledgerId);
@@ -117,26 +116,9 @@ export default function CategorySettingsScreen() {
       return undefined;
     }
 
-    const subscriptionId = ++realtimeSubscriptionSequenceRef.current;
-    const channel = supabase
-      .channel(`ledger-categories-${ledgerId}-${subscriptionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'ledger_categories',
-          filter: `ledger_id=eq.${ledgerId}`
-        },
-        () => {
-          loadCategoryData();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeToLedgerData(ledgerId, () => {
+      void loadCategoryData();
+    });
   }, [ledgerId, loadCategoryData]);
 
   const memberNames = useMemo(() => {

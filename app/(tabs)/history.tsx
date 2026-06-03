@@ -26,6 +26,7 @@ import {
   getLedgerMembers,
   getProfiles
 } from '@/src/lib/ledger';
+import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
   addMonths,
   amountForUser,
@@ -33,7 +34,6 @@ import {
   formatMonthLabel,
   monthKeyFromDateString
 } from '@/src/lib/stats';
-import { supabase } from '@/src/lib/supabase';
 import type { Expense, Ledger, Profile } from '@/src/types/database';
 
 type FilterDropdownKey = 'user' | 'category' | 'startMonth' | 'endMonth';
@@ -48,7 +48,6 @@ type FilteredExpense = {
   expense: Expense;
 };
 
-let realtimeSubscriptionSequence = 0;
 const historyDateFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
@@ -139,37 +138,9 @@ export default function HistoryScreen() {
       return undefined;
     }
 
-    const subscriptionId = ++realtimeSubscriptionSequence;
-    const channel = supabase
-      .channel(`ledger-history-${ledgerId}-${subscriptionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expenses',
-          filter: `ledger_id=eq.${ledgerId}`
-        },
-        () => {
-          load();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expense_splits'
-        },
-        () => {
-          load();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeToLedgerData(ledgerId, () => {
+      void load();
+    });
   }, [ledgerId, load]);
 
   const profileDisplayName = useCallback((userId: string) => {

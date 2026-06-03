@@ -6,12 +6,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, styles } from '@/src/components/styles';
 import { InsetActionRow, SettingsSection } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
+import { useSyncContext } from '@/src/context/SyncContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { getErrorMessage, getLedgerMembers } from '@/src/lib/ledger';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { session, signOut: signOutSession } = useAuth();
+  const sync = useSyncContext();
   const { error, ledger, loading, reloadLedger } = useRequiredLedger();
   const ledgerId = ledger?.id;
   const [memberCount, setMemberCount] = useState<number | null>(null);
@@ -63,6 +65,28 @@ export default function SettingsScreen() {
   }
 
   async function signOut() {
+    if (sync.hasUnsyncedChanges) {
+      Alert.alert(
+        'Unsynced Changes',
+        'There are local changes that have not synced yet. Signing out now will discard them from this device.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Force Sign Out',
+            style: 'destructive',
+            onPress: () => {
+              void forceSignOut();
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    await forceSignOut();
+  }
+
+  async function forceSignOut() {
     try {
       await signOutSession();
     } catch (signOutError) {
@@ -113,7 +137,14 @@ export default function SettingsScreen() {
           description="Shared categories, split ratios"
           icon="pricetags-outline"
           onPress={() => router.push('/settings/categories')}
+          showDivider
           title="Categories"
+        />
+        <InsetActionRow
+          description={`${sync.pending} pending · ${sync.failed} failed · ${sync.conflict} conflicts`}
+          icon="cloud-upload-outline"
+          onPress={() => router.push('/settings/sync')}
+          title="Sync status"
         />
       </SettingsSection>
 

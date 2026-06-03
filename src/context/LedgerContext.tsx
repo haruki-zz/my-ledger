@@ -12,7 +12,15 @@ import {
   leaveLedger as leaveLedgerById,
   type LedgerMembership
 } from '@/src/lib/ledger';
-import { isSupabaseConfigured } from '@/src/lib/supabase';
+import {
+  isLocalRepositoryOnline,
+  refreshExpenses,
+  refreshLedgerCategories,
+  refreshLedgerLocalData,
+  refreshMemberships
+} from '@/src/lib/localRepository';
+import { emitLedgerDataChanged } from '@/src/lib/localEvents';
+import { isSupabaseConfigured, supabase } from '@/src/lib/supabase';
 
 const ACTIVE_LEDGER_STORAGE_KEY = 'my-ledger.activeLedgerId';
 
@@ -39,8 +47,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadSequenceRef = useRef(0);
+  const membershipRefreshRef = useRef<Promise<void> | null>(null);
 
-  const reloadLedgers = useCallback(async (preferredLedgerId?: string | null) => {
+  const reloadLedgers = useCallback(async (preferredLedgerId?: string | null, refreshRemote = true) => {
     const loadSequence = ++loadSequenceRef.current;
 
     if (authLoading || !isSupabaseConfigured) {
@@ -65,7 +74,7 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       const storedLedgerId = preferredLedgerId === undefined
         ? await AsyncStorage.getItem(ACTIVE_LEDGER_STORAGE_KEY)
         : preferredLedgerId;
-      const nextLedgers = await getMyLedgerMemberships();
+      const nextLedgers = await getMyLedgerMemberships(userId);
       const nextActiveLedger = nextLedgers.find((membership) => membership.ledger.id === storedLedgerId)
         || nextLedgers[0]
         || null;
@@ -79,6 +88,35 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
         setLedgers(nextLedgers);
         setActiveLedger(nextActiveLedger);
+      }
+
+      if (refreshRemote && isLocalRepositoryOnline() && !membershipRefreshRef.current) {
+        membershipRefreshRef.current = refreshMemberships(userId)
+          .then(async () => {
+            const refreshedLedgers = await getMyLedgerMemberships(userId);
+            const refreshedActiveLedger = refreshedLedgers.find((membership) => membership.ledger.id === storedLedgerId)
+              || refreshedLedgers[0]
+              || null;
+
+            if (loadSequence !== loadSequenceRef.current) {
+              return;
+            }
+
+            if (refreshedActiveLedger) {
+              await AsyncStorage.setItem(ACTIVE_LEDGER_STORAGE_KEY, refreshedActiveLedger.ledger.id);
+            } else {
+              await AsyncStorage.removeItem(ACTIVE_LEDGER_STORAGE_KEY);
+            }
+
+            setLedgers(refreshedLedgers);
+            setActiveLedger(refreshedActiveLedger);
+          })
+          .catch((refreshError) => {
+            console.warn('Could not refresh ledger memberships:', getErrorMessage(refreshError));
+          })
+          .finally(() => {
+            membershipRefreshRef.current = null;
+          });
       }
 
       return nextActiveLedger;
@@ -103,6 +141,69 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
 
     void reloadLedgers();
   }, [authLoading, reloadLedgers, userId]);
+
+  useEffect(() => {
+    const ledgerId = activeLedger?.ledger.id;
+    if (!ledgerId) {
+      return undefined;
+    }
+
+    void refreshLedgerLocalData(ledgerId);
+
+    const channel = supabase
+      .channel(`ledger-local-refresh-${ledgerId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'expenses',
+          filter: `ledger_id=eq.${ledgerId}`
+        },
+        () => {
+          void refreshExpenses(ledgerId);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ledger_categories',
+          filter: `ledger_id=eq.${ledgerId}`
+        },
+        () => {
+          void refreshLedgerCategories(ledgerId);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'expense_splits'
+        },
+        () => {
+          void refreshExpenses(ledgerId);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transfer_checklist_completions'
+        },
+        () => {
+          emitLedgerDataChanged(ledgerId);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeLedger?.ledger.id]);
 
   const selectLedger = useCallback(async (ledgerId: string) => {
     const selectedLedger = ledgers.find((membership) => membership.ledger.id === ledgerId);

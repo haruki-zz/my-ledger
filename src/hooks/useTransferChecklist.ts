@@ -5,10 +5,8 @@ import {
   setTransferConfirmations,
   type TransferConfirmationUpdate
 } from '@/src/lib/ledger';
-import { supabase } from '@/src/lib/supabase';
+import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import type { TransferChecklistItemRow } from '@/src/types/database';
-
-let transferChecklistSubscriptionSequence = 0;
 const REALTIME_RELOAD_DEBOUNCE_MS = 250;
 
 export function useTransferChecklist(ledgerId: string | null) {
@@ -89,62 +87,18 @@ export function useTransferChecklist(ledgerId: string | null) {
   }, [load]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
     if (!ledgerId) {
       return undefined;
     }
 
-    const subscriptionId = ++transferChecklistSubscriptionSequence;
-    const channel = supabase
-      .channel(`ledger-transfers-${ledgerId}-${subscriptionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expenses',
-          filter: `ledger_id=eq.${ledgerId}`
-        },
-        () => {
-          scheduleReload();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expense_splits'
-        },
-        () => {
-          scheduleReload();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'transfer_checklist_completions'
-        },
-        () => {
-          scheduleReload();
-        }
-      )
-      .subscribe();
+    return subscribeToLedgerData(ledgerId, () => {
+      void loadRef.current();
+    });
+  }, [ledgerId]);
 
-    return () => {
-      if (reloadTimer.current) {
-        clearTimeout(reloadTimer.current);
-        reloadTimer.current = null;
-      }
-
-      supabase.removeChannel(channel);
-    };
-  }, [ledgerId, scheduleReload]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const setConfirmations = useCallback(async (updates: TransferConfirmationUpdate[]) => {
     if (updates.length === 0) {

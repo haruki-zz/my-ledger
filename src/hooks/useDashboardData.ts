@@ -8,6 +8,7 @@ import {
   getLedgerMembers,
   getProfiles
 } from '@/src/lib/ledger';
+import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
   buildDashboardStats,
   compareMonthKeys,
@@ -18,8 +19,6 @@ import {
 } from '@/src/lib/stats';
 import { supabase } from '@/src/lib/supabase';
 import type { Expense, Ledger, LedgerMemberProfile, Profile } from '@/src/types/database';
-
-let realtimeSubscriptionSequence = 0;
 
 export function useDashboardData(monthKey: string, range: DashboardRange) {
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
@@ -149,49 +148,9 @@ export function useDashboardData(monthKey: string, range: DashboardRange) {
       return undefined;
     }
 
-    const subscriptionId = ++realtimeSubscriptionSequence;
-    const channel = supabase
-      .channel(`ledger-dashboard-${ledgerId}-${subscriptionId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expenses',
-          filter: `ledger_id=eq.${ledgerId}`
-        },
-        () => {
-          void loadRef.current();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'ledger_categories',
-          filter: `ledger_id=eq.${ledgerId}`
-        },
-        () => {
-          void loadRef.current();
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'expense_splits'
-        },
-        () => {
-          void loadRef.current();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return subscribeToLedgerData(ledgerId, () => {
+      void loadRef.current();
+    });
   }, [ledgerId]);
 
   const stats = useMemo(

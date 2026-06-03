@@ -1,4 +1,27 @@
 import { supabase } from '@/src/lib/supabase';
+import {
+  cacheTransferItems,
+  deleteLocalExpense,
+  deleteLocalLedgerCategory,
+  getCachedExpense,
+  getCachedExpenses,
+  getCachedExpensesByMonth,
+  getCachedFirstExpenseSpentOn,
+  getCachedLedgerCategories,
+  getCachedLedgerMembers,
+  getCachedLedgerMemberships,
+  getCachedProfiles,
+  getCachedTransferItems,
+  hasCachedExpensesSnapshot,
+  isLocalRepositoryOnline,
+  refreshExpenses,
+  refreshLedgerCategories,
+  refreshLedgerMembers,
+  refreshMemberships,
+  refreshProfiles,
+  saveLocalExpense,
+  saveLocalLedgerCategory
+} from '@/src/lib/localRepository';
 import type {
   Expense,
   ExpenseOwnership,
@@ -44,28 +67,31 @@ type LedgerMembershipRow = LedgerMember & {
   ledger: Ledger | null;
 };
 
-export async function getMyLedgerMemberships(): Promise<LedgerMembership[]> {
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError) {
-    throw userError;
+export async function getMyLedgerMemberships(currentUserId?: string | null): Promise<LedgerMembership[]> {
+  let userId = currentUserId || null;
+  if (!userId) {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError) {
+      throw userError;
+    }
+    userId = userData.user?.id || null;
   }
 
-  const userId = userData.user?.id;
   if (!userId) {
     return [];
   }
 
-  const { data: memberships, error: membershipError } = await supabase
-    .from('ledger_members')
-    .select('*, ledger:ledgers(*)')
-    .eq('user_id', userId)
-    .order('joined_at', { ascending: true });
-
-  if (membershipError) {
-    throw membershipError;
+  const cachedMemberships = await getCachedLedgerMemberships(userId);
+  if (cachedMemberships.length > 0) {
+    return mapLedgerMemberships(cachedMemberships as LedgerMembershipRow[], userId);
   }
 
-  return ((memberships || []) as LedgerMembershipRow[])
+  await refreshMemberships(userId);
+  return mapLedgerMemberships((await getCachedLedgerMemberships(userId)) as LedgerMembershipRow[], userId);
+}
+
+function mapLedgerMemberships(memberships: LedgerMembershipRow[], userId: string): LedgerMembership[] {
+  return memberships
     .map((membership) => {
       if (!membership.ledger) {
         return null;
@@ -126,56 +152,23 @@ export async function deleteLedger(ledgerId: string) {
 }
 
 export async function getLedgerMembers(ledgerId: string): Promise<LedgerMemberProfile[]> {
-  const { data: members, error: membersError } = await supabase
-    .from('ledger_members')
-    .select('*')
-    .eq('ledger_id', ledgerId)
-    .order('joined_at', { ascending: true });
-
-  if (membersError) {
-    throw membersError;
+  const cachedMembers = await getCachedLedgerMembers(ledgerId);
+  if (cachedMembers.length > 0) {
+    return cachedMembers;
   }
 
-  const userIds = (members || []).map((member) => member.user_id);
-  if (userIds.length === 0) {
-    return [];
-  }
-
-  const { data: profiles, error: profilesError } = await supabase
-    .from('profiles')
-    .select('*')
-    .in('id', userIds);
-
-  if (profilesError) {
-    throw profilesError;
-  }
-
-  const profilesById = new Map((profiles || []).map((profile) => [profile.id, profile]));
-
-  return (members || []).map((member: LedgerMember) => ({
-    ...member,
-    profile: profilesById.get(member.user_id) || {
-      id: member.user_id,
-      display_name: 'User',
-      created_at: member.joined_at,
-      updated_at: member.joined_at
-    }
-  }));
+  await refreshLedgerMembers(ledgerId);
+  return getCachedLedgerMembers(ledgerId);
 }
 
 export async function getLedgerCategories(ledgerId: string): Promise<LedgerCategory[]> {
-  const { data, error } = await supabase
-    .from('ledger_categories')
-    .select('*')
-    .eq('ledger_id', ledgerId)
-    .order('sort_order', { ascending: true })
-    .order('category_name', { ascending: true });
-
-  if (error) {
-    throw error;
+  const cachedCategories = await getCachedLedgerCategories(ledgerId);
+  if (cachedCategories.length > 0) {
+    return cachedCategories;
   }
 
-  return data || [];
+  await refreshLedgerCategories(ledgerId);
+  return getCachedLedgerCategories(ledgerId);
 }
 
 export async function seedDefaultLedgerCategories(ledgerId: string) {
@@ -228,30 +221,15 @@ export type SaveLedgerCategoryInput = {
 };
 
 export async function saveLedgerCategory(input: SaveLedgerCategoryInput): Promise<LedgerCategory> {
-  const { data, error } = await supabase.rpc('save_ledger_category', {
-    p_ledger_id: input.ledgerId,
-    p_category_name: input.categoryName,
-    p_split_ratio_a: input.splitRatioA,
-    p_split_ratio_b: input.splitRatioB,
-    p_sort_order: input.sortOrder
-  });
-
-  if (error) {
-    throw error;
+  const savedCategory = await saveLocalLedgerCategory(input);
+  if (!savedCategory) {
+    throw new Error('Could not save category locally');
   }
-
-  return data;
+  return savedCategory;
 }
 
 export async function deleteLedgerCategory(ledgerId: string, categoryName: string) {
-  const { error } = await supabase.rpc('delete_ledger_category', {
-    p_ledger_id: ledgerId,
-    p_category_name: categoryName
-  });
-
-  if (error) {
-    throw error;
-  }
+  await deleteLocalLedgerCategory(ledgerId, categoryName);
 }
 
 export async function getProfiles(userIds: string[]): Promise<Record<string, Profile>> {
@@ -260,28 +238,27 @@ export async function getProfiles(userIds: string[]): Promise<Record<string, Pro
     return {};
   }
 
-  const { data, error } = await supabase.from('profiles').select('*').in('id', uniqueIds);
-
-  if (error) {
-    throw error;
+  const cachedProfiles = await getCachedProfiles(uniqueIds);
+  const missingIds = uniqueIds.filter((id) => !cachedProfiles[id]);
+  if (missingIds.length === 0) {
+    return cachedProfiles;
   }
 
-  return Object.fromEntries((data || []).map((profile) => [profile.id, profile]));
+  const refreshedProfiles = await refreshProfiles(missingIds);
+  return {
+    ...cachedProfiles,
+    ...refreshedProfiles
+  };
 }
 
 export async function getExpenses(ledgerId: string): Promise<Expense[]> {
-  const { data: rows, error: rowsError } = await supabase
-    .from('expenses')
-    .select('*')
-    .eq('ledger_id', ledgerId)
-    .order('spent_on', { ascending: false })
-    .order('created_at', { ascending: false });
-
-  if (rowsError) {
-    throw rowsError;
+  const cachedExpenses = await getCachedExpenses(ledgerId);
+  if (cachedExpenses.length > 0 || await hasCachedExpensesSnapshot(ledgerId)) {
+    return cachedExpenses;
   }
 
-  return attachSplits(rows || []);
+  await refreshExpenses(ledgerId);
+  return getCachedExpenses(ledgerId);
 }
 
 export async function getExpensesByMonth(
@@ -289,38 +266,35 @@ export async function getExpensesByMonth(
   startDate: string,
   endDate: string
 ): Promise<Expense[]> {
-  const { data: rows, error: rowsError } = await supabase
-    .from('expenses')
-    .select('*')
-    .eq('ledger_id', ledgerId)
-    .gte('spent_on', startDate)
-    .lte('spent_on', endDate)
-    .order('spent_on', { ascending: false })
-    .order('created_at', { ascending: false });
-
-  if (rowsError) {
-    throw rowsError;
+  const cachedExpenses = await getCachedExpensesByMonth(ledgerId, startDate, endDate);
+  if (cachedExpenses.length > 0 || await hasCachedExpensesSnapshot(ledgerId)) {
+    return cachedExpenses;
   }
 
-  return attachSplits(rows || []);
+  await refreshExpenses(ledgerId);
+  return getCachedExpensesByMonth(ledgerId, startDate, endDate);
 }
 
 export async function getFirstExpenseSpentOn(ledgerId: string): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('expenses')
-    .select('spent_on')
-    .eq('ledger_id', ledgerId)
-    .order('spent_on', { ascending: true })
-    .limit(1);
-
-  if (error) {
-    throw error;
+  const cachedSpentOn = await getCachedFirstExpenseSpentOn(ledgerId);
+  if (cachedSpentOn) {
+    return cachedSpentOn;
   }
 
-  return data?.[0]?.spent_on || null;
+  if (await hasCachedExpensesSnapshot(ledgerId)) {
+    return null;
+  }
+
+  await refreshExpenses(ledgerId);
+  return getCachedFirstExpenseSpentOn(ledgerId);
 }
 
 export async function getExpense(expenseId: string): Promise<Expense> {
+  const cachedExpense = await getCachedExpense(expenseId);
+  if (cachedExpense) {
+    return cachedExpense;
+  }
+
   const { data, error } = await supabase
     .from('expenses')
     .select('*')
@@ -376,33 +350,13 @@ export type SaveExpenseInput = {
 };
 
 export async function saveExpense(input: SaveExpenseInput): Promise<ExpenseRow> {
-  const { data, error } = await supabase.rpc('save_expense', {
-    p_expense_id: input.id || null,
-    p_ledger_id: input.ledgerId,
-    p_amount_yen: input.amountYen,
-    p_category: input.category,
-    p_paid_by: input.paidBy,
-    p_ownership: input.ownership,
-    p_spent_on: input.spentOn,
-    p_note: input.note,
-    p_splits: input.splits
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  return data;
+  const expense = await saveLocalExpense(input);
+  const { splits: _splits, ...row } = expense;
+  return row;
 }
 
 export async function deleteExpense(expenseId: string) {
-  const { error } = await supabase.rpc('delete_expense', {
-    p_expense_id: expenseId
-  });
-
-  if (error) {
-    throw error;
-  }
+  await deleteLocalExpense(expenseId);
 }
 
 export type TransferConfirmationUpdate = {
@@ -419,6 +373,11 @@ function assertTransferConfirmationUpdates(updates: TransferConfirmationUpdate[]
 }
 
 export async function getOpenTransferItems(ledgerId: string): Promise<TransferChecklistItemRow[]> {
+  const cachedItems = await getCachedTransferItems(ledgerId);
+  if (!isLocalRepositoryOnline()) {
+    return cachedItems;
+  }
+
   const { data, error } = await supabase.rpc('get_open_transfer_items', {
     p_ledger_id: ledgerId
   });
@@ -427,11 +386,16 @@ export async function getOpenTransferItems(ledgerId: string): Promise<TransferCh
     throw error;
   }
 
-  return data || [];
+  await cacheTransferItems(ledgerId, data || []);
+  return data || cachedItems;
 }
 
 export async function setTransferConfirmations(updates: TransferConfirmationUpdate[]) {
   assertTransferConfirmationUpdates(updates);
+
+  if (!isLocalRepositoryOnline()) {
+    throw new Error('Transfer confirmations require an internet connection');
+  }
 
   const { error } = await supabase.rpc('set_transfer_confirmations', {
     p_updates: updates
