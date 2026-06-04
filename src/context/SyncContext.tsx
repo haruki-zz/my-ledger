@@ -6,7 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies } from '@/src/components/styles';
-import { getLocalDb } from '@/src/lib/localDb';
+import { getLocalDb, isLocalDbUnavailableError } from '@/src/lib/localDb';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
   drainSyncQueue,
@@ -50,12 +50,32 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   });
 
   const refresh = useCallback(async () => {
-    await getLocalDb();
-    setSummary(await getSyncQueueSummary());
+    try {
+      await getLocalDb();
+      setSummary(await getSyncQueueSummary());
+    } catch (error) {
+      if (!isLocalDbUnavailableError(error)) {
+        throw error;
+      }
+      setSummary({
+        pending: 0,
+        syncing: 0,
+        failed: 0,
+        conflict: 0
+      });
+    }
   }, []);
 
   const requestDrain = useCallback(() => {
-    void drainSyncQueue().finally(refresh);
+    void drainSyncQueue()
+      .catch((error) => {
+        if (!isLocalDbUnavailableError(error)) {
+          console.warn('Could not drain sync queue:', error instanceof Error ? error.message : String(error));
+        }
+      })
+      .finally(() => {
+        void refresh();
+      });
   }, [refresh]);
 
   useEffect(() => {

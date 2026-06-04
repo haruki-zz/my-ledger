@@ -46,7 +46,13 @@ export function TransferChecklistCard({
     new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]))
   ), [members]);
   const netSummary = useMemo(() => buildNetSummary(items, members), [items, members]);
+  const participantItems = useMemo(() => (
+    currentUserId ? items.filter((item) => isParticipant(item, currentUserId)) : []
+  ), [currentUserId, items]);
+  const allParticipantItemsConfirmed = participantItems.length > 0
+    && participantItems.every((item) => completedAtForUser(item, currentUserId));
   const canOpenDetails = items.length > 0 && !loading;
+  const canConfirmNet = participantItems.length > 0 && !loading && !saving;
 
   function userName(userId: string | null) {
     if (!userId) {
@@ -57,23 +63,9 @@ export function TransferChecklistCard({
   }
 
   function directionLabel() {
-    if (loading) {
-      return 'Loading transfers';
-    }
-
-    if (netSummary.amountYen === 0) {
-      return 'Net balance settled';
-    }
-
-    if (netSummary.payerUserId === currentUserId) {
-      return `You owe ${userName(netSummary.payeeUserId)}`;
-    }
-
-    if (netSummary.payeeUserId === currentUserId) {
-      return `${userName(netSummary.payerUserId)} owes you`;
-    }
-
-    return `${userName(netSummary.payerUserId)} to ${userName(netSummary.payeeUserId)}`;
+    return netSummary.count > 0
+      ? `${userName(netSummary.payerUserId)} to ${userName(netSummary.payeeUserId)}`
+      : 'No unsettled transfer';
   }
 
   function toggleItem(item: TransferChecklistItemRow) {
@@ -87,31 +79,59 @@ export function TransferChecklistCard({
     }]);
   }
 
+  function toggleNetConfirmations() {
+    if (!canConfirmNet) {
+      return;
+    }
+
+    const nextConfirmed = !allParticipantItemsConfirmed;
+    void onSetConfirmations(participantItems.map((item) => ({
+      expense_id: item.expense_id,
+      confirmed: nextConfirmed
+    })));
+  }
+
   return (
     <>
-      <Pressable
-        accessibilityRole="button"
-        disabled={!canOpenDetails}
-        onPress={() => setOverlayVisible(true)}
-      >
-        {({ pressed }) => (
-          <BentoCard style={[localStyles.card, pressed && canOpenDetails && localStyles.cardPressed]}>
-            <View style={localStyles.iconWrap}>
-              <Ionicons color={colors.primaryDark} name="swap-horizontal" size={28} />
-            </View>
+      <BentoCard style={localStyles.card}>
+        <NetConfirmRadio
+          checked={allParticipantItemsConfirmed}
+          disabled={!canConfirmNet}
+          onPress={toggleNetConfirmations}
+          saving={saving}
+        />
 
+        <Pressable
+          accessibilityRole="button"
+          disabled={!canOpenDetails}
+          onPress={() => setOverlayVisible(true)}
+          style={({ pressed }) => [
+            localStyles.detailsButton,
+            pressed && canOpenDetails && localStyles.cardPressed
+          ]}
+        >
+          <View style={localStyles.detailsContent}>
             <View style={localStyles.textGroup}>
-              <Text style={styles.upperLabel}>Transfers (Net)</Text>
-              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.directionText}>
-                {directionLabel()}
-              </Text>
-              <Text style={styles.muted}>
-                {loading
-                  ? 'Checking open items'
-                  : netSummary.count > 0
-                    ? `${netSummary.count} open ${netSummary.count === 1 ? 'item' : 'items'}`
-                    : 'All transfers settled'}
-              </Text>
+              {loading ? (
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.directionText}>
+                  Loading transfers
+                </Text>
+              ) : netSummary.count > 0 ? (
+                <>
+                  <View style={localStyles.transferDirectionRow}>
+                    <UserPill label={userName(netSummary.payerUserId)} tone="payer" />
+                    <Text style={localStyles.transferDirectionText}>to</Text>
+                    <UserPill label={userName(netSummary.payeeUserId)} tone="payee" />
+                  </View>
+                  <Text style={styles.muted}>
+                    {netSummary.count} open {netSummary.count === 1 ? 'item' : 'items'}
+                  </Text>
+                </>
+              ) : (
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.settledText}>
+                  {directionLabel()}
+                </Text>
+              )}
               {error ? <Text style={styles.error}>{error}</Text> : null}
               {refreshing ? <Text style={styles.muted}>Syncing</Text> : null}
             </View>
@@ -119,16 +139,16 @@ export function TransferChecklistCard({
             <View style={localStyles.amountGroup}>
               {loading ? (
                 <ActivityIndicator color={colors.primary} size="small" />
-              ) : (
+              ) : netSummary.count > 0 ? (
                 <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.amountText}>
                   {formatYen(netSummary.amountYen)}
                 </Text>
-              )}
-              <Ionicons color={canOpenDetails ? colors.ink : colors.subtle} name="chevron-forward" size={20} />
+              ) : null}
+              {canOpenDetails ? <Ionicons color={colors.ink} name="chevron-forward" size={20} /> : null}
             </View>
-          </BentoCard>
-        )}
-      </Pressable>
+          </View>
+        </Pressable>
+      </BentoCard>
 
       <TransferItemsOverlay
         currentUserId={currentUserId}
@@ -140,6 +160,62 @@ export function TransferChecklistCard({
         visible={overlayVisible}
       />
     </>
+  );
+}
+
+function UserPill({ label, tone }: { label: string; tone: 'payer' | 'payee' }) {
+  const isPayer = tone === 'payer';
+
+  return (
+    <View style={[
+      localStyles.userPill,
+      { backgroundColor: isPayer ? colors.tint : 'rgba(249,115,22,0.10)' }
+    ]}>
+      <Text
+        ellipsizeMode="tail"
+        numberOfLines={1}
+        style={[
+          localStyles.userPillText,
+          { color: isPayer ? colors.primaryDark : '#F97316' }
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function NetConfirmRadio({
+  checked,
+  disabled,
+  onPress,
+  saving
+}: {
+  checked: boolean;
+  disabled: boolean;
+  onPress: () => void;
+  saving: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={checked ? 'Unconfirm net transfers' : 'Confirm net transfers'}
+      accessibilityRole="radio"
+      accessibilityState={{ checked, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        localStyles.netRadio,
+        checked && localStyles.netRadioChecked,
+        disabled && localStyles.netRadioDisabled,
+        pressed && !disabled && localStyles.netRadioPressed
+      ]}
+    >
+      {saving ? (
+        <ActivityIndicator color={colors.primaryDark} size="small" />
+      ) : checked ? (
+        <View style={localStyles.netRadioDot} />
+      ) : null}
+    </Pressable>
   );
 }
 
@@ -196,7 +272,7 @@ function buildNetSummary(items: TransferChecklistItemRow[], members: LedgerMembe
 
   return {
     amountYen: 0,
-    count: items.length,
+    count: 0,
     payerUserId: null,
     payeeUserId: null
   };
@@ -206,7 +282,8 @@ const localStyles = StyleSheet.create({
   amountGroup: {
     alignItems: 'flex-end',
     flexDirection: 'row',
-    gap: 10
+    gap: 10,
+    minWidth: 74
   },
   amountText: {
     color: colors.primaryDark,
@@ -221,11 +298,20 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 14,
-    minHeight: 94,
+    minHeight: 78,
     padding: 16
   },
   cardPressed: {
     opacity: 0.78
+  },
+  detailsButton: {
+    flex: 1,
+    minWidth: 0
+  },
+  detailsContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 14
   },
   directionText: {
     color: colors.ink,
@@ -233,17 +319,76 @@ const localStyles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21
   },
-  iconWrap: {
+  netRadio: {
     alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderRadius: 28,
-    height: 56,
+    backgroundColor: colors.surface,
+    borderColor: colors.primaryDark,
+    borderRadius: 18,
+    borderWidth: 2,
+    height: 36,
     justifyContent: 'center',
-    width: 56
+    width: 36
+  },
+  netRadioChecked: {
+    backgroundColor: colors.tint
+  },
+  netRadioDisabled: {
+    borderColor: colors.line,
+    opacity: 0.62
+  },
+  netRadioDot: {
+    backgroundColor: colors.primaryDark,
+    borderRadius: 8,
+    height: 16,
+    width: 16
+  },
+  netRadioPressed: {
+    transform: [{ scale: 0.96 }]
   },
   textGroup: {
     flex: 1,
     gap: 3,
     minWidth: 0
+  },
+  settledText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 21
+  },
+  transferDirectionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 6,
+    maxWidth: '100%',
+    minWidth: 0
+  },
+  transferDirectionText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+    flexShrink: 0
+  },
+  userPill: {
+    borderRadius: 999,
+    flexShrink: 1,
+    maxWidth: '45%',
+    minHeight: 22,
+    minWidth: 0,
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+    paddingVertical: 3
+  },
+  userPillText: {
+    flexShrink: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.7,
+    lineHeight: 14
   }
 });

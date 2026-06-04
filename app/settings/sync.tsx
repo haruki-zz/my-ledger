@@ -10,18 +10,28 @@ import {
   getSyncQueueItems,
   retrySyncQueueItem
 } from '@/src/lib/localRepository';
+import { isLocalDbUnavailableError, retryLocalDbOpen } from '@/src/lib/localDb';
 import type { SyncQueueRecord } from '@/src/lib/syncQueue';
 
 export default function SyncStatusScreen() {
   const sync = useSyncContext();
   const { refresh } = sync;
   const [items, setItems] = useState<SyncQueueRecord[]>([]);
+  const [localDbError, setLocalDbError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      setLocalDbError(null);
       setItems(await getSyncQueueItems());
+      await refresh();
+    } catch (loadError) {
+      if (!isLocalDbUnavailableError(loadError)) {
+        throw loadError;
+      }
+      setItems([]);
+      setLocalDbError(loadError.message);
       await refresh();
     } finally {
       setLoading(false);
@@ -35,6 +45,21 @@ export default function SyncStatusScreen() {
   async function retry(sequence: number) {
     await retrySyncQueueItem(sequence);
     await load();
+  }
+
+  async function retryLocalDatabase() {
+    setLoading(true);
+    try {
+      await retryLocalDbOpen();
+      await load();
+    } catch (retryError) {
+      if (!isLocalDbUnavailableError(retryError)) {
+        Alert.alert('Retry Failed', retryError instanceof Error ? retryError.message : String(retryError));
+      }
+      setLocalDbError(retryError instanceof Error ? retryError.message : String(retryError));
+    } finally {
+      setLoading(false);
+    }
   }
 
   function forceLocal(sequence: number) {
@@ -92,7 +117,19 @@ export default function SyncStatusScreen() {
         </View>
       ) : null}
 
-      {items.length === 0 && !loading ? (
+      {localDbError && !loading ? (
+        <BentoCard>
+          <Text style={styles.h2}>Local database unavailable</Text>
+          <Text style={styles.muted}>
+            The app is using the remote database directly. Retry if browser storage support has changed.
+          </Text>
+          <Pressable onPress={retryLocalDatabase} style={[styles.button, syncStyles.retryLocalDbButton]}>
+            <Text style={styles.buttonText}>Retry local database</Text>
+          </Pressable>
+        </BentoCard>
+      ) : null}
+
+      {items.length === 0 && !loading && !localDbError ? (
         <BentoCard>
           <Text style={styles.h2}>All synced</Text>
           <Text style={styles.muted}>There are no pending offline changes.</Text>
@@ -169,6 +206,10 @@ const syncStyles = StyleSheet.create({
   },
   action: {
     flex: 1,
+    minHeight: 42
+  },
+  retryLocalDbButton: {
+    marginTop: 12,
     minHeight: 42
   }
 });

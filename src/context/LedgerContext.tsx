@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAuth } from '@/src/context/AuthContext';
+import { isLocalDbUnavailableError } from '@/src/lib/localDb';
 import {
   createLedger,
   deleteLedger as deleteLedgerById,
@@ -112,6 +113,9 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
             setActiveLedger(refreshedActiveLedger);
           })
           .catch((refreshError) => {
+            if (isLocalDbUnavailableError(refreshError)) {
+              return;
+            }
             console.warn('Could not refresh ledger memberships:', getErrorMessage(refreshError));
           })
           .finally(() => {

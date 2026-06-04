@@ -1,4 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
+import { isLocalDbUnavailableError } from '@/src/lib/localDb';
 import {
   cacheTransferItems,
   deleteLocalExpense,
@@ -81,19 +82,15 @@ export async function getMyLedgerMemberships(currentUserId?: string | null): Pro
     return [];
   }
 
-  const cachedMemberships = await getCachedLedgerMemberships(userId);
-  if (cachedMemberships.length > 0) {
-    return mapLedgerMemberships(cachedMemberships as LedgerMembershipRow[], userId);
-  }
-
-  try {
-    await refreshMemberships(userId);
-  } catch (error) {
-    if (!isOfflineError(error)) {
-      throw error;
+  return withLocalFallback(async () => {
+    const cachedMemberships = await getCachedLedgerMemberships(userId);
+    if (cachedMemberships.length > 0) {
+      return mapLedgerMemberships(cachedMemberships as LedgerMembershipRow[], userId);
     }
-  }
-  return mapLedgerMemberships((await getCachedLedgerMemberships(userId)) as LedgerMembershipRow[], userId);
+
+    await ignoreOfflineError(() => refreshMemberships(userId));
+    return mapLedgerMemberships((await getCachedLedgerMemberships(userId)) as LedgerMembershipRow[], userId);
+  }, () => fetchRemoteLedgerMemberships(userId));
 }
 
 function mapLedgerMemberships(memberships: LedgerMembershipRow[], userId: string): LedgerMembership[] {
@@ -158,35 +155,27 @@ export async function deleteLedger(ledgerId: string) {
 }
 
 export async function getLedgerMembers(ledgerId: string): Promise<LedgerMemberProfile[]> {
-  const cachedMembers = await getCachedLedgerMembers(ledgerId);
-  if (cachedMembers.length > 0) {
-    return cachedMembers;
-  }
-
-  try {
-    await refreshLedgerMembers(ledgerId);
-  } catch (error) {
-    if (!isOfflineError(error)) {
-      throw error;
+  return withLocalFallback(async () => {
+    const cachedMembers = await getCachedLedgerMembers(ledgerId);
+    if (cachedMembers.length > 0) {
+      return cachedMembers;
     }
-  }
-  return getCachedLedgerMembers(ledgerId);
+
+    await ignoreOfflineError(() => refreshLedgerMembers(ledgerId));
+    return getCachedLedgerMembers(ledgerId);
+  }, () => fetchRemoteLedgerMembers(ledgerId));
 }
 
 export async function getLedgerCategories(ledgerId: string): Promise<LedgerCategory[]> {
-  const cachedCategories = await getCachedLedgerCategories(ledgerId);
-  if (cachedCategories.length > 0) {
-    return cachedCategories;
-  }
-
-  try {
-    await refreshLedgerCategories(ledgerId);
-  } catch (error) {
-    if (!isOfflineError(error)) {
-      throw error;
+  return withLocalFallback(async () => {
+    const cachedCategories = await getCachedLedgerCategories(ledgerId);
+    if (cachedCategories.length > 0) {
+      return cachedCategories;
     }
-  }
-  return getCachedLedgerCategories(ledgerId);
+
+    await ignoreOfflineError(() => refreshLedgerCategories(ledgerId));
+    return getCachedLedgerCategories(ledgerId);
+  }, () => fetchRemoteLedgerCategories(ledgerId));
 }
 
 export async function seedDefaultLedgerCategories(ledgerId: string) {
@@ -241,6 +230,27 @@ function isOfflineError(error: unknown) {
   );
 }
 
+async function withLocalFallback<T>(localFn: () => Promise<T>, remoteFn: () => Promise<T>): Promise<T> {
+  try {
+    return await localFn();
+  } catch (error) {
+    if (isLocalDbUnavailableError(error)) {
+      return remoteFn();
+    }
+    throw error;
+  }
+}
+
+async function ignoreOfflineError(fn: () => Promise<unknown>) {
+  try {
+    await fn();
+  } catch (error) {
+    if (!isOfflineError(error)) {
+      throw error;
+    }
+  }
+}
+
 export type SaveLedgerCategoryInput = {
   ledgerId: string;
   categoryName: string;
@@ -267,40 +277,34 @@ export async function getProfiles(userIds: string[]): Promise<Record<string, Pro
     return {};
   }
 
-  const cachedProfiles = await getCachedProfiles(uniqueIds);
-  const missingIds = uniqueIds.filter((id) => !cachedProfiles[id]);
-  if (missingIds.length === 0) {
-    return cachedProfiles;
-  }
-
-  let refreshedProfiles: Record<string, Profile> = {};
-  try {
-    refreshedProfiles = await refreshProfiles(missingIds);
-  } catch (error) {
-    if (!isOfflineError(error)) {
-      throw error;
+  return withLocalFallback(async () => {
+    const cachedProfiles = await getCachedProfiles(uniqueIds);
+    const missingIds = uniqueIds.filter((id) => !cachedProfiles[id]);
+    if (missingIds.length === 0) {
+      return cachedProfiles;
     }
-  }
-  return {
-    ...cachedProfiles,
-    ...refreshedProfiles
-  };
+
+    let refreshedProfiles: Record<string, Profile> = {};
+    await ignoreOfflineError(async () => {
+      refreshedProfiles = await refreshProfiles(missingIds);
+    });
+    return {
+      ...cachedProfiles,
+      ...refreshedProfiles
+    };
+  }, () => fetchRemoteProfiles(uniqueIds));
 }
 
 export async function getExpenses(ledgerId: string): Promise<Expense[]> {
-  const cachedExpenses = await getCachedExpenses(ledgerId);
-  if (cachedExpenses.length > 0 || await hasCachedExpensesSnapshot(ledgerId)) {
-    return cachedExpenses;
-  }
-
-  try {
-    await refreshExpenses(ledgerId);
-  } catch (error) {
-    if (!isOfflineError(error)) {
-      throw error;
+  return withLocalFallback(async () => {
+    const cachedExpenses = await getCachedExpenses(ledgerId);
+    if (cachedExpenses.length > 0 || await hasCachedExpensesSnapshot(ledgerId)) {
+      return cachedExpenses;
     }
-  }
-  return getCachedExpenses(ledgerId);
+
+    await ignoreOfflineError(() => refreshExpenses(ledgerId));
+    return getCachedExpenses(ledgerId);
+  }, () => fetchRemoteExpenses(ledgerId));
 }
 
 export async function getExpensesByMonth(
@@ -309,69 +313,46 @@ export async function getExpensesByMonth(
   endDate: string,
   options: { refreshFirst?: boolean } = {}
 ): Promise<Expense[]> {
-  if (options.refreshFirst) {
-    try {
-      await refreshExpenses(ledgerId);
-    } catch (error) {
-      if (!isOfflineError(error)) {
-        throw error;
-      }
+  return withLocalFallback(async () => {
+    if (options.refreshFirst) {
+      await ignoreOfflineError(() => refreshExpenses(ledgerId));
     }
-  }
 
-  const cachedExpenses = await getCachedExpensesByMonth(ledgerId, startDate, endDate);
-  if (cachedExpenses.length > 0 || await hasCachedExpensesSnapshot(ledgerId)) {
-    return cachedExpenses;
-  }
-
-  try {
-    await refreshExpenses(ledgerId);
-  } catch (error) {
-    if (!isOfflineError(error)) {
-      throw error;
+    const cachedExpenses = await getCachedExpensesByMonth(ledgerId, startDate, endDate);
+    if (cachedExpenses.length > 0 || await hasCachedExpensesSnapshot(ledgerId)) {
+      return cachedExpenses;
     }
-  }
-  return getCachedExpensesByMonth(ledgerId, startDate, endDate);
+
+    await ignoreOfflineError(() => refreshExpenses(ledgerId));
+    return getCachedExpensesByMonth(ledgerId, startDate, endDate);
+  }, () => fetchRemoteExpenses(ledgerId, startDate, endDate));
 }
 
 export async function getFirstExpenseSpentOn(ledgerId: string): Promise<string | null> {
-  const cachedSpentOn = await getCachedFirstExpenseSpentOn(ledgerId);
-  if (cachedSpentOn) {
-    return cachedSpentOn;
-  }
-
-  if (await hasCachedExpensesSnapshot(ledgerId)) {
-    return null;
-  }
-
-  try {
-    await refreshExpenses(ledgerId);
-  } catch (error) {
-    if (!isOfflineError(error)) {
-      throw error;
+  return withLocalFallback(async () => {
+    const cachedSpentOn = await getCachedFirstExpenseSpentOn(ledgerId);
+    if (cachedSpentOn) {
+      return cachedSpentOn;
     }
-  }
-  return getCachedFirstExpenseSpentOn(ledgerId);
+
+    if (await hasCachedExpensesSnapshot(ledgerId)) {
+      return null;
+    }
+
+    await ignoreOfflineError(() => refreshExpenses(ledgerId));
+    return getCachedFirstExpenseSpentOn(ledgerId);
+  }, () => fetchRemoteFirstExpenseSpentOn(ledgerId));
 }
 
 export async function getExpense(expenseId: string): Promise<Expense> {
-  const cachedExpense = await getCachedExpense(expenseId);
-  if (cachedExpense) {
-    return cachedExpense;
-  }
+  return withLocalFallback(async () => {
+    const cachedExpense = await getCachedExpense(expenseId);
+    if (cachedExpense) {
+      return cachedExpense;
+    }
 
-  const { data, error } = await supabase
-    .from('expenses')
-    .select('*')
-    .eq('id', expenseId)
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  const [expense] = await attachSplits([data]);
-  return expense;
+    return fetchRemoteExpense(expenseId);
+  }, () => fetchRemoteExpense(expenseId));
 }
 
 async function attachSplits(expenses: ExpenseRow[]): Promise<Expense[]> {
@@ -438,7 +419,14 @@ function assertTransferConfirmationUpdates(updates: TransferConfirmationUpdate[]
 }
 
 export async function getOpenTransferItems(ledgerId: string): Promise<TransferChecklistItemRow[]> {
-  const cachedItems = await getCachedTransferItems(ledgerId);
+  let cachedItems: TransferChecklistItemRow[] = [];
+  try {
+    cachedItems = await getCachedTransferItems(ledgerId);
+  } catch (error) {
+    if (!isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+  }
   if (!isLocalRepositoryOnline()) {
     return cachedItems;
   }
@@ -452,7 +440,13 @@ export async function getOpenTransferItems(ledgerId: string): Promise<TransferCh
       throw error;
     }
 
-    await cacheTransferItems(ledgerId, data || []);
+    try {
+      await cacheTransferItems(ledgerId, data || []);
+    } catch (cacheError) {
+      if (!isLocalDbUnavailableError(cacheError)) {
+        throw cacheError;
+      }
+    }
     return data || cachedItems;
   } catch (error) {
     if (!isOfflineError(error)) {
@@ -460,6 +454,129 @@ export async function getOpenTransferItems(ledgerId: string): Promise<TransferCh
     }
     return cachedItems;
   }
+}
+
+async function fetchRemoteLedgerMemberships(userId: string): Promise<LedgerMembership[]> {
+  const { data, error } = await supabase
+    .from('ledger_members')
+    .select('*, ledger:ledgers(*)')
+    .eq('user_id', userId)
+    .order('joined_at', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return mapLedgerMemberships((data || []) as LedgerMembershipRow[], userId);
+}
+
+async function fetchRemoteLedgerMembers(ledgerId: string): Promise<LedgerMemberProfile[]> {
+  const { data: members, error } = await supabase
+    .from('ledger_members')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .order('joined_at', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const profiles = await fetchRemoteProfiles((members || []).map((member) => member.user_id));
+  return (members || []).map((member) => ({
+    ledger_id: member.ledger_id,
+    user_id: member.user_id,
+    joined_at: member.joined_at,
+    profile: profiles[member.user_id] || {
+      id: member.user_id,
+      display_name: 'User',
+      created_at: member.joined_at,
+      updated_at: member.joined_at
+    }
+  }));
+}
+
+async function fetchRemoteLedgerCategories(ledgerId: string): Promise<LedgerCategory[]> {
+  const { data, error } = await supabase
+    .from('ledger_categories')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .order('sort_order', { ascending: true })
+    .order('category_name', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []) as LedgerCategory[];
+}
+
+async function fetchRemoteProfiles(userIds: string[]): Promise<Record<string, Profile>> {
+  const uniqueIds = [...new Set(userIds)].filter(Boolean);
+  if (uniqueIds.length === 0) {
+    return {};
+  }
+
+  const { data, error } = await supabase.from('profiles').select('*').in('id', uniqueIds);
+  if (error) {
+    throw error;
+  }
+  return Object.fromEntries((data || []).map((profile) => [profile.id, profile as Profile]));
+}
+
+async function fetchRemoteExpenses(ledgerId: string, startDate?: string, endDate?: string): Promise<Expense[]> {
+  let query = supabase
+    .from('expenses')
+    .select('*')
+    .eq('ledger_id', ledgerId);
+
+  if (startDate) {
+    query = query.gte('spent_on', startDate);
+  }
+
+  if (endDate) {
+    query = query.lte('spent_on', endDate);
+  }
+
+  const { data, error } = await query
+    .order('spent_on', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return attachSplits((data || []) as ExpenseRow[]);
+}
+
+async function fetchRemoteExpense(expenseId: string): Promise<Expense> {
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('*')
+    .eq('id', expenseId)
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  const [expense] = await attachSplits([data]);
+  return expense;
+}
+
+async function fetchRemoteFirstExpenseSpentOn(ledgerId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('expenses')
+    .select('spent_on')
+    .eq('ledger_id', ledgerId)
+    .order('spent_on', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.spent_on || null;
 }
 
 export async function setTransferConfirmations(updates: TransferConfirmationUpdate[]) {

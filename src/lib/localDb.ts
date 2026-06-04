@@ -1,20 +1,54 @@
 import * as SQLite from 'expo-sqlite';
+import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'my-ledger-offline.db';
 const SCHEMA_VERSION = 1;
+const WEB_DATABASE_OPEN_TIMEOUT_MS = 2500;
+const LOCAL_DB_OPEN_TIMEOUT = Symbol('local-db-open-timeout');
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let localDbUnavailableError: LocalDbUnavailableError | null = null;
 
 // Async mutex: serializes all withLocalTransaction calls so that
 // only one BEGIN…COMMIT runs at a time on the single db connection.
 let txQueue: Promise<void> = Promise.resolve();
 
+export class LocalDbUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LocalDbUnavailableError';
+  }
+}
+
+export function isLocalDbUnavailableError(error: unknown) {
+  return error instanceof LocalDbUnavailableError;
+}
+
 export async function getLocalDb() {
+  if (localDbUnavailableError) {
+    throw localDbUnavailableError;
+  }
+
   if (!databasePromise) {
-    databasePromise = openAndMigrate();
+    databasePromise = withOpenTimeout(openAndMigrate()).catch((error) => {
+      databasePromise = null;
+      // A timed-out web SQLite open is treated as a session-level capability failure
+      // so callers can immediately use the remote fallback. Other open errors are
+      // left retryable by clearing only the in-flight promise.
+      if (isLocalDbUnavailableError(error)) {
+        localDbUnavailableError = error;
+      }
+      throw error;
+    });
   }
 
   return databasePromise;
+}
+
+export async function retryLocalDbOpen() {
+  localDbUnavailableError = null;
+  databasePromise = null;
+  return getLocalDb();
 }
 
 /**
@@ -54,6 +88,31 @@ async function openAndMigrate() {
   `);
   await migrateLocalDb(db);
   return db;
+}
+
+async function withOpenTimeout<T>(promise: Promise<T>): Promise<T> {
+  if (Platform.OS !== 'web') {
+    return promise;
+  }
+
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<typeof LOCAL_DB_OPEN_TIMEOUT>((resolve) => {
+    timeoutId = setTimeout(() => {
+      resolve(LOCAL_DB_OPEN_TIMEOUT);
+    }, WEB_DATABASE_OPEN_TIMEOUT_MS);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    if (result === LOCAL_DB_OPEN_TIMEOUT) {
+      throw new LocalDbUnavailableError('Local database is unavailable in this browser session');
+    }
+    return result;
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
@@ -204,18 +263,24 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
 }
 
 export async function clearLocalBusinessData() {
-  await withLocalTransaction(async () => {
-    const db = await getLocalDb();
-    await db.execAsync(`
-      DELETE FROM sync_dedupe;
-      DELETE FROM sync_queue;
-      DELETE FROM transfer_checklist_snapshot;
-      DELETE FROM ledger_categories;
-      DELETE FROM expense_splits;
-      DELETE FROM expenses;
-      DELETE FROM ledger_members;
-      DELETE FROM ledgers;
-      DELETE FROM profiles;
-    `);
-  });
+  try {
+    await withLocalTransaction(async () => {
+      const db = await getLocalDb();
+      await db.execAsync(`
+        DELETE FROM sync_dedupe;
+        DELETE FROM sync_queue;
+        DELETE FROM transfer_checklist_snapshot;
+        DELETE FROM ledger_categories;
+        DELETE FROM expense_splits;
+        DELETE FROM expenses;
+        DELETE FROM ledger_members;
+        DELETE FROM ledgers;
+        DELETE FROM profiles;
+      `);
+    });
+  } catch (error) {
+    if (!isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+  }
 }

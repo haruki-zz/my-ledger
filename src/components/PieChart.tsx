@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'r
 import Svg, { Circle, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { iconNameForExpenseCategory } from '@/src/lib/categories';
 import { formatCompactYen, formatYen } from '@/src/lib/format';
 import type { CategoryStat } from '@/src/lib/stats';
 
@@ -130,7 +131,7 @@ export function PieChart({
             >
               <View style={chartStyles.legendName}>
                 <View style={[chartStyles.legendDot, { backgroundColor: category.color }]} />
-                <Ionicons color={colors.ink} name={iconForCategory(category.category)} size={18} />
+                <Ionicons color={colors.ink} name={iconNameForExpenseCategory(category.category)} size={18} />
                 <Text ellipsizeMode="tail" numberOfLines={1} style={chartStyles.legendText}>
                   {category.category}
                 </Text>
@@ -163,42 +164,6 @@ function buildSegments(categories: CategoryStat[], totalYen: number, circumferen
   }
 
   return segments;
-}
-
-function iconForCategory(category: string): keyof typeof Ionicons.glyphMap {
-  const normalized = category.toLowerCase();
-  if (normalized.includes('housing') || normalized.includes('house') || normalized.includes('rent')) {
-    return 'home-outline';
-  }
-  if (
-    normalized.includes('food') ||
-    normalized.includes('dining') ||
-    normalized.includes('grocery') ||
-    normalized.includes('groceries') ||
-    normalized.includes('meal') ||
-    normalized.includes('restaurant')
-  ) {
-    return 'restaurant-outline';
-  }
-  if (normalized.includes('transport') || normalized.includes('train') || normalized.includes('taxi') || normalized.includes('commute')) {
-    return 'bus-outline';
-  }
-  if (normalized.includes('utilities') || normalized.includes('electric') || normalized.includes('power') || normalized.includes('gas')) {
-    return 'flash-outline';
-  }
-  if (normalized.includes('shopping') || normalized.includes('store') || normalized.includes('clothes')) {
-    return 'bag-outline';
-  }
-  if (normalized.includes('travel')) {
-    return 'airplane-outline';
-  }
-  if (normalized.includes('health')) {
-    return 'medkit-outline';
-  }
-  if (normalized.includes('entertainment')) {
-    return 'film-outline';
-  }
-  return 'ellipsis-horizontal';
 }
 
 const chartStyles = StyleSheet.create({

@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import type { GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
@@ -39,15 +40,25 @@ export function DailyChart({
   selectedCategoryName
 }: DailyChartProps) {
   const maxAmount = Math.max(0, ...series.map((item) => item.totalAmountYen));
-  const firstNonZeroIndex = series.findIndex((item) => item.totalAmountYen > 0);
-  const [selectedIndex, setSelectedIndex] = useState(firstNonZeroIndex >= 0 ? firstNonZeroIndex : 0);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [chartWidth, setChartWidth] = useState(WIDTH);
-  const safeSelectedIndex = clamp(selectedIndex, 0, Math.max(0, series.length - 1));
+  const hideTooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safeSelectedIndex = selectedIndex === null ? null : clamp(selectedIndex, 0, Math.max(0, series.length - 1));
   const labelIndexes = useMemo(() => labelIndexSet(series.length), [series.length]);
 
   useEffect(() => {
-    setSelectedIndex(firstNonZeroIndex >= 0 ? firstNonZeroIndex : 0);
-  }, [firstNonZeroIndex, selectedCategoryName, series]);
+    setSelectedIndex(null);
+    if (hideTooltipTimer.current) {
+      clearTimeout(hideTooltipTimer.current);
+      hideTooltipTimer.current = null;
+    }
+  }, [selectedCategoryName, series]);
+
+  useEffect(() => () => {
+    if (hideTooltipTimer.current) {
+      clearTimeout(hideTooltipTimer.current);
+    }
+  }, []);
 
   if (series.length === 0 || maxAmount <= 0) {
     return (
@@ -81,19 +92,45 @@ export function DailyChart({
       topY: baseline - totalHeight
     };
   });
-  const selectedPoint = points[safeSelectedIndex];
-  const tooltip = tooltipLayout(selectedPoint.x);
+  const selectedPoint = safeSelectedIndex === null ? null : points[safeSelectedIndex];
+  const tooltip = selectedPoint ? tooltipLayout(selectedPoint.x) : null;
+
+  function handleChartPress(event: GestureResponderEvent) {
+    const locationX = getPressLocationX(event);
+    if (locationX === null) {
+      return;
+    }
+    selectPointAt(locationX);
+  }
 
   function selectPointAt(locationX: number) {
     const scaledX = (locationX / Math.max(chartWidth, 1)) * WIDTH;
     const index = Math.floor((scaledX - PADDING_LEFT) / Math.max(barSlotWidth, 1));
-    setSelectedIndex(clamp(index, 0, series.length - 1));
+    const nextIndex = clamp(index, 0, series.length - 1);
+
+    if (points[nextIndex]?.totalAmountYen <= 0) {
+      setSelectedIndex(null);
+      if (hideTooltipTimer.current) {
+        clearTimeout(hideTooltipTimer.current);
+        hideTooltipTimer.current = null;
+      }
+      return;
+    }
+
+    setSelectedIndex(nextIndex);
+    if (hideTooltipTimer.current) {
+      clearTimeout(hideTooltipTimer.current);
+    }
+    hideTooltipTimer.current = setTimeout(() => {
+      setSelectedIndex(null);
+      hideTooltipTimer.current = null;
+    }, 3000);
   }
 
   return (
     <Pressable
       onLayout={(event) => setChartWidth(event.nativeEvent.layout.width)}
-      onPress={(event) => selectPointAt(event.nativeEvent.locationX)}
+      onPress={handleChartPress}
       style={{ gap: 10 }}
     >
       <Svg height={HEIGHT} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%">
@@ -139,7 +176,7 @@ export function DailyChart({
           );
         })}
 
-        {selectedPoint.totalAmountYen > 0 ? (
+        {selectedPoint && tooltip ? (
           <>
             <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={7} stroke="rgba(15,118,110,0.26)" strokeWidth={4} />
             <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={3} stroke={CURRENT_COLOR} strokeWidth={2} />
@@ -195,6 +232,41 @@ function labelIndexSet(length: number) {
 function formatTooltipDate(dateString: string) {
   const [year, month, day] = dateString.split('-').map(Number);
   return tooltipDateFormatter.format(new Date(year, month - 1, day));
+}
+
+function getPressLocationX(event: GestureResponderEvent): number | null {
+  const nativeEvent = event.nativeEvent as GestureResponderEvent['nativeEvent'] & {
+    clientX?: number;
+    offsetX?: number;
+  };
+
+  const locationX = nativeEvent.locationX;
+  if (typeof locationX === 'number' && Number.isFinite(locationX)) {
+    return locationX;
+  }
+
+  const offsetX = nativeEvent.offsetX;
+  if (typeof offsetX === 'number' && Number.isFinite(offsetX)) {
+    return offsetX;
+  }
+
+  const webEvent = event as GestureResponderEvent & {
+    currentTarget?: {
+      getBoundingClientRect?: () => { left: number };
+    };
+  };
+  const clientX = nativeEvent.clientX ?? nativeEvent.pageX;
+  const left = webEvent.currentTarget?.getBoundingClientRect?.().left;
+
+  if (typeof clientX === 'number' && typeof left === 'number' && Number.isFinite(clientX) && Number.isFinite(left)) {
+    return clientX - left;
+  }
+
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.warn('DailyChart press ignored because no horizontal press coordinate was available.');
+  }
+
+  return null;
 }
 
 function clamp(value: number, min: number, max: number) {

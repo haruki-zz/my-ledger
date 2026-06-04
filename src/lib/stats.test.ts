@@ -6,10 +6,31 @@ import {
   resolveDashboardDateRange,
   type DashboardPeriod
 } from './stats';
+import { EXPENSE_CATEGORIES, iconNameForExpenseCategory } from './categories';
 import type { Expense } from '@/src/types/database';
 
 const CURRENT_USER_ID = 'user-a';
 const OTHER_USER_ID = 'user-b';
+
+describe('expense category icons', () => {
+  it('has specific icons for default expense categories', () => {
+    for (const category of EXPENSE_CATEGORIES) {
+      if (category === 'Other') {
+        expect(iconNameForExpenseCategory(category)).toBe('ellipsis-horizontal');
+      } else {
+        expect(iconNameForExpenseCategory(category)).not.toBe('ellipsis-horizontal');
+      }
+    }
+
+    expect(iconNameForExpenseCategory('Communications')).toBe('chatbubbles-outline');
+  });
+
+  it('resolves common category icon edge cases', () => {
+    expect(iconNameForExpenseCategory('FOOD')).toBe('restaurant-outline');
+    expect(iconNameForExpenseCategory('food & dining')).toBe('restaurant-outline');
+    expect(iconNameForExpenseCategory('Unknown Category')).toBe('ellipsis-horizontal');
+  });
+});
 
 describe('resolveDashboardDateRange', () => {
   it('resolves today with yesterday comparison', () => {

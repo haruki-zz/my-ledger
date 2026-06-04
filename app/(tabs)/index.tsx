@@ -1,11 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Animated, PanResponder, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CategoryTrendModal } from '@/src/components/CategoryTrendModal';
 import { DailyChart } from '@/src/components/DailyChart';
-import { PieChart, type AnchorPoint } from '@/src/components/PieChart';
+import { PieChart } from '@/src/components/PieChart';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { TransferChecklistCard } from '@/src/components/TransferChecklistCard';
 import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/components/ui';
@@ -14,7 +13,6 @@ import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   addMonths,
-  buildDashboardDailyUserSeriesForCategories,
   compareMonthKeys,
   currentMonthKey,
   type CategoryStat,
@@ -23,7 +21,6 @@ import {
 
 type SelectedCategoryState = {
   category: CategoryStat;
-  anchorPoint?: AnchorPoint;
 };
 
 const PERIOD_OPTIONS: PillTabOption<DashboardPeriod>[] = [
@@ -46,18 +43,15 @@ export default function DashboardScreen() {
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [selectedCategory, setSelectedCategory] = useState<SelectedCategoryState | null>(null);
-  const [trendModalVisible, setTrendModalVisible] = useState(false);
   const [drillProgress] = useState(() => new Animated.Value(1));
   const {
     ledger,
     members,
-    expenses,
     currentUserId,
     otherUserId,
     minimumMonthKey,
     loadedMonthKey,
     stats,
-    dataVersion,
     loading,
     refreshing,
     error,
@@ -79,20 +73,6 @@ export default function DashboardScreen() {
   const atMinimumMonth = minimumMonthKey ? compareMonthKeys(monthKey, minimumMonthKey) <= 0 : false;
   const monthNavigationDisabled = period !== 'month';
   const isSwitchingMonth = refreshing && Boolean(loadedMonthKey && loadedMonthKey !== monthKey);
-  const selectedCategoryDailySeries = useMemo(() => {
-    if (!selectedCategory) {
-      return null;
-    }
-
-    return buildDashboardDailyUserSeriesForCategories({
-      expenses,
-      categories: selectedCategory.category.sourceCategories || [selectedCategory.category.category],
-      startDateString: stats.dateRange.startDateString,
-      endDateString: stats.dateRange.endDateString,
-      userIds: [currentUserId, otherUserId].filter((userId): userId is string => Boolean(userId))
-    });
-  }, [currentUserId, expenses, otherUserId, selectedCategory, stats.dateRange.endDateString, stats.dateRange.startDateString]);
-  const dailySeries = selectedCategoryDailySeries || stats.dailyUserSeries;
   const memberStats = stats.memberTotals;
   const currentMemberStat = memberStats.find((member) => member.userId === currentUserId);
   const otherMemberStat = memberStats.find((member) => member.userId === otherUserId);
@@ -131,7 +111,6 @@ export default function DashboardScreen() {
 
     runDrillTransition();
     setSelectedCategory(null);
-    setTrendModalVisible(false);
     setMonthKey((current) => addMonths(current, amount));
   }, [period, runDrillTransition]);
 
@@ -146,18 +125,17 @@ export default function DashboardScreen() {
 
     runDrillTransition();
     setSelectedCategory(null);
-    setTrendModalVisible(false);
     setPeriod(nextPeriod);
     if (nextPeriod !== 'month') {
       setMonthKey(currentMonthKey());
     }
   }
 
-  function openCategoryDailyTrend(category: CategoryStat, anchorPoint?: AnchorPoint) {
+  function toggleCategorySelection(category: CategoryStat) {
     setSelectedCategory((current) => (
       current?.category.category === category.category
         ? null
-        : { category, anchorPoint }
+        : { category }
     ));
     runDrillTransition();
   }
@@ -272,8 +250,7 @@ export default function DashboardScreen() {
                   <MemberSplit
                     amountYen={currentMemberStat?.amountYen || 0}
                     color={colors.primaryDark}
-                    label="You"
-                    percentage={currentMemberStat?.percentage || 0}
+                    label={currentUserName}
                   />
                   {otherUserId ? (
                     <>
@@ -281,8 +258,7 @@ export default function DashboardScreen() {
                       <MemberSplit
                         amountYen={otherMemberStat?.amountYen || 0}
                         color="#F97316"
-                        label="Partner"
-                        percentage={otherMemberStat?.percentage || 0}
+                        label={otherUserName}
                       />
                     </>
                   ) : null}
@@ -315,7 +291,7 @@ export default function DashboardScreen() {
             </View>
             <PieChart
               categories={stats.categories}
-              onCategoryPress={openCategoryDailyTrend}
+              onCategoryPress={toggleCategorySelection}
               selectedCategoryName={selectedCategory?.category.category}
               totalYen={stats.totalYen}
             />
@@ -331,15 +307,10 @@ export default function DashboardScreen() {
               </View>
 
               <View style={localStyles.trendActions}>
-                {selectedCategory ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => setTrendModalVisible(true)}
-                    style={({ pressed }) => [localStyles.monthlyTrendButton, pressed && localStyles.pressed]}
-                  >
-                    <Text style={localStyles.monthlyTrendText}>Monthly trend</Text>
-                  </Pressable>
-                ) : null}
+                <View style={localStyles.dailyTrendLegend}>
+                  {currentUserId ? <UserLegendPill color={colors.primaryDark} label={currentUserName} /> : null}
+                  {otherUserId ? <UserLegendPill color="#F97316" label={otherUserName} /> : null}
+                </View>
               </View>
             </View>
 
@@ -348,52 +319,50 @@ export default function DashboardScreen() {
               currentUserName={currentUserName}
               otherUserId={otherUserId}
               otherUserName={otherUserName}
-              selectedCategoryName={selectedCategory?.category.category}
-              series={dailySeries}
+              series={stats.dailyUserSeries}
             />
           </BentoCard>
         </View>
       </ScrollView>
 
-      <CategoryTrendModal
-        anchorPoint={selectedCategory?.anchorPoint}
-        category={selectedCategory?.category || null}
-        currentUserId={currentUserId}
-        dataVersion={dataVersion}
-        endMonthKey={loadedMonthKey || monthKey}
-        ledgerId={ledger?.id || null}
-        onClose={() => setTrendModalVisible(false)}
-        otherUserId={otherUserId}
-        range="all"
-        visible={trendModalVisible && Boolean(selectedCategory)}
-      />
     </>
+  );
+}
+
+function UserLegendPill({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={[
+      localStyles.userLegendPill,
+      { backgroundColor: color === '#F97316' ? 'rgba(249,115,22,0.10)' : colors.tint }
+    ]}>
+      <View style={[localStyles.userLegendDot, { backgroundColor: color }]} />
+      <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.userLegendText, { color }]}>
+        {label}
+      </Text>
+    </View>
   );
 }
 
 function MemberSplit({
   amountYen,
   color,
-  label,
-  percentage
+  label
 }: {
   amountYen: number;
   color: string;
   label: string;
-  percentage: number;
 }) {
   return (
     <View style={localStyles.memberSplit}>
-      <Text style={styles.upperLabel}>{label}</Text>
+      <View style={[localStyles.memberNamePill, { backgroundColor: color === colors.primaryDark ? colors.tint : 'rgba(249,115,22,0.10)' }]}>
+        <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.memberNamePillText, { color }]}>
+          {label}
+        </Text>
+      </View>
       <View style={localStyles.memberAmountRow}>
         <Text adjustsFontSizeToFit numberOfLines={1} style={[localStyles.memberAmount, { color }]}>
           {formatYen(amountYen)}
         </Text>
-        <View style={[localStyles.memberPercentBadge, { backgroundColor: color === colors.primaryDark ? colors.tint : 'rgba(249,115,22,0.10)' }]}>
-          <Text style={[localStyles.memberPercentText, { color }]}>
-            {percentage.toFixed(1)}%
-          </Text>
-        </View>
       </View>
     </View>
   );
@@ -532,7 +501,6 @@ const localStyles = StyleSheet.create({
   memberAmountRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 10,
     minHeight: 32,
     justifyContent: 'space-between'
   },
@@ -540,20 +508,21 @@ const localStyles = StyleSheet.create({
     backgroundColor: colors.line,
     width: 1
   },
-  memberPercentBadge: {
-    alignItems: 'center',
-    borderRadius: 8,
-    height: 32,
+  memberNamePill: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    maxWidth: '100%',
+    minHeight: 22,
     justifyContent: 'center',
-    minWidth: 72,
-    paddingHorizontal: 8,
-    paddingVertical: 0
+    paddingHorizontal: 9,
+    paddingVertical: 3
   },
-  memberPercentText: {
+  memberNamePillText: {
     fontFamily: fontFamilies.bold,
-    fontSize: 13,
+    fontSize: 10,
     fontWeight: '700',
-    lineHeight: 18
+    letterSpacing: 0.7,
+    lineHeight: 14
   },
   memberSplit: {
     flex: 1,
@@ -588,21 +557,6 @@ const localStyles = StyleSheet.create({
     lineHeight: 20,
     textTransform: 'uppercase'
   },
-  monthlyTrendButton: {
-    alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderRadius: 18,
-    justifyContent: 'center',
-    minHeight: 38,
-    paddingHorizontal: 12
-  },
-  monthlyTrendText: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 18
-  },
   monthSwipeArea: {
     gap: 18
   },
@@ -624,9 +578,6 @@ const localStyles = StyleSheet.create({
     maxWidth: 236,
     minWidth: 168
   },
-  pressed: {
-    opacity: 0.68
-  },
   refreshRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -644,6 +595,14 @@ const localStyles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8
   },
+  dailyTrendLegend: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 6,
+    justifyContent: 'flex-end',
+    minWidth: 0
+  },
   trendCard: {
     minHeight: 0
   },
@@ -651,5 +610,28 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8
+  },
+  userLegendDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  userLegendPill: {
+    alignItems: 'center',
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 6,
+    maxWidth: 112,
+    minHeight: 24,
+    paddingHorizontal: 9,
+    paddingVertical: 4
+  },
+  userLegendText: {
+    flexShrink: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    lineHeight: 14
   }
 });
