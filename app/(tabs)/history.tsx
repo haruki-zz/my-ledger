@@ -3,22 +3,36 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  FlatList,
+  Keyboard,
   Pressable,
   RefreshControl,
   ScrollView,
+  SectionList,
   StyleSheet,
   Text,
-  View,
-  type StyleProp,
-  type ViewStyle
+  TextInput,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, fontFamilies, styles } from '@/src/components/styles';
-import { BentoCard, FilterChip, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { BentoCard, IconButton, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
+import {
+  ActiveFilterPill,
+  CategoryList,
+  FilterControlButton,
+  OptionList,
+  type ActiveHistoryFilterChip,
+  type HistoryFilterOption
+} from '@/src/components/history/HistoryFilterControls';
+import {
+  ExpenseDetailModal,
+  SplitBreakdownModal,
+  type HistoryExpenseItem
+} from '@/src/components/history/HistoryExpenseModals';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { CHART_PALETTE } from '@/src/lib/chartPalette';
+import { iconNameForExpenseCategory } from '@/src/lib/categories';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
@@ -32,29 +46,38 @@ import {
   amountForUser,
   compareMonthKeys,
   formatMonthLabel,
+  monthEndDateString,
   monthKeyFromDateString
 } from '@/src/lib/stats';
+import { useHistoryFilters, type HistoryFilterDropdownKey } from '@/src/hooks/useHistoryFilters';
 import type { Expense, Ledger, Profile } from '@/src/types/database';
 
-type FilterDropdownKey = 'user' | 'category' | 'startMonth' | 'endMonth';
+type FilteredExpense = HistoryExpenseItem;
 
-type FilterOption = {
-  label: string;
-  value: string;
+type HistorySection = {
+  count: number;
+  data: FilteredExpense[];
+  date: string;
+  totalYen: number;
 };
 
-type FilteredExpense = {
-  displayAmountYen: number;
-  expense: Expense;
-};
-
-const historyDateFormatter = new Intl.DateTimeFormat('en-US', {
-  day: 'numeric',
-  month: 'short'
-});
-const shortMonthFormatter = new Intl.DateTimeFormat('en-US', {
+const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
+  day: '2-digit',
   month: 'short',
-  year: '2-digit'
+  year: 'numeric'
+});
+const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
+  weekday: 'short'
+});
+const timeFormatter = new Intl.DateTimeFormat('en-US', {
+  hour: '2-digit',
+  hour12: false,
+  minute: '2-digit'
+});
+const updatedFormatter = new Intl.DateTimeFormat('en-US', {
+  hour: '2-digit',
+  hour12: false,
+  minute: '2-digit'
 });
 
 export default function HistoryScreen() {
@@ -63,21 +86,56 @@ export default function HistoryScreen() {
   const currentLedger = activeLedger?.ledger || null;
   const activeLedgerId = activeLedger?.ledger.id || null;
   const currentLedgerRef = useRef<Ledger | null>(null);
+  const searchInputRef = useRef<TextInput | null>(null);
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [activeMemberIds, setActiveMemberIds] = useState<Set<string>>(new Set());
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [startMonth, setStartMonth] = useState<string | null>(null);
-  const [endMonth, setEndMonth] = useState<string | null>(null);
-  const [activeDropdown, setActiveDropdown] = useState<FilterDropdownKey | null>(null);
+  const {
+    activeDropdown,
+    clearCategories,
+    clearSearch,
+    closeDropdown,
+    debouncedSearchText,
+    endMonth,
+    filtersOpen,
+    resetFilters,
+    searchOpen,
+    searchText,
+    selectedCategories,
+    selectedUserId,
+    selectEndMonth,
+    selectStartMonth,
+    selectUser,
+    setFiltersOpen,
+    setSearchOpen,
+    setSearchText,
+    startMonth,
+    toggleCategory,
+    toggleDropdown
+  } = useHistoryFilters();
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
+  const [detailSelection, setDetailSelection] = useState<FilteredExpense | null>(null);
+  const [splitSelection, setSplitSelection] = useState<FilteredExpense | null>(null);
 
   useEffect(() => {
     currentLedgerRef.current = currentLedger;
   }, [currentLedger]);
+
+  useEffect(() => {
+    if (!searchOpen) {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 80);
+
+    return () => clearTimeout(timeout);
+  }, [searchOpen]);
 
   const load = useCallback(async () => {
     if (ledgerLoading) {
@@ -98,16 +156,19 @@ export default function HistoryScreen() {
         getExpenses(activeLedger.id),
         getLedgerMembers(activeLedger.id)
       ]);
-      const profileIds = nextExpenses.flatMap((expense) => [
-        expense.paid_by,
-        expense.recorded_by,
-        ...expense.splits.map((split) => split.user_id)
-      ]);
+      const profileIds = new Set<string>();
+      for (const expense of nextExpenses) {
+        profileIds.add(expense.paid_by);
+        profileIds.add(expense.recorded_by);
+        expense.splits.forEach((split) => profileIds.add(split.user_id));
+      }
+      nextMembers.forEach((member) => profileIds.add(member.user_id));
 
       setLedger(activeLedger);
       setExpenses(nextExpenses);
       setActiveMemberIds(new Set(nextMembers.map((member) => member.user_id)));
-      setProfiles(await getProfiles([...profileIds, ...nextMembers.map((member) => member.user_id)]));
+      setProfiles(await getProfiles([...profileIds]));
+      setLastLoadedAt(new Date());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load expenses');
     } finally {
@@ -120,12 +181,12 @@ export default function HistoryScreen() {
     setExpenses([]);
     setProfiles({});
     setActiveMemberIds(new Set());
-    setSelectedUserId(null);
-    setSelectedCategory(null);
-    setStartMonth(null);
-    setEndMonth(null);
-    setActiveDropdown(null);
-  }, [activeLedgerId]);
+    resetFilters();
+    setCollapsedSections(new Set());
+    setDetailSelection(null);
+    setSplitSelection(null);
+    setLastLoadedAt(null);
+  }, [activeLedgerId, resetFilters]);
 
   useEffect(() => {
     load();
@@ -167,10 +228,6 @@ export default function HistoryScreen() {
     })
   ), [profileDisplayName, userOptionIds]);
 
-  const userSortOrderById = useMemo(() => (
-    new Map(sortedUserIds.map((userId, index) => [userId, index]))
-  ), [sortedUserIds]);
-
   const userColorById = useMemo(() => {
     const usedPaletteIndexes = new Set<number>();
     const colorsById = new Map<string, string>();
@@ -189,15 +246,14 @@ export default function HistoryScreen() {
     return colorsById;
   }, [userOptionIds]);
 
-  const userOptions = useMemo<FilterOption[]>(() => (
-    sortedUserIds
-      .map((userId) => ({
-        label: profileDisplayName(userId),
-        value: userId
-      }))
+  const userOptions = useMemo<HistoryFilterOption[]>(() => (
+    sortedUserIds.map((userId) => ({
+      label: profileDisplayName(userId),
+      value: userId
+    }))
   ), [profileDisplayName, sortedUserIds]);
 
-  const categoryOptions = useMemo<FilterOption[]>(() => (
+  const categoryOptions = useMemo<HistoryFilterOption[]>(() => (
     [...new Set(expenses.map((expense) => expense.category).filter(Boolean))]
       .sort((a, b) => a.localeCompare(b))
       .map((category) => ({
@@ -206,7 +262,7 @@ export default function HistoryScreen() {
       }))
   ), [expenses]);
 
-  const monthOptions = useMemo<FilterOption[]>(() => {
+  const monthOptions = useMemo<HistoryFilterOption[]>(() => {
     if (expenses.length === 0) {
       return [];
     }
@@ -215,7 +271,7 @@ export default function HistoryScreen() {
     const sortedKeys = [...new Set(monthKeys)].sort(compareMonthKeys);
     const firstMonth = sortedKeys[0];
     const lastMonth = sortedKeys[sortedKeys.length - 1];
-    const options: FilterOption[] = [];
+    const options: HistoryFilterOption[] = [];
 
     for (
       let monthKey = firstMonth;
@@ -231,7 +287,15 @@ export default function HistoryScreen() {
     return options;
   }, [expenses]);
 
+  const searchTextByExpenseId = useMemo(() => (
+    new Map(expenses.map((expense) => [
+      expense.id,
+      buildExpenseSearchText(expense, profileDisplayName)
+    ]))
+  ), [expenses, profileDisplayName]);
+
   const filteredExpenses = useMemo<FilteredExpense[]>(() => {
+    const query = normalizeSearch(debouncedSearchText);
     const nextFilteredExpenses: FilteredExpense[] = [];
 
     for (const expense of expenses) {
@@ -241,7 +305,7 @@ export default function HistoryScreen() {
         continue;
       }
 
-      if (selectedCategory && expense.category !== selectedCategory) {
+      if (selectedCategories.size > 0 && !selectedCategories.has(expense.category)) {
         continue;
       }
 
@@ -254,162 +318,134 @@ export default function HistoryScreen() {
         continue;
       }
 
+      if (query && !expenseMatchesSearch(searchTextByExpenseId.get(expense.id), displayAmountYen, query)) {
+        continue;
+      }
+
       nextFilteredExpenses.push({ displayAmountYen, expense });
     }
 
-    return nextFilteredExpenses;
-  }, [endMonth, expenses, selectedCategory, selectedUserId, startMonth]);
+    return nextFilteredExpenses.sort((a, b) => (
+      b.expense.spent_on.localeCompare(a.expense.spent_on) ||
+      b.expense.created_at.localeCompare(a.expense.created_at)
+    ));
+  }, [debouncedSearchText, endMonth, expenses, searchTextByExpenseId, selectedCategories, selectedUserId, startMonth]);
 
-  const activeFilterCount = [selectedUserId, selectedCategory, startMonth, endMonth].filter(Boolean).length;
-  const hasActiveFilters = activeFilterCount > 0;
+  const activeFilterChips = useMemo<ActiveHistoryFilterChip[]>(() => {
+    const chips: ActiveHistoryFilterChip[] = [];
+
+    if (debouncedSearchText.trim()) {
+      chips.push({
+        key: 'search',
+        label: `Search ${debouncedSearchText.trim()}`,
+        onClear: clearSearch
+      });
+    }
+
+    if (selectedUserId) {
+      chips.push({
+        key: 'user',
+        label: profileDisplayName(selectedUserId),
+        onClear: () => selectUser('')
+      });
+    }
+
+    if (selectedCategories.size > 0) {
+      chips.push({
+        key: 'category',
+        label: selectedCategories.size === 1 ? [...selectedCategories][0] : `Category ${selectedCategories.size}`,
+        onClear: clearCategories
+      });
+    }
+
+    if (startMonth) {
+      chips.push({
+        key: 'startMonth',
+        label: `From ${formatMonthBoundary(startMonth, 'start')}`,
+        onClear: () => selectStartMonth('')
+      });
+    }
+
+    if (endMonth) {
+      chips.push({
+        key: 'endMonth',
+        label: `To ${formatMonthBoundary(endMonth, 'end')}`,
+        onClear: () => selectEndMonth('')
+      });
+    }
+
+    return chips;
+  }, [
+    clearCategories,
+    clearSearch,
+    debouncedSearchText,
+    endMonth,
+    profileDisplayName,
+    selectEndMonth,
+    selectStartMonth,
+    selectUser,
+    selectedCategories,
+    selectedUserId,
+    startMonth
+  ]);
+
+  const hasActiveFilters = activeFilterChips.length > 0;
 
   const total = useMemo(
     () => filteredExpenses.reduce((sum, item) => sum + item.displayAmountYen, 0),
     [filteredExpenses]
   );
 
-  function toggleDropdown(dropdown: FilterDropdownKey) {
-    setActiveDropdown((current) => (current === dropdown ? null : dropdown));
+  const sections = useMemo<HistorySection[]>(() => {
+    const sectionMap = new Map<string, FilteredExpense[]>();
+
+    for (const item of filteredExpenses) {
+      const existing = sectionMap.get(item.expense.spent_on) || [];
+      existing.push(item);
+      sectionMap.set(item.expense.spent_on, existing);
+    }
+
+    return [...sectionMap.entries()].map(([date, items]) => ({
+      count: items.length,
+      data: collapsedSections.has(date) ? [] : items,
+      date,
+      totalYen: items.reduce((sum, item) => sum + item.displayAmountYen, 0)
+    }));
+  }, [collapsedSections, filteredExpenses]);
+
+  function openDropdown(dropdown: HistoryFilterDropdownKey) {
+    Keyboard.dismiss();
+    toggleDropdown(dropdown);
   }
 
-  function selectUser(value: string) {
-    setSelectedUserId(value || null);
-    setActiveDropdown(null);
-  }
-
-  function selectCategory(value: string) {
-    setSelectedCategory(value || null);
-    setActiveDropdown(null);
-  }
-
-  function selectStartMonth(value: string) {
-    const nextStartMonth = value || null;
-    setStartMonth(nextStartMonth);
-
-    if (nextStartMonth && endMonth && compareMonthKeys(nextStartMonth, endMonth) > 0) {
-      setEndMonth(nextStartMonth);
-    }
-
-    setActiveDropdown(null);
-  }
-
-  function selectEndMonth(value: string) {
-    const nextEndMonth = value || null;
-    setEndMonth(nextEndMonth);
-
-    if (nextEndMonth && startMonth && compareMonthKeys(nextEndMonth, startMonth) < 0) {
-      setStartMonth(nextEndMonth);
-    }
-
-    setActiveDropdown(null);
-  }
-
-  function resetFilters() {
-    setSelectedUserId(null);
-    setSelectedCategory(null);
-    setStartMonth(null);
-    setEndMonth(null);
-    setActiveDropdown(null);
-  }
-
-  function clearFilter(filter: FilterDropdownKey) {
-    if (filter === 'user') {
-      setSelectedUserId(null);
-    }
-
-    if (filter === 'category') {
-      setSelectedCategory(null);
-    }
-
-    if (filter === 'startMonth') {
-      setStartMonth(null);
-    }
-
-    if (filter === 'endMonth') {
-      setEndMonth(null);
-    }
-
-    setActiveDropdown((current) => (current === filter ? null : current));
-  }
-
-  function filterChipLabel(filter: FilterDropdownKey) {
-    if (filter === 'user') {
-      return selectedUserId ? profileDisplayName(selectedUserId) : 'User';
-    }
-
-    if (filter === 'category') {
-      return selectedCategory || 'Category';
-    }
-
-    if (filter === 'startMonth') {
-      return startMonth ? formatShortMonthLabel(startMonth) : 'From';
-    }
-
-    return endMonth ? formatShortMonthLabel(endMonth) : 'To';
-  }
-
-  function filterActive(filter: FilterDropdownKey) {
-    if (filter === 'user') {
-      return Boolean(selectedUserId);
-    }
-
-    if (filter === 'category') {
-      return Boolean(selectedCategory);
-    }
-
-    if (filter === 'startMonth') {
-      return Boolean(startMonth);
-    }
-
-    return Boolean(endMonth);
-  }
-
-  function pressFilter(filter: FilterDropdownKey) {
-    if (filterActive(filter)) {
-      clearFilter(filter);
-      return;
-    }
-
-    toggleDropdown(filter);
-  }
-
-  const compareBadgeUserIds = useCallback((a: string, b: string) => {
-    const orderComparison = (userSortOrderById.get(a) ?? Number.MAX_SAFE_INTEGER) -
-      (userSortOrderById.get(b) ?? Number.MAX_SAFE_INTEGER);
-
-    if (orderComparison !== 0) {
-      return orderComparison;
-    }
-
-    const nameComparison = profileDisplayName(a).localeCompare(profileDisplayName(b));
-    return nameComparison || a.localeCompare(b);
-  }, [profileDisplayName, userSortOrderById]);
-
-  const expenseBadges = useCallback((expense: Expense): ExpenseBadge[] => {
-    let userIds: string[];
-
-    if (expense.ownership === 'shared') {
-      const splitUserIds: string[] = [];
-
-      for (const split of expense.splits) {
-        if (!splitUserIds.includes(split.user_id)) {
-          splitUserIds.push(split.user_id);
-        }
+  function toggleSection(date: string) {
+    setCollapsedSections((current) => {
+      const next = new Set(current);
+      if (next.has(date)) {
+        next.delete(date);
+      } else {
+        next.add(date);
       }
 
-      userIds = splitUserIds.sort(compareBadgeUserIds).slice(0, 2);
-    } else {
-      userIds = [expense.paid_by];
-    }
+      return next;
+    });
+  }
 
-    const badgeUserIds = userIds.length > 0 ? userIds : [expense.paid_by];
-
-    return badgeUserIds.map((userId) => ({
-      accent: userColorById.get(userId) || colors.primary,
-      id: userId,
-      label: profileDisplayName(userId)
-    }));
-  }, [compareBadgeUserIds, profileDisplayName, userColorById]);
+  const expenseBadges = useCallback((expense: Expense): ExpenseBadge[] => {
+    const ownerAccent = userColorById.get(expense.paid_by) || colors.primary;
+    return [
+      {
+        accent: ownerAccent,
+        id: `paid-${expense.paid_by}`,
+        label: profileDisplayName(expense.paid_by)
+      },
+      {
+        accent: expense.ownership === 'shared' ? colors.primaryDark : colors.accent,
+        id: `ownership-${expense.ownership}`,
+        label: expense.ownership === 'shared' ? 'Shared' : 'Personal'
+      }
+    ];
+  }, [profileDisplayName, userColorById]);
 
   async function confirmDelete(expenseId: string) {
     Alert.alert('Delete Expense', 'This cannot be undone.', [
@@ -419,6 +455,8 @@ export default function HistoryScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
+            setDetailSelection(null);
+            setSplitSelection(null);
             await deleteExpense(expenseId);
             await load();
           } catch (deleteError) {
@@ -429,140 +467,416 @@ export default function HistoryScreen() {
     ]);
   }
 
-  const filterKeys: FilterDropdownKey[] = ['user', 'category', 'startMonth', 'endMonth'];
-
   const header = (
     <View style={localStyles.headerContent}>
-      <View>
-        <Text style={localStyles.ledgerKicker}>{ledger ? ledger.name : 'Shared Ledger'}</Text>
+      <View style={localStyles.topBar}>
+        <Pressable onPress={() => router.push('/ledger')} style={localStyles.brandBlock}>
+          <View style={localStyles.brandRow}>
+            <Ionicons color={colors.primaryDark} name="book" size={24} />
+            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.brandTitle}>My Ledger</Text>
+          </View>
+          <View style={localStyles.ledgerRow}>
+            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.ledgerKicker}>
+              {ledger ? ledger.name : 'Shared Ledger'}
+            </Text>
+            <Ionicons color={colors.muted} name="chevron-down" size={16} />
+          </View>
+        </Pressable>
+
+        <View style={localStyles.headerActions}>
+          <IconButton
+            accessibilityLabel={searchOpen ? 'Close search' : 'Open search'}
+            icon={searchOpen ? 'close' : 'search'}
+            onPress={() => {
+              setSearchOpen(!searchOpen);
+            }}
+            size="lg"
+            tone="neutral"
+          />
+          <IconButton
+            accessibilityLabel={filtersOpen ? 'Hide filters' : 'Show filters'}
+            icon="options-outline"
+            onPress={() => {
+              setFiltersOpen(!filtersOpen);
+            }}
+            size="lg"
+            tone={filtersOpen ? 'primary' : 'neutral'}
+          />
+        </View>
       </View>
+
+      {searchOpen ? (
+        <View style={localStyles.searchShell}>
+          <Ionicons color={colors.muted} name="search" size={19} />
+          <TextInput
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+            onChangeText={setSearchText}
+            placeholder="Search records"
+            placeholderTextColor={colors.subtle}
+            ref={searchInputRef}
+            returnKeyType="search"
+            style={localStyles.searchInput}
+            value={searchText}
+          />
+        </View>
+      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <BentoCard style={localStyles.summaryStrip}>
-        <View style={localStyles.summaryText}>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>{formatYen(total)}</Text>
-          <Text style={localStyles.summaryCount}>{filteredExpenses.length} records</Text>
+      <BentoCard style={localStyles.summaryCard}>
+        <View style={localStyles.summaryMainRow}>
+          <View style={localStyles.summaryTotalBlock}>
+            <View style={localStyles.summaryLabelRow}>
+              <Text style={localStyles.summaryLabel}>Filtered Total</Text>
+              <Ionicons color={colors.muted} name="information-circle-outline" size={17} />
+            </View>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>
+              {formatYen(total)}
+            </Text>
+            <View style={localStyles.updatedRow}>
+              <Ionicons color={colors.primaryDark} name="arrow-down" size={17} />
+              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.updatedText}>
+                Across current filters
+              </Text>
+            </View>
+          </View>
+
+          <View style={localStyles.summaryDivider} />
+
+          <View style={localStyles.summaryRecordsBlock}>
+            <Text style={localStyles.summaryLabel}>Records</Text>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.recordCount}>
+              {filteredExpenses.length}
+            </Text>
+            <View style={localStyles.updatedRow}>
+              <View style={localStyles.updatedDot} />
+              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.updatedText}>
+                {formatUpdatedStatus(lastLoadedAt)}
+              </Text>
+            </View>
+          </View>
         </View>
-        <Ionicons color="rgba(15,118,110,0.42)" name="receipt-outline" size={30} />
+
+        <View style={localStyles.activeFilterHeader}>
+          <Text style={localStyles.summaryLabel}>Active Filters</Text>
+          {hasActiveFilters ? (
+            <Pressable onPress={resetFilters}>
+              <Text style={localStyles.clearAllText}>Clear all</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        <ScrollView
+          contentContainerStyle={localStyles.activeFilterChips}
+          directionalLockEnabled
+          horizontal
+          nestedScrollEnabled
+          showsHorizontalScrollIndicator={false}
+        >
+          {activeFilterChips.length > 0 ? activeFilterChips.map((chip) => (
+            <ActiveFilterPill key={chip.key} label={chip.label} onClear={chip.onClear} />
+          )) : (
+            <Text style={localStyles.noFiltersText}>None</Text>
+          )}
+        </ScrollView>
       </BentoCard>
 
-      <ScrollView
-        contentContainerStyle={localStyles.filterChips}
-        horizontal
-        nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}
-      >
-        {filterKeys.map((item) => (
-          <FilterChip
-            active={filterActive(item)}
-            key={item}
-            label={filterChipLabel(item)}
-            onPress={() => pressFilter(item)}
-          />
-        ))}
-      </ScrollView>
+      {filtersOpen ? (
+        <View style={localStyles.filterArea}>
+          <ScrollView
+            contentContainerStyle={localStyles.filterControls}
+            directionalLockEnabled
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={false}
+          >
+            <FilterControlButton
+              active={Boolean(selectedUserId)}
+              icon="person-outline"
+              label={selectedUserId ? profileDisplayName(selectedUserId) : 'User'}
+              onPress={() => openDropdown('user')}
+            />
+            <FilterControlButton
+              active={selectedCategories.size > 0}
+              icon="pricetag-outline"
+              label={selectedCategories.size > 0 ? `Category ${selectedCategories.size}` : 'Category'}
+              onPress={() => openDropdown('category')}
+            />
+            <FilterControlButton
+              active={Boolean(startMonth)}
+              icon="calendar-outline"
+              label={startMonth ? formatMonthBoundary(startMonth, 'start') : 'From'}
+              onPress={() => openDropdown('startMonth')}
+            />
+            <FilterControlButton
+              active={Boolean(endMonth)}
+              icon="calendar-outline"
+              label={endMonth ? formatMonthBoundary(endMonth, 'end') : 'To'}
+              onPress={() => openDropdown('endMonth')}
+            />
+          </ScrollView>
 
-      {activeDropdown ? (
-        <BentoCard style={localStyles.dropdownCard}>
-          {activeDropdown === 'user' ? (
-            <FilterDropdown
-              active
-              label="User"
-              onChange={selectUser}
-              onToggle={() => toggleDropdown('user')}
-              options={[{ label: 'All users', value: '' }, ...userOptions]}
-              selectedValue={selectedUserId || ''}
-            />
+          {activeDropdown ? (
+            <BentoCard style={localStyles.dropdownCard}>
+              {activeDropdown === 'user' ? (
+                <OptionList
+                  emptyLabel="All users"
+                  onChange={selectUser}
+                  options={userOptions}
+                  selectedValue={selectedUserId || ''}
+                />
+              ) : null}
+              {activeDropdown === 'category' ? (
+                <CategoryList
+                  onApply={closeDropdown}
+                  onClear={clearCategories}
+                  onToggle={toggleCategory}
+                  options={categoryOptions}
+                  selectedCategories={selectedCategories}
+                />
+              ) : null}
+              {activeDropdown === 'startMonth' ? (
+                <OptionList
+                  emptyLabel="Any start"
+                  onChange={selectStartMonth}
+                  options={monthOptions}
+                  selectedValue={startMonth || ''}
+                />
+              ) : null}
+              {activeDropdown === 'endMonth' ? (
+                <OptionList
+                  emptyLabel="Any end"
+                  onChange={selectEndMonth}
+                  options={monthOptions}
+                  selectedValue={endMonth || ''}
+                />
+              ) : null}
+            </BentoCard>
           ) : null}
-          {activeDropdown === 'category' ? (
-            <FilterDropdown
-              active
-              label="Category"
-              onChange={selectCategory}
-              onToggle={() => toggleDropdown('category')}
-              options={[{ label: 'All categories', value: '' }, ...categoryOptions]}
-              selectedValue={selectedCategory || ''}
-            />
-          ) : null}
-          {activeDropdown === 'startMonth' ? (
-            <FilterDropdown
-              active
-              label="From"
-              onChange={selectStartMonth}
-              onToggle={() => toggleDropdown('startMonth')}
-              options={[{ label: 'Any start', value: '' }, ...monthOptions]}
-              selectedValue={startMonth || ''}
-            />
-          ) : null}
-          {activeDropdown === 'endMonth' ? (
-            <FilterDropdown
-              active
-              label="To"
-              onChange={selectEndMonth}
-              onToggle={() => toggleDropdown('endMonth')}
-              options={[{ label: 'Any end', value: '' }, ...monthOptions]}
-              selectedValue={endMonth || ''}
-            />
-          ) : null}
-        </BentoCard>
+        </View>
       ) : null}
     </View>
   );
 
   return (
-    <FlatList
-      ListEmptyComponent={(
-        <View style={localStyles.emptyState}>
-          {!loading && expenses.length === 0 ? (
-            <BentoCard>
-              <Text style={styles.h2}>No Expenses Yet</Text>
-              <Text style={styles.muted}>Tap the floating add button to create the first Supabase-backed record.</Text>
-            </BentoCard>
-          ) : null}
+    <>
+      <SectionList
+        ListEmptyComponent={(
+          <View style={localStyles.emptyState}>
+            {!loading && expenses.length === 0 ? (
+              <BentoCard>
+                <Text style={styles.h2}>No Expenses Yet</Text>
+                <Text style={styles.muted}>Tap the floating add button to create the first record.</Text>
+              </BentoCard>
+            ) : null}
 
-          {!loading && expenses.length > 0 && filteredExpenses.length === 0 ? (
-            <BentoCard>
-              <Text style={styles.h2}>No Matching Expenses</Text>
-              <Text style={styles.muted}>Adjust or reset the filters to show more records.</Text>
-              {hasActiveFilters ? (
-                <Pressable onPress={resetFilters} style={[styles.button, styles.secondaryButton]}>
-                  <Text style={[styles.buttonText, styles.secondaryButtonText]}>Reset Filters</Text>
-                </Pressable>
-              ) : null}
-            </BentoCard>
-          ) : null}
-        </View>
-      )}
-      ListHeaderComponent={header}
-      contentContainerStyle={[styles.content, localStyles.listContent, { paddingTop: insets.top + 16 }]}
-      data={filteredExpenses}
-      keyExtractor={({ expense }) => expense.id}
-      refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
-      style={styles.page}
-      renderItem={({ item }) => (
-        <SwipeExpenseRow
-          amount={formatYen(item.displayAmountYen)}
-          badges={expenseBadges(item.expense)}
-          category={item.expense.category}
-          dateLabel={formatHistoryDate(item.expense.spent_on)}
-          onDelete={() => confirmDelete(item.expense.id)}
-          onEdit={() => router.push(`/expenses/${item.expense.id}`)}
+            {!loading && expenses.length > 0 && filteredExpenses.length === 0 ? (
+              <BentoCard>
+                <Text style={styles.h2}>No Matching Expenses</Text>
+                <Text style={styles.muted}>Adjust the filters or search to show more records.</Text>
+                {hasActiveFilters ? (
+                  <Pressable onPress={resetFilters} style={[styles.button, styles.secondaryButton]}>
+                    <Text style={[styles.buttonText, styles.secondaryButtonText]}>Clear all</Text>
+                  </Pressable>
+                ) : null}
+              </BentoCard>
+            ) : null}
+          </View>
+        )}
+        ListHeaderComponent={header}
+        contentContainerStyle={[styles.content, localStyles.listContent, { paddingTop: insets.top + 16 }]}
+        initialNumToRender={18}
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        keyExtractor={({ expense }) => expense.id}
+        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
+        renderItem={({ item }) => (
+          <View style={localStyles.rowWrapper}>
+            <SwipeExpenseRow
+              compact
+              content={{
+                amount: formatYen(item.displayAmountYen),
+                badges: expenseBadges(item.expense),
+                category: item.expense.category,
+                dateLabel: formatHistoryDate(item.expense.spent_on),
+                leadingIcon: iconNameForExpenseCategory(item.expense.category),
+                leadingIconColor: colorForCategory(item.expense.category),
+                subtitle: rowSubtitle(item.expense),
+                timeLabel: formatExpenseTime(item.expense),
+                title: rowTitle(item.expense)
+              }}
+              onDelete={() => confirmDelete(item.expense.id)}
+              onEdit={() => router.push(`/expenses/${item.expense.id}`)}
+              onSplitBreakdown={() => setSplitSelection(item)}
+              onViewDetails={() => setDetailSelection(item)}
+            />
+          </View>
+        )}
+        renderSectionHeader={({ section }) => (
+          <SectionHeader
+            collapsed={collapsedSections.has(section.date)}
+            count={section.count}
+            date={section.date}
+            onPress={() => toggleSection(section.date)}
+            totalYen={section.totalYen}
+          />
+        )}
+        sections={sections}
+        showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled={false}
+        style={styles.page}
+      />
+
+      {detailSelection ? (
+        <ExpenseDetailModal
+          formatCreatedAt={formatCreatedAt}
+          formatHistoryDate={formatHistoryDate}
+          item={detailSelection}
+          onClose={() => setDetailSelection(null)}
+          onDelete={() => confirmDelete(detailSelection.expense.id)}
+          onEdit={() => router.push(`/expenses/${detailSelection.expense.id}`)}
+          onSplit={() => {
+            setSplitSelection(detailSelection);
+            setDetailSelection(null);
+          }}
+          profileDisplayName={profileDisplayName}
         />
-      )}
-      showsVerticalScrollIndicator={false}
-    />
+      ) : null}
+
+      {splitSelection ? (
+        <SplitBreakdownModal
+          item={splitSelection}
+          onClose={() => setSplitSelection(null)}
+          profileDisplayName={profileDisplayName}
+        />
+      ) : null}
+    </>
   );
 }
 
-function formatHistoryDate(dateString: string) {
-  const date = new Date(`${dateString}T00:00:00`);
-  return historyDateFormatter.format(date);
+function SectionHeader({
+  collapsed,
+  count,
+  date,
+  onPress,
+  totalYen
+}: {
+  collapsed: boolean;
+  count: number;
+  date: string;
+  onPress: () => void;
+  totalYen: number;
+}) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [localStyles.sectionHeader, pressed && localStyles.pressed]}>
+      <View style={localStyles.sectionDateBlock}>
+        <Text style={localStyles.sectionDate}>{formatSectionDate(date)}</Text>
+        <Text style={localStyles.sectionWeekday}>{formatWeekday(date)} · {count} records</Text>
+      </View>
+      <View style={localStyles.sectionTotalBlock}>
+        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.sectionTotal}>{formatYen(totalYen)}</Text>
+        <Ionicons color={colors.ink} name={collapsed ? 'chevron-down' : 'chevron-up'} size={18} />
+      </View>
+    </Pressable>
+  );
 }
 
-function formatShortMonthLabel(monthKey: string) {
-  const [year, month] = monthKey.split('-').map(Number);
-  return shortMonthFormatter.format(new Date(year, month - 1, 1));
+function buildExpenseSearchText(
+  expense: Expense,
+  profileDisplayName: (userId: string) => string
+) {
+  const splitNames = expense.splits.map((split) => profileDisplayName(split.user_id));
+  return normalizeSearch([
+    expense.note || '',
+    expense.category,
+    expense.spent_on,
+    expense.amount_yen,
+    formatYen(expense.amount_yen),
+    expense.ownership,
+    profileDisplayName(expense.paid_by),
+    profileDisplayName(expense.recorded_by),
+    ...splitNames
+  ].join(' '));
+}
+
+function expenseMatchesSearch(
+  indexedSearchText: string | undefined,
+  displayAmountYen: number,
+  normalizedQuery: string
+) {
+  const displayAmountSearchText = normalizeSearch(`${displayAmountYen} ${formatYen(displayAmountYen)}`);
+
+  return Boolean(indexedSearchText?.includes(normalizedQuery) || displayAmountSearchText.includes(normalizedQuery));
+}
+
+function normalizeSearch(value: unknown) {
+  return String(value).toLowerCase().replace(/[¥,\s]/g, '');
+}
+
+function rowTitle(expense: Expense) {
+  return expense.note?.trim() || expense.category;
+}
+
+function rowSubtitle(expense: Expense) {
+  return expense.note?.trim() ? expense.category : expense.ownership === 'shared' ? 'Shared expense' : 'Personal expense';
+}
+
+function formatHistoryDate(dateString: string) {
+  return fullDateFormatter.format(parseDateString(dateString));
+}
+
+function formatSectionDate(dateString: string) {
+  return fullDateFormatter.format(parseDateString(dateString)).toUpperCase();
+}
+
+function formatWeekday(dateString: string) {
+  return weekdayFormatter.format(parseDateString(dateString)).toUpperCase();
+}
+
+function formatExpenseTime(expense: Expense) {
+  const date = new Date(expense.created_at);
+  if (Number.isNaN(date.getTime())) {
+    return '--:--';
+  }
+
+  return timeFormatter.format(date);
+}
+
+function formatCreatedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return `${formatHistoryDate(date.toISOString().slice(0, 10))} ${timeFormatter.format(date)}`;
+}
+
+function formatUpdatedStatus(value: Date | null) {
+  if (!value) {
+    return 'Updating...';
+  }
+
+  if (Date.now() - value.getTime() < 60_000) {
+    return 'Updated just now';
+  }
+
+  return `Updated ${updatedFormatter.format(value)}`;
+}
+
+function formatMonthBoundary(monthKey: string, boundary: 'start' | 'end') {
+  const dateString = boundary === 'start' ? `${monthKey}-01` : monthEndDateString(monthKey);
+  return dateString.replaceAll('-', '/');
+}
+
+function parseDateString(dateString: string) {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function colorForCategory(category: string) {
+  return CHART_PALETTE[hashString(category) % CHART_PALETTE.length] || colors.primaryDark;
 }
 
 function hashString(value: string) {
@@ -575,129 +889,239 @@ function hashString(value: string) {
   return Math.abs(hash);
 }
 
-type FilterDropdownProps = {
-  active: boolean;
-  label: string;
-  onChange: (value: string) => void;
-  onToggle: () => void;
-  options: FilterOption[];
-  selectedValue: string;
-  style?: StyleProp<ViewStyle>;
-};
-
-function FilterDropdown({
-  active,
-  label,
-  onChange,
-  onToggle,
-  options,
-  selectedValue,
-  style
-}: FilterDropdownProps) {
-  const selectedOption = options.find((option) => option.value === selectedValue) || options[0];
-
-  return (
-    <View style={[localStyles.filterField, style]}>
-      <Text style={styles.upperLabel}>{label}</Text>
-      <View style={styles.dropdown}>
-        <Pressable
-          onPress={onToggle}
-          style={[styles.dropdownTrigger, active && styles.dropdownTriggerActive]}
-        >
-          <Text ellipsizeMode="tail" numberOfLines={1} style={styles.dropdownValue}>
-            {selectedOption?.label || 'Any'}
-          </Text>
-          <Text style={styles.dropdownIndicator}>{active ? '⌃' : '⌄'}</Text>
-        </Pressable>
-
-        {active ? (
-          <View style={[styles.dropdownMenu, localStyles.dropdownMenu]}>
-            <ScrollView nestedScrollEnabled style={localStyles.dropdownMenuScroll}>
-              {options.map((option) => {
-                const selected = option.value === selectedValue;
-                return (
-                  <Pressable
-                    key={option.value || `${label}-all`}
-                    onPress={() => onChange(option.value)}
-                    style={[styles.dropdownOption, selected && styles.dropdownOptionActive]}
-                  >
-                    <Text
-                      ellipsizeMode="tail"
-                      numberOfLines={1}
-                      style={[styles.dropdownOptionText, selected && styles.dropdownOptionTextActive]}
-                    >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
 const localStyles = StyleSheet.create({
+  activeFilterChips: {
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 32,
+    paddingRight: 18
+  },
+  activeFilterHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  brandBlock: {
+    flex: 1,
+    gap: 5,
+    minWidth: 0
+  },
+  brandRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minWidth: 0
+  },
+  brandTitle: {
+    color: colors.primaryDark,
+    flexShrink: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 24,
+    fontWeight: '700',
+    lineHeight: 31
+  },
+  clearAllText: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18
+  },
   dropdownCard: {
     gap: 10,
     padding: 14
   },
-  dropdownMenu: {
-    maxHeight: 228
-  },
-  dropdownMenuScroll: {
-    maxHeight: 228
-  },
   emptyState: {
     gap: 12
   },
-  filterChips: {
+  filterArea: {
+    gap: 8
+  },
+  filterControls: {
     gap: 10,
     paddingRight: 20
   },
-  filterField: {
-    gap: 8
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12
   },
   headerContent: {
     gap: 18
   },
   ledgerKicker: {
+    color: colors.ink,
+    flexShrink: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 15,
+    lineHeight: 20
+  },
+  ledgerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    paddingLeft: 36
+  },
+  listContent: {
+    gap: 10
+  },
+  noFiltersText: {
     color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 13,
+    lineHeight: 18
+  },
+  pressed: {
+    opacity: 0.76
+  },
+  recordCount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 30,
+    fontWeight: '700',
+    lineHeight: 38
+  },
+  rowWrapper: {
+    marginTop: 0
+  },
+  searchInput: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 16,
+    minWidth: 0,
+    paddingVertical: 0
+  },
+  searchShell: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    borderColor: colors.line,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 50,
+    paddingHorizontal: 14
+  },
+  sectionDate: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20
+  },
+  sectionDateBlock: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0
+  },
+  sectionHeader: {
+    alignItems: 'center',
+    backgroundColor: colors.glass,
+    borderColor: colors.glassBorder,
+    borderRadius: theme.radii.surface,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    marginTop: 4,
+    minHeight: 58,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    ...theme.shadow,
+    shadowOpacity: 0.06,
+    shadowRadius: 16
+  },
+  sectionTotal: {
+    color: colors.ink,
     fontFamily: fontFamilies.bold,
     fontSize: 18,
     fontWeight: '700',
-    lineHeight: 24
+    lineHeight: 24,
+    maxWidth: 142,
+    textAlign: 'right'
   },
-  listContent: {
-    gap: 16
+  sectionTotalBlock: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6
+  },
+  sectionWeekday: {
+    color: colors.muted,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17
   },
   summaryAmount: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
-    fontSize: 38,
+    fontSize: 42,
     fontWeight: '700',
     letterSpacing: 0,
-    lineHeight: 46
+    lineHeight: 52
   },
-  summaryCount: {
+  summaryCard: {
+    gap: 18,
+    paddingHorizontal: 22,
+    paddingVertical: 20
+  },
+  summaryDivider: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.line,
+    width: 1
+  },
+  summaryLabel: {
     color: colors.muted,
     fontFamily: fontFamilies.bold,
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '700',
-    lineHeight: 22
+    letterSpacing: 1.3,
+    lineHeight: 17,
+    textTransform: 'uppercase'
   },
-  summaryStrip: {
+  summaryLabelRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 106,
-    paddingHorizontal: 24,
-    paddingVertical: 18
+    gap: 6
   },
-  summaryText: {
+  summaryMainRow: {
+    flexDirection: 'row',
+    gap: 22
+  },
+  summaryRecordsBlock: {
+    gap: 14,
+    minWidth: 110
+  },
+  summaryTotalBlock: {
     flex: 1,
+    gap: 8,
     minWidth: 0
+  },
+  topBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 16,
+    justifyContent: 'space-between'
+  },
+  updatedDot: {
+    backgroundColor: colors.primaryDark,
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  updatedRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    minHeight: 20
+  },
+  updatedText: {
+    color: colors.muted,
+    flexShrink: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 17
   }
 });

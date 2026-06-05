@@ -19,6 +19,7 @@ import {
 
 import {
   ExpenseContextMenu,
+  type ExpenseContextMenuAction,
   type ExpenseContextMenuCard,
   type ExpenseContextMenuPoint,
   type ExpenseContextMenuRect
@@ -26,7 +27,7 @@ import {
 import {
   EXPENSE_ROW_CARD_MIN_HEIGHT,
   ExpenseRowCardContent,
-  type ExpenseBadge
+  type ExpenseRowCardContentData
 } from '@/src/components/ExpenseRowCardContent';
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { tintFromAccent } from '@/src/lib/color';
@@ -107,12 +108,15 @@ type FilterChipProps = {
 };
 
 type SwipeExpenseRowProps = {
-  amount: string;
-  badges: ExpenseBadge[];
-  category: string;
-  dateLabel: string;
+  compact?: boolean;
+  content: ExpenseRowCardContentData;
   onDelete: () => void;
   onEdit: () => void;
+  onSplitBreakdown?: () => void;
+  onViewDetails?: () => void;
+  subtitle?: string;
+  timeLabel?: string;
+  title?: string;
 };
 
 type ExpenseContextMenuState = {
@@ -133,6 +137,16 @@ const SWIPE_TRIGGER_DISTANCE = SWIPE_ACTION_WIDTH * 0.9;
 const SWIPE_MAX_TRANSLATE = SWIPE_ACTION_WIDTH + 20;
 const SWIPE_IDLE_THRESHOLD = 1;
 const LONG_PRESS_DELAY_MS = 360;
+
+function useLatestRef<T>(value: T) {
+  const valueRef = useRef(value);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  return valueRef;
+}
 
 export function GlassSurface({ children, style, ...viewProps }: GlassSurfaceProps) {
   return (
@@ -366,12 +380,12 @@ export function FilterChip({ active, label, onPress }: FilterChipProps) {
 }
 
 export function SwipeExpenseRow({
-  amount,
-  badges,
-  category,
-  dateLabel,
+  compact,
+  content,
   onDelete,
-  onEdit
+  onEdit,
+  onSplitBreakdown,
+  onViewDetails
 }: SwipeExpenseRowProps) {
   const [translateX] = useState(() => new Animated.Value(0));
   const [responder, setResponder] = useState<PanResponderInstance | null>(null);
@@ -382,16 +396,12 @@ export function SwipeExpenseRow({
     panResponderActive: false,
     swipeActionHandled: false
   });
-  const onDeleteRef = useRef(onDelete);
-  const onEditRef = useRef(onEdit);
-
-  useEffect(() => {
-    onDeleteRef.current = onDelete;
-  }, [onDelete]);
-
-  useEffect(() => {
-    onEditRef.current = onEdit;
-  }, [onEdit]);
+  const actionsRef = useLatestRef({
+    delete: onDelete,
+    edit: onEdit,
+    splitBreakdown: onSplitBreakdown,
+    viewDetails: onViewDetails
+  });
 
   useEffect(() => {
     setResponder(PanResponder.create({
@@ -413,7 +423,7 @@ export function SwipeExpenseRow({
           gestureStateRef.current.swipeActionHandled = true;
           gestureStateRef.current.panResponderActive = false;
           resetSwipe(translateX);
-          onEditRef.current();
+          actionsRef.current.edit();
           return;
         }
 
@@ -421,7 +431,7 @@ export function SwipeExpenseRow({
           gestureStateRef.current.swipeActionHandled = true;
           gestureStateRef.current.panResponderActive = false;
           resetSwipe(translateX);
-          onDeleteRef.current();
+          actionsRef.current.delete();
           return;
         }
 
@@ -434,7 +444,7 @@ export function SwipeExpenseRow({
       },
       onPanResponderTerminationRequest: () => true
     }));
-  }, [translateX]);
+  }, [actionsRef, translateX]);
 
   function handlePressIn() {
     gestureStateRef.current.longPressHandled = false;
@@ -453,7 +463,7 @@ export function SwipeExpenseRow({
       resetSwipe(translateX);
     }
 
-    onEditRef.current();
+    actionsRef.current.edit();
   }
 
   function handleLongPress(event: GestureResponderEvent) {
@@ -463,7 +473,7 @@ export function SwipeExpenseRow({
       x: event.nativeEvent.pageX,
       y: event.nativeEvent.pageY
     };
-    const card = { amount, badges, category, dateLabel };
+    const card = { ...content, compact };
     const row = rowRef.current;
 
     if (!row) {
@@ -491,16 +501,58 @@ export function SwipeExpenseRow({
   }
 
   function handleAccessibilityAction(event: AccessibilityActionEvent) {
+    if (event.nativeEvent.actionName === 'viewDetails') {
+      actionsRef.current.viewDetails?.();
+    }
+
+    if (event.nativeEvent.actionName === 'splitBreakdown') {
+      actionsRef.current.splitBreakdown?.();
+    }
+
     if (event.nativeEvent.actionName === 'edit') {
-      onEditRef.current();
+      actionsRef.current.edit();
     }
 
     if (event.nativeEvent.actionName === 'delete') {
-      onDeleteRef.current();
+      actionsRef.current.delete();
     }
   }
 
-  const badgeLabels = badges.map((badge) => badge.label).join(', ');
+  const badgeLabels = content.badges.map((badge) => badge.label).join(', ');
+  const accessibilityActions = [
+    ...(onViewDetails ? [{ label: 'View details', name: 'viewDetails' }] : []),
+    ...(onSplitBreakdown ? [{ label: 'Split breakdown', name: 'splitBreakdown' }] : []),
+    { label: 'Edit', name: 'edit' },
+    { label: 'Delete', name: 'delete' }
+  ];
+  const menuActions: ExpenseContextMenuAction[] = [
+    ...(onViewDetails ? [{
+      accessibilityLabel: 'View expense details',
+      icon: 'information-circle-outline' as const,
+      label: 'View details',
+      onPress: () => actionsRef.current.viewDetails?.()
+    }] : []),
+    ...(onSplitBreakdown ? [{
+      accessibilityLabel: 'View split breakdown',
+      icon: 'git-branch-outline' as const,
+      label: 'Split breakdown',
+      onPress: () => actionsRef.current.splitBreakdown?.()
+    }] : []),
+    {
+      accessibilityLabel: 'Edit expense',
+      icon: 'create-outline',
+      label: 'Edit',
+      onPress: () => actionsRef.current.edit()
+    },
+    {
+      accessibilityLabel: 'Delete expense',
+      destructive: true,
+      icon: 'trash-outline',
+      label: 'Delete',
+      onPress: () => actionsRef.current.delete()
+    }
+  ];
+  const rowTitle = content.title || content.category;
 
   return (
     <View collapsable={false} ref={rowRef} style={uiStyles.swipeShell}>
@@ -513,11 +565,8 @@ export function SwipeExpenseRow({
         </View>
       </View>
       <AnimatedPressable
-        accessibilityActions={[
-          { label: 'Edit', name: 'edit' },
-          { label: 'Delete', name: 'delete' }
-        ]}
-        accessibilityLabel={`${category}, ${dateLabel}, ${amount}, ${badgeLabels}`}
+        accessibilityActions={accessibilityActions}
+        accessibilityLabel={`${rowTitle}, ${content.dateLabel}, ${content.amount}, ${badgeLabels}`}
         accessibilityRole="button"
         onAccessibilityAction={handleAccessibilityAction}
         delayLongPress={LONG_PRESS_DELAY_MS}
@@ -527,24 +576,24 @@ export function SwipeExpenseRow({
         {...(responder?.panHandlers || {})}
         style={[
           uiStyles.swipeCard,
+          compact && uiStyles.swipeCardCompact,
           {
             transform: [{ translateX }]
           }
         ]}
       >
         <ExpenseRowCardContent
-          amount={amount}
-          badges={badges}
-          category={category}
-          dateLabel={dateLabel}
+          {...content}
+          compact={compact}
         />
       </AnimatedPressable>
       {contextMenu ? (
         <ExpenseContextMenu
+          actions={menuActions}
           card={contextMenu.card}
           onClose={() => setContextMenu(null)}
-          onDelete={() => onDeleteRef.current()}
-          onEdit={() => onEditRef.current()}
+          onDelete={() => actionsRef.current.delete()}
+          onEdit={() => actionsRef.current.edit()}
           rowRect={contextMenu.rowRect}
           touchPoint={contextMenu.touchPoint}
         />
@@ -916,6 +965,13 @@ const uiStyles = StyleSheet.create({
     minHeight: 82,
     overflow: 'hidden',
     ...theme.shadow
+  },
+  swipeCardCompact: {
+    borderRadius: 0,
+    minHeight: 68,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0
   },
   swipeShell: {
     borderRadius: theme.radii.surface

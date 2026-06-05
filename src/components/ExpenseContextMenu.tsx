@@ -16,16 +16,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   EXPENSE_ROW_CARD_MIN_HEIGHT,
   ExpenseRowCardContent,
-  type ExpenseBadge
+  type ExpenseRowCardContentData
 } from '@/src/components/ExpenseRowCardContent';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
 import { clampToRange } from '@/src/lib/math';
 
-export type ExpenseContextMenuCard = {
-  amount: string;
-  badges: ExpenseBadge[];
-  category: string;
-  dateLabel: string;
+export type ExpenseContextMenuCard = ExpenseRowCardContentData & {
+  compact?: boolean;
 };
 
 export type ExpenseContextMenuPoint = {
@@ -38,21 +35,22 @@ export type ExpenseContextMenuRect = ExpenseContextMenuPoint & {
   width: number;
 };
 
+export type ExpenseContextMenuAction = {
+  accessibilityLabel: string;
+  destructive?: boolean;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+};
+
 type ExpenseContextMenuProps = {
+  actions?: ExpenseContextMenuAction[];
   card: ExpenseContextMenuCard;
   onClose: () => void;
   onDelete: () => void;
   onEdit: () => void;
   rowRect: ExpenseContextMenuRect;
   touchPoint: ExpenseContextMenuPoint;
-};
-
-type QuickActionProps = {
-  accessibilityLabel: string;
-  destructive?: boolean;
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  onPress: () => void;
 };
 
 type BlurFallbackBoundaryProps = {
@@ -66,13 +64,12 @@ type BlurFallbackBoundaryState = {
 const MENU_WIDTH = 184;
 const QUICK_ACTION_HEIGHT = 52;
 const MENU_DIVIDER_HEIGHT = 1;
-const MENU_ACTION_COUNT = 2;
-const MENU_HEIGHT = QUICK_ACTION_HEIGHT * MENU_ACTION_COUNT + MENU_DIVIDER_HEIGHT;
 const MENU_GAP = 16;
 const SCREEN_MARGIN = 16;
 const PREVIEW_SCALE = 1.05;
 
 export function ExpenseContextMenu({
+  actions,
   card,
   onClose,
   onDelete,
@@ -84,9 +81,27 @@ export function ExpenseContextMenu({
   const insets = useSafeAreaInsets();
   const [transitionProgress] = useState(() => new Animated.Value(0));
   const [closing, setClosing] = useState(false);
+  const menuActions = useMemo<ExpenseContextMenuAction[]>(() => (
+    actions || [
+      {
+        accessibilityLabel: 'Edit expense',
+        icon: 'create-outline',
+        label: 'Edit',
+        onPress: onEdit
+      },
+      {
+        accessibilityLabel: 'Delete expense',
+        destructive: true,
+        icon: 'trash-outline',
+        label: 'Delete',
+        onPress: onDelete
+      }
+    ]
+  ), [actions, onDelete, onEdit]);
+  const menuHeight = menuHeightForActions(menuActions.length);
   const layout = useMemo(() => (
-    contextMenuLayout(rowRect, touchPoint, screenWidth, screenHeight, insets.bottom)
-  ), [insets.bottom, rowRect, screenHeight, screenWidth, touchPoint]);
+    contextMenuLayout(rowRect, touchPoint, screenWidth, screenHeight, insets.bottom, menuHeight)
+  ), [insets.bottom, menuHeight, rowRect, screenHeight, screenWidth, touchPoint]);
   const canRenderIosBlur = Platform.OS === 'ios' && Boolean(BlurView);
 
   useEffect(() => {
@@ -208,20 +223,18 @@ export function ExpenseContextMenu({
           ]}
         >
           <Animated.View style={[contextMenuStyles.menu, menuAnimatedStyle]}>
-            <QuickAction
-              accessibilityLabel="Edit expense"
-              icon="create-outline"
-              label="Edit"
-              onPress={() => closeMenu(onEdit)}
-            />
-            <View style={contextMenuStyles.menuDivider} />
-            <QuickAction
-              accessibilityLabel="Delete expense"
-              destructive
-              icon="trash-outline"
-              label="Delete"
-              onPress={() => closeMenu(onDelete)}
-            />
+            {menuActions.map((action, index) => (
+              <View key={`${action.label}-${index}`}>
+                {index > 0 ? <View style={contextMenuStyles.menuDivider} /> : null}
+                <QuickAction
+                  accessibilityLabel={action.accessibilityLabel}
+                  destructive={action.destructive}
+                  icon={action.icon}
+                  label={action.label}
+                  onPress={() => closeMenu(action.onPress)}
+                />
+              </View>
+            ))}
           </Animated.View>
         </Pressable>
       </Pressable>
@@ -264,12 +277,23 @@ function QuickAction({ accessibilityLabel, destructive, icon, label, onPress }: 
   );
 }
 
+type QuickActionProps = ExpenseContextMenuAction;
+
+function menuHeightForActions(actionCount: number) {
+  if (actionCount <= 0) {
+    return 0;
+  }
+
+  return actionCount * QUICK_ACTION_HEIGHT + (actionCount - 1) * MENU_DIVIDER_HEIGHT;
+}
+
 function contextMenuLayout(
   rowRect: ExpenseContextMenuRect,
   touchPoint: ExpenseContextMenuPoint,
   screenWidth: number,
   screenHeight: number,
-  bottomInset: number
+  bottomInset: number,
+  menuHeight: number
 ) {
   const previewWidth = rowRect.width > 0 ? rowRect.width : Math.max(screenWidth - 40, 280);
   const previewHeight = rowRect.height > 0 ? rowRect.height : EXPENSE_ROW_CARD_MIN_HEIGHT;
@@ -281,14 +305,14 @@ function contextMenuLayout(
     screenWidth - MENU_WIDTH - SCREEN_MARGIN
   );
   const availableBelow = screenHeight - bottomInset - touchPoint.y - MENU_GAP;
-  const menuY = availableBelow >= MENU_HEIGHT
+  const menuY = availableBelow >= menuHeight
     ? touchPoint.y + MENU_GAP
-    : touchPoint.y - MENU_HEIGHT - MENU_GAP;
+    : touchPoint.y - menuHeight - MENU_GAP;
 
   return {
     menu: {
       x: menuX,
-      y: clampToRange(menuY, SCREEN_MARGIN, screenHeight - MENU_HEIGHT - bottomInset - SCREEN_MARGIN)
+      y: clampToRange(menuY, SCREEN_MARGIN, screenHeight - menuHeight - bottomInset - SCREEN_MARGIN)
     },
     preview: {
       height: previewHeight,

@@ -137,7 +137,6 @@ export default function DashboardScreen() {
         ? null
         : { category }
     ));
-    runDrillTransition();
   }
 
   const monthSwipeResponder = useMemo(() => PanResponder.create({
