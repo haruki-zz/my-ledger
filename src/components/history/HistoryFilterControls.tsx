@@ -8,21 +8,6 @@ export type HistoryFilterOption = {
   value: string;
 };
 
-export type ActiveHistoryFilterChip = {
-  key: string;
-  label: string;
-  onClear: () => void;
-};
-
-export function ActiveFilterPill({ label, onClear }: { label: string; onClear: () => void }) {
-  return (
-    <Pressable onPress={onClear} style={({ pressed }) => [filterStyles.activeFilterPill, pressed && filterStyles.pressed]}>
-      <Text ellipsizeMode="tail" numberOfLines={1} style={filterStyles.activeFilterPillText}>{label}</Text>
-      <Ionicons color={colors.primaryDark} name="close" size={15} />
-    </Pressable>
-  );
-}
-
 export function FilterControlButton({
   active,
   icon,
@@ -59,12 +44,12 @@ export function OptionList({
   options,
   selectedValue
 }: {
-  emptyLabel: string;
+  emptyLabel?: string;
   onChange: (value: string) => void;
   options: HistoryFilterOption[];
   selectedValue: string;
 }) {
-  const allOptions = [{ label: emptyLabel, value: '' }, ...options];
+  const allOptions = emptyLabel ? [{ label: emptyLabel, value: '' }, ...options] : options;
 
   return (
     <ScrollView nestedScrollEnabled style={filterStyles.dropdownMenuScroll}>
@@ -72,7 +57,7 @@ export function OptionList({
         const selected = option.value === selectedValue;
         return (
           <Pressable
-            key={option.value || emptyLabel}
+            key={option.value || '__empty__'}
             onPress={() => onChange(option.value)}
             style={[filterStyles.optionRow, selected && filterStyles.optionRowActive]}
           >
@@ -132,27 +117,6 @@ export function CategoryList({
 }
 
 const filterStyles = StyleSheet.create({
-  activeFilterPill: {
-    alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.16)',
-    borderRadius: 16,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 7,
-    maxWidth: 210,
-    minHeight: 32,
-    paddingHorizontal: 12,
-    paddingVertical: 6
-  },
-  activeFilterPillText: {
-    color: colors.primaryDark,
-    flexShrink: 1,
-    fontFamily: fontFamilies.bold,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16
-  },
   applyButton: {
     alignItems: 'center',
     backgroundColor: colors.tint,
@@ -228,12 +192,12 @@ const filterStyles = StyleSheet.create({
     borderColor: colors.line,
     borderRadius: 18,
     borderWidth: 1,
+    flex: 1,
     flexDirection: 'row',
     gap: 8,
     height: 48,
     justifyContent: 'center',
-    maxWidth: 210,
-    minWidth: 122,
+    minWidth: 0,
     paddingHorizontal: 14
   },
   filterControlActive: {

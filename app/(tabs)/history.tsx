@@ -3,26 +3,21 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Keyboard,
   Pressable,
   RefreshControl,
-  ScrollView,
   SectionList,
   StyleSheet,
   Text,
-  TextInput,
   View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { BentoCard, IconButton, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
+import { BentoCard, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
 import {
-  ActiveFilterPill,
   CategoryList,
   FilterControlButton,
   OptionList,
-  type ActiveHistoryFilterChip,
   type HistoryFilterOption
 } from '@/src/components/history/HistoryFilterControls';
 import {
@@ -30,6 +25,7 @@ import {
   SplitBreakdownModal,
   type HistoryExpenseItem
 } from '@/src/components/history/HistoryExpenseModals';
+import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { CHART_PALETTE } from '@/src/lib/chartPalette';
 import { iconNameForExpenseCategory } from '@/src/lib/categories';
@@ -45,8 +41,8 @@ import {
   addMonths,
   amountForUser,
   compareMonthKeys,
+  currentMonthKey,
   formatMonthLabel,
-  monthEndDateString,
   monthKeyFromDateString
 } from '@/src/lib/stats';
 import { useHistoryFilters, type HistoryFilterDropdownKey } from '@/src/hooks/useHistoryFilters';
@@ -74,20 +70,15 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   hour12: false,
   minute: '2-digit'
 });
-const updatedFormatter = new Intl.DateTimeFormat('en-US', {
-  hour: '2-digit',
-  hour12: false,
-  minute: '2-digit'
-});
-
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
+  const { session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const currentLedger = activeLedger?.ledger || null;
   const activeLedgerId = activeLedger?.ledger.id || null;
+  const currentUserId = session?.user.id || null;
   const currentLedgerRef = useRef<Ledger | null>(null);
-  const searchInputRef = useRef<TextInput | null>(null);
-  const [ledger, setLedger] = useState<Ledger | null>(null);
+  const collapseDefaultsMonthRef = useRef<string | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [activeMemberIds, setActiveMemberIds] = useState<Set<string>>(new Set());
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
@@ -96,46 +87,23 @@ export default function HistoryScreen() {
   const {
     activeDropdown,
     clearCategories,
-    clearSearch,
     closeDropdown,
-    debouncedSearchText,
-    endMonth,
-    filtersOpen,
     resetFilters,
-    searchOpen,
-    searchText,
     selectedCategories,
+    selectedMonth,
     selectedUserId,
-    selectEndMonth,
-    selectStartMonth,
+    selectMonth,
     selectUser,
-    setFiltersOpen,
-    setSearchOpen,
-    setSearchText,
-    startMonth,
     toggleCategory,
     toggleDropdown
   } = useHistoryFilters();
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
-  const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null);
   const [detailSelection, setDetailSelection] = useState<FilteredExpense | null>(null);
   const [splitSelection, setSplitSelection] = useState<FilteredExpense | null>(null);
 
   useEffect(() => {
     currentLedgerRef.current = currentLedger;
   }, [currentLedger]);
-
-  useEffect(() => {
-    if (!searchOpen) {
-      return undefined;
-    }
-
-    const timeout = setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 80);
-
-    return () => clearTimeout(timeout);
-  }, [searchOpen]);
 
   const load = useCallback(async () => {
     if (ledgerLoading) {
@@ -164,11 +132,9 @@ export default function HistoryScreen() {
       }
       nextMembers.forEach((member) => profileIds.add(member.user_id));
 
-      setLedger(activeLedger);
       setExpenses(nextExpenses);
       setActiveMemberIds(new Set(nextMembers.map((member) => member.user_id)));
       setProfiles(await getProfiles([...profileIds]));
-      setLastLoadedAt(new Date());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load expenses');
     } finally {
@@ -177,15 +143,14 @@ export default function HistoryScreen() {
   }, [ledgerLoading]);
 
   useEffect(() => {
-    setLedger(null);
     setExpenses([]);
     setProfiles({});
     setActiveMemberIds(new Set());
     resetFilters();
     setCollapsedSections(new Set());
+    collapseDefaultsMonthRef.current = null;
     setDetailSelection(null);
     setSplitSelection(null);
-    setLastLoadedAt(null);
   }, [activeLedgerId, resetFilters]);
 
   useEffect(() => {
@@ -229,22 +194,28 @@ export default function HistoryScreen() {
   ), [profileDisplayName, userOptionIds]);
 
   const userColorById = useMemo(() => {
-    const usedPaletteIndexes = new Set<number>();
     const colorsById = new Map<string, string>();
+    const fallbackColors = [
+      '#F97316',
+      ...CHART_PALETTE.filter((color) => (
+        color !== colors.primary &&
+        color !== colors.primaryDark &&
+        color !== '#F97316'
+      ))
+    ];
+    let fallbackColorIndex = 0;
 
-    for (const userId of [...userOptionIds].sort((a, b) => a.localeCompare(b))) {
-      let paletteIndex = hashString(userId) % CHART_PALETTE.length;
-
-      for (let attempt = 0; attempt < CHART_PALETTE.length && usedPaletteIndexes.has(paletteIndex); attempt += 1) {
-        paletteIndex = (paletteIndex + 1) % CHART_PALETTE.length;
+    for (const userId of sortedUserIds) {
+      if (userId === currentUserId) {
+        colorsById.set(userId, colors.primaryDark);
+      } else {
+        colorsById.set(userId, fallbackColors[fallbackColorIndex % fallbackColors.length]);
+        fallbackColorIndex += 1;
       }
-
-      usedPaletteIndexes.add(paletteIndex);
-      colorsById.set(userId, CHART_PALETTE[paletteIndex]);
     }
 
     return colorsById;
-  }, [userOptionIds]);
+  }, [currentUserId, sortedUserIds]);
 
   const userOptions = useMemo<HistoryFilterOption[]>(() => (
     sortedUserIds.map((userId) => ({
@@ -263,11 +234,7 @@ export default function HistoryScreen() {
   ), [expenses]);
 
   const monthOptions = useMemo<HistoryFilterOption[]>(() => {
-    if (expenses.length === 0) {
-      return [];
-    }
-
-    const monthKeys = expenses.map((expense) => monthKeyFromDateString(expense.spent_on));
+    const monthKeys = [...expenses.map((expense) => monthKeyFromDateString(expense.spent_on)), currentMonthKey()];
     const sortedKeys = [...new Set(monthKeys)].sort(compareMonthKeys);
     const firstMonth = sortedKeys[0];
     const lastMonth = sortedKeys[sortedKeys.length - 1];
@@ -284,18 +251,10 @@ export default function HistoryScreen() {
       });
     }
 
-    return options;
+    return options.reverse();
   }, [expenses]);
 
-  const searchTextByExpenseId = useMemo(() => (
-    new Map(expenses.map((expense) => [
-      expense.id,
-      buildExpenseSearchText(expense, profileDisplayName)
-    ]))
-  ), [expenses, profileDisplayName]);
-
   const filteredExpenses = useMemo<FilteredExpense[]>(() => {
-    const query = normalizeSearch(debouncedSearchText);
     const nextFilteredExpenses: FilteredExpense[] = [];
 
     for (const expense of expenses) {
@@ -310,15 +269,7 @@ export default function HistoryScreen() {
       }
 
       const expenseMonth = monthKeyFromDateString(expense.spent_on);
-      if (startMonth && compareMonthKeys(expenseMonth, startMonth) < 0) {
-        continue;
-      }
-
-      if (endMonth && compareMonthKeys(expenseMonth, endMonth) > 0) {
-        continue;
-      }
-
-      if (query && !expenseMatchesSearch(searchTextByExpenseId.get(expense.id), displayAmountYen, query)) {
+      if (expenseMonth !== selectedMonth) {
         continue;
       }
 
@@ -329,67 +280,12 @@ export default function HistoryScreen() {
       b.expense.spent_on.localeCompare(a.expense.spent_on) ||
       b.expense.created_at.localeCompare(a.expense.created_at)
     ));
-  }, [debouncedSearchText, endMonth, expenses, searchTextByExpenseId, selectedCategories, selectedUserId, startMonth]);
+  }, [expenses, selectedCategories, selectedMonth, selectedUserId]);
 
-  const activeFilterChips = useMemo<ActiveHistoryFilterChip[]>(() => {
-    const chips: ActiveHistoryFilterChip[] = [];
-
-    if (debouncedSearchText.trim()) {
-      chips.push({
-        key: 'search',
-        label: `Search ${debouncedSearchText.trim()}`,
-        onClear: clearSearch
-      });
-    }
-
-    if (selectedUserId) {
-      chips.push({
-        key: 'user',
-        label: profileDisplayName(selectedUserId),
-        onClear: () => selectUser('')
-      });
-    }
-
-    if (selectedCategories.size > 0) {
-      chips.push({
-        key: 'category',
-        label: selectedCategories.size === 1 ? [...selectedCategories][0] : `Category ${selectedCategories.size}`,
-        onClear: clearCategories
-      });
-    }
-
-    if (startMonth) {
-      chips.push({
-        key: 'startMonth',
-        label: `From ${formatMonthBoundary(startMonth, 'start')}`,
-        onClear: () => selectStartMonth('')
-      });
-    }
-
-    if (endMonth) {
-      chips.push({
-        key: 'endMonth',
-        label: `To ${formatMonthBoundary(endMonth, 'end')}`,
-        onClear: () => selectEndMonth('')
-      });
-    }
-
-    return chips;
-  }, [
-    clearCategories,
-    clearSearch,
-    debouncedSearchText,
-    endMonth,
-    profileDisplayName,
-    selectEndMonth,
-    selectStartMonth,
-    selectUser,
-    selectedCategories,
-    selectedUserId,
-    startMonth
-  ]);
-
-  const hasActiveFilters = activeFilterChips.length > 0;
+  const hasActiveFilters = Boolean(
+    selectedUserId ||
+    selectedCategories.size > 0
+  );
 
   const total = useMemo(
     () => filteredExpenses.reduce((sum, item) => sum + item.displayAmountYen, 0),
@@ -413,8 +309,29 @@ export default function HistoryScreen() {
     }));
   }, [collapsedSections, filteredExpenses]);
 
+  useEffect(() => {
+    if (collapseDefaultsMonthRef.current === selectedMonth) {
+      return;
+    }
+
+    const today = todayDateString();
+    const monthDates = expenses
+      .filter((expense) => monthKeyFromDateString(expense.spent_on) === selectedMonth)
+      .map((expense) => expense.spent_on);
+
+    if (monthDates.length === 0) {
+      return;
+    }
+
+    const defaultCollapsedDates = new Set(
+      monthDates.filter((date) => date !== today)
+    );
+
+    setCollapsedSections(defaultCollapsedDates);
+    collapseDefaultsMonthRef.current = selectedMonth;
+  }, [expenses, selectedMonth]);
+
   function openDropdown(dropdown: HistoryFilterDropdownKey) {
-    Keyboard.dismiss();
     toggleDropdown(dropdown);
   }
 
@@ -432,19 +349,15 @@ export default function HistoryScreen() {
   }
 
   const expenseBadges = useCallback((expense: Expense): ExpenseBadge[] => {
-    const ownerAccent = userColorById.get(expense.paid_by) || colors.primary;
-    return [
-      {
-        accent: ownerAccent,
-        id: `paid-${expense.paid_by}`,
-        label: profileDisplayName(expense.paid_by)
-      },
-      {
-        accent: expense.ownership === 'shared' ? colors.primaryDark : colors.accent,
-        id: `ownership-${expense.ownership}`,
-        label: expense.ownership === 'shared' ? 'Shared' : 'Personal'
-      }
-    ];
+    const participantIds = expense.ownership === 'shared' && expense.splits.length > 0
+      ? uniqueUserIds(expense.splits.map((split) => split.user_id))
+      : [expense.paid_by];
+
+    return participantIds.map((userId) => ({
+      accent: userColorById.get(userId) || colors.primary,
+      id: `participant-${expense.id}-${userId}`,
+      label: profileDisplayName(userId)
+    }));
   }, [profileDisplayName, userColorById]);
 
   async function confirmDelete(expenseId: string) {
@@ -470,193 +383,83 @@ export default function HistoryScreen() {
   const header = (
     <View style={localStyles.headerContent}>
       <View style={localStyles.topBar}>
-        <Pressable onPress={() => router.push('/ledger')} style={localStyles.brandBlock}>
+        <View style={localStyles.brandBlock}>
           <View style={localStyles.brandRow}>
-            <Ionicons color={colors.primaryDark} name="book" size={24} />
-            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.brandTitle}>My Ledger</Text>
-          </View>
-          <View style={localStyles.ledgerRow}>
-            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.ledgerKicker}>
-              {ledger ? ledger.name : 'Shared Ledger'}
+            <Ionicons color={colors.primaryDark} name="calendar" size={24} />
+            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.brandTitle}>
+              {formatMonthLabel(selectedMonth)}
             </Text>
-            <Ionicons color={colors.muted} name="chevron-down" size={16} />
           </View>
-        </Pressable>
-
-        <View style={localStyles.headerActions}>
-          <IconButton
-            accessibilityLabel={searchOpen ? 'Close search' : 'Open search'}
-            icon={searchOpen ? 'close' : 'search'}
-            onPress={() => {
-              setSearchOpen(!searchOpen);
-            }}
-            size="lg"
-            tone="neutral"
-          />
-          <IconButton
-            accessibilityLabel={filtersOpen ? 'Hide filters' : 'Show filters'}
-            icon="options-outline"
-            onPress={() => {
-              setFiltersOpen(!filtersOpen);
-            }}
-            size="lg"
-            tone={filtersOpen ? 'primary' : 'neutral'}
-          />
         </View>
+
       </View>
-
-      {searchOpen ? (
-        <View style={localStyles.searchShell}>
-          <Ionicons color={colors.muted} name="search" size={19} />
-          <TextInput
-            autoCapitalize="none"
-            autoCorrect={false}
-            clearButtonMode="while-editing"
-            onChangeText={setSearchText}
-            placeholder="Search records"
-            placeholderTextColor={colors.subtle}
-            ref={searchInputRef}
-            returnKeyType="search"
-            style={localStyles.searchInput}
-            value={searchText}
-          />
-        </View>
-      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <BentoCard style={localStyles.summaryCard}>
-        <View style={localStyles.summaryMainRow}>
-          <View style={localStyles.summaryTotalBlock}>
-            <View style={localStyles.summaryLabelRow}>
-              <Text style={localStyles.summaryLabel}>Filtered Total</Text>
-              <Ionicons color={colors.muted} name="information-circle-outline" size={17} />
-            </View>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>
-              {formatYen(total)}
-            </Text>
-            <View style={localStyles.updatedRow}>
-              <Ionicons color={colors.primaryDark} name="arrow-down" size={17} />
-              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.updatedText}>
-                Across current filters
-              </Text>
-            </View>
+        <View style={localStyles.summaryTotalBlock}>
+          <View style={localStyles.summaryLabelRow}>
+            <Text style={localStyles.summaryLabel}>Filtered Total</Text>
+            <Ionicons color={colors.muted} name="information-circle-outline" size={17} />
           </View>
-
-          <View style={localStyles.summaryDivider} />
-
-          <View style={localStyles.summaryRecordsBlock}>
-            <Text style={localStyles.summaryLabel}>Records</Text>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.recordCount}>
-              {filteredExpenses.length}
-            </Text>
-            <View style={localStyles.updatedRow}>
-              <View style={localStyles.updatedDot} />
-              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.updatedText}>
-                {formatUpdatedStatus(lastLoadedAt)}
-              </Text>
-            </View>
-          </View>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>
+            {formatYen(total)}
+          </Text>
         </View>
 
-        <View style={localStyles.activeFilterHeader}>
-          <Text style={localStyles.summaryLabel}>Active Filters</Text>
-          {hasActiveFilters ? (
-            <Pressable onPress={resetFilters}>
-              <Text style={localStyles.clearAllText}>Clear all</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        <ScrollView
-          contentContainerStyle={localStyles.activeFilterChips}
-          directionalLockEnabled
-          horizontal
-          nestedScrollEnabled
-          showsHorizontalScrollIndicator={false}
-        >
-          {activeFilterChips.length > 0 ? activeFilterChips.map((chip) => (
-            <ActiveFilterPill key={chip.key} label={chip.label} onClear={chip.onClear} />
-          )) : (
-            <Text style={localStyles.noFiltersText}>None</Text>
-          )}
-        </ScrollView>
       </BentoCard>
 
-      {filtersOpen ? (
-        <View style={localStyles.filterArea}>
-          <ScrollView
-            contentContainerStyle={localStyles.filterControls}
-            directionalLockEnabled
-            horizontal
-            nestedScrollEnabled
-            showsHorizontalScrollIndicator={false}
-          >
-            <FilterControlButton
-              active={Boolean(selectedUserId)}
-              icon="person-outline"
-              label={selectedUserId ? profileDisplayName(selectedUserId) : 'User'}
-              onPress={() => openDropdown('user')}
-            />
-            <FilterControlButton
-              active={selectedCategories.size > 0}
-              icon="pricetag-outline"
-              label={selectedCategories.size > 0 ? `Category ${selectedCategories.size}` : 'Category'}
-              onPress={() => openDropdown('category')}
-            />
-            <FilterControlButton
-              active={Boolean(startMonth)}
-              icon="calendar-outline"
-              label={startMonth ? formatMonthBoundary(startMonth, 'start') : 'From'}
-              onPress={() => openDropdown('startMonth')}
-            />
-            <FilterControlButton
-              active={Boolean(endMonth)}
-              icon="calendar-outline"
-              label={endMonth ? formatMonthBoundary(endMonth, 'end') : 'To'}
-              onPress={() => openDropdown('endMonth')}
-            />
-          </ScrollView>
-
-          {activeDropdown ? (
-            <BentoCard style={localStyles.dropdownCard}>
-              {activeDropdown === 'user' ? (
-                <OptionList
-                  emptyLabel="All users"
-                  onChange={selectUser}
-                  options={userOptions}
-                  selectedValue={selectedUserId || ''}
-                />
-              ) : null}
-              {activeDropdown === 'category' ? (
-                <CategoryList
-                  onApply={closeDropdown}
-                  onClear={clearCategories}
-                  onToggle={toggleCategory}
-                  options={categoryOptions}
-                  selectedCategories={selectedCategories}
-                />
-              ) : null}
-              {activeDropdown === 'startMonth' ? (
-                <OptionList
-                  emptyLabel="Any start"
-                  onChange={selectStartMonth}
-                  options={monthOptions}
-                  selectedValue={startMonth || ''}
-                />
-              ) : null}
-              {activeDropdown === 'endMonth' ? (
-                <OptionList
-                  emptyLabel="Any end"
-                  onChange={selectEndMonth}
-                  options={monthOptions}
-                  selectedValue={endMonth || ''}
-                />
-              ) : null}
-            </BentoCard>
-          ) : null}
+      <View style={localStyles.filterArea}>
+        <View style={localStyles.filterControls}>
+          <FilterControlButton
+            active={Boolean(selectedUserId)}
+            icon="person-outline"
+            label={selectedUserId ? profileDisplayName(selectedUserId) : 'User'}
+            onPress={() => openDropdown('user')}
+          />
+          <FilterControlButton
+            active={selectedCategories.size > 0}
+            icon="pricetag-outline"
+            label={selectedCategories.size > 0 ? `Category ${selectedCategories.size}` : 'Category'}
+            onPress={() => openDropdown('category')}
+          />
+          <FilterControlButton
+            active
+            icon="calendar-outline"
+            label={formatMonthLabel(selectedMonth)}
+            onPress={() => openDropdown('month')}
+          />
         </View>
-      ) : null}
+
+        {activeDropdown ? (
+          <BentoCard style={localStyles.dropdownCard}>
+            {activeDropdown === 'user' ? (
+              <OptionList
+                emptyLabel="All users"
+                onChange={selectUser}
+                options={userOptions}
+                selectedValue={selectedUserId || ''}
+              />
+            ) : null}
+            {activeDropdown === 'category' ? (
+              <CategoryList
+                onApply={closeDropdown}
+                onClear={clearCategories}
+                onToggle={toggleCategory}
+                options={categoryOptions}
+                selectedCategories={selectedCategories}
+              />
+            ) : null}
+            {activeDropdown === 'month' ? (
+              <OptionList
+                onChange={selectMonth}
+                options={monthOptions}
+                selectedValue={selectedMonth}
+              />
+            ) : null}
+          </BentoCard>
+        ) : null}
+      </View>
     </View>
   );
 
@@ -674,8 +477,8 @@ export default function HistoryScreen() {
 
             {!loading && expenses.length > 0 && filteredExpenses.length === 0 ? (
               <BentoCard>
-                <Text style={styles.h2}>No Matching Expenses</Text>
-                <Text style={styles.muted}>Adjust the filters or search to show more records.</Text>
+                <Text style={styles.h2}>No Expenses This Month</Text>
+                <Text style={styles.muted}>Switch month or adjust user and category filters.</Text>
                 {hasActiveFilters ? (
                   <Pressable onPress={resetFilters} style={[styles.button, styles.secondaryButton]}>
                     <Text style={[styles.buttonText, styles.secondaryButtonText]}>Clear all</Text>
@@ -692,27 +495,17 @@ export default function HistoryScreen() {
         keyboardShouldPersistTaps="handled"
         keyExtractor={({ expense }) => expense.id}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
-        renderItem={({ item }) => (
-          <View style={localStyles.rowWrapper}>
-            <SwipeExpenseRow
-              compact
-              content={{
-                amount: formatYen(item.displayAmountYen),
-                badges: expenseBadges(item.expense),
-                category: item.expense.category,
-                dateLabel: formatHistoryDate(item.expense.spent_on),
-                leadingIcon: iconNameForExpenseCategory(item.expense.category),
-                leadingIconColor: colorForCategory(item.expense.category),
-                subtitle: rowSubtitle(item.expense),
-                timeLabel: formatExpenseTime(item.expense),
-                title: rowTitle(item.expense)
-              }}
-              onDelete={() => confirmDelete(item.expense.id)}
-              onEdit={() => router.push(`/expenses/${item.expense.id}`)}
-              onSplitBreakdown={() => setSplitSelection(item)}
-              onViewDetails={() => setDetailSelection(item)}
-            />
-          </View>
+        renderItem={({ item, index, section }) => (
+          <SectionDetailRow
+            expenseBadges={expenseBadges}
+            first={index === 0}
+            item={item}
+            last={index === section.data.length - 1}
+            onDelete={(expense) => confirmDelete(expense.id)}
+            onEdit={(expense) => router.push(`/expenses/${expense.id}`)}
+            onSplitBreakdown={setSplitSelection}
+            onViewDetails={setDetailSelection}
+          />
         )}
         renderSectionHeader={({ section }) => (
           <SectionHeader
@@ -783,36 +576,52 @@ function SectionHeader({
   );
 }
 
-function buildExpenseSearchText(
-  expense: Expense,
-  profileDisplayName: (userId: string) => string
-) {
-  const splitNames = expense.splits.map((split) => profileDisplayName(split.user_id));
-  return normalizeSearch([
-    expense.note || '',
-    expense.category,
-    expense.spent_on,
-    expense.amount_yen,
-    formatYen(expense.amount_yen),
-    expense.ownership,
-    profileDisplayName(expense.paid_by),
-    profileDisplayName(expense.recorded_by),
-    ...splitNames
-  ].join(' '));
-}
-
-function expenseMatchesSearch(
-  indexedSearchText: string | undefined,
-  displayAmountYen: number,
-  normalizedQuery: string
-) {
-  const displayAmountSearchText = normalizeSearch(`${displayAmountYen} ${formatYen(displayAmountYen)}`);
-
-  return Boolean(indexedSearchText?.includes(normalizedQuery) || displayAmountSearchText.includes(normalizedQuery));
-}
-
-function normalizeSearch(value: unknown) {
-  return String(value).toLowerCase().replace(/[¥,\s]/g, '');
+function SectionDetailRow({
+  expenseBadges,
+  first,
+  item,
+  last,
+  onDelete,
+  onEdit,
+  onSplitBreakdown,
+  onViewDetails
+}: {
+  expenseBadges: (expense: Expense) => ExpenseBadge[];
+  first: boolean;
+  item: FilteredExpense;
+  last: boolean;
+  onDelete: (expense: Expense) => void;
+  onEdit: (expense: Expense) => void;
+  onSplitBreakdown: (item: FilteredExpense) => void;
+  onViewDetails: (item: FilteredExpense) => void;
+}) {
+  return (
+    <View style={[
+      localStyles.sectionDetailSegment,
+      first && localStyles.sectionDetailSegmentFirst,
+      last && localStyles.sectionDetailSegmentLast
+    ]}>
+      {!first ? <View style={localStyles.detailDivider} /> : null}
+      <SwipeExpenseRow
+        compact
+        content={{
+          amount: formatYen(item.displayAmountYen),
+          badges: expenseBadges(item.expense),
+          category: item.expense.category,
+          dateLabel: formatHistoryDate(item.expense.spent_on),
+          leadingIcon: iconNameForExpenseCategory(item.expense.category),
+          leadingIconColor: colorForCategory(item.expense.category),
+          subtitle: rowSubtitle(item.expense),
+          timeLabel: formatExpenseTime(item.expense),
+          title: rowTitle(item.expense)
+        }}
+        onDelete={() => onDelete(item.expense)}
+        onEdit={() => onEdit(item.expense)}
+        onSplitBreakdown={() => onSplitBreakdown(item)}
+        onViewDetails={() => onViewDetails(item)}
+      />
+    </View>
+  );
 }
 
 function rowTitle(expense: Expense) {
@@ -853,30 +662,26 @@ function formatCreatedAt(value: string) {
   return `${formatHistoryDate(date.toISOString().slice(0, 10))} ${timeFormatter.format(date)}`;
 }
 
-function formatUpdatedStatus(value: Date | null) {
-  if (!value) {
-    return 'Updating...';
-  }
-
-  if (Date.now() - value.getTime() < 60_000) {
-    return 'Updated just now';
-  }
-
-  return `Updated ${updatedFormatter.format(value)}`;
-}
-
-function formatMonthBoundary(monthKey: string, boundary: 'start' | 'end') {
-  const dateString = boundary === 'start' ? `${monthKey}-01` : monthEndDateString(monthKey);
-  return dateString.replaceAll('-', '/');
-}
-
 function parseDateString(dateString: string) {
   const [year, month, day] = dateString.split('-').map(Number);
   return new Date(year, month - 1, day);
 }
 
+function todayDateString() {
+  const date = new Date();
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-');
+}
+
 function colorForCategory(category: string) {
   return CHART_PALETTE[hashString(category) % CHART_PALETTE.length] || colors.primaryDark;
+}
+
+function uniqueUserIds(userIds: string[]) {
+  return [...new Set(userIds.filter(Boolean))];
 }
 
 function hashString(value: string) {
@@ -890,18 +695,6 @@ function hashString(value: string) {
 }
 
 const localStyles = StyleSheet.create({
-  activeFilterChips: {
-    alignItems: 'center',
-    gap: 8,
-    minHeight: 32,
-    paddingRight: 18
-  },
-  activeFilterHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12
-  },
   brandBlock: {
     flex: 1,
     gap: 5,
@@ -921,13 +714,6 @@ const localStyles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 31
   },
-  clearAllText: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18
-  },
   dropdownCard: {
     gap: 10,
     padding: 14
@@ -939,70 +725,18 @@ const localStyles = StyleSheet.create({
     gap: 8
   },
   filterControls: {
-    gap: 10,
-    paddingRight: 20
-  },
-  headerActions: {
-    alignItems: 'center',
     flexDirection: 'row',
-    gap: 12
+    gap: 10,
+    width: '100%'
   },
   headerContent: {
     gap: 18
   },
-  ledgerKicker: {
-    color: colors.ink,
-    flexShrink: 1,
-    fontFamily: fontFamilies.regular,
-    fontSize: 15,
-    lineHeight: 20
-  },
-  ledgerRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    paddingLeft: 36
-  },
   listContent: {
-    gap: 10
-  },
-  noFiltersText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 13,
-    lineHeight: 18
+    gap: 0
   },
   pressed: {
     opacity: 0.76
-  },
-  recordCount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
-    fontSize: 30,
-    fontWeight: '700',
-    lineHeight: 38
-  },
-  rowWrapper: {
-    marginTop: 0
-  },
-  searchInput: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.regular,
-    fontSize: 16,
-    minWidth: 0,
-    paddingVertical: 0
-  },
-  searchShell: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.86)',
-    borderColor: colors.line,
-    borderRadius: 18,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 50,
-    paddingHorizontal: 14
   },
   sectionDate: {
     color: colors.ink,
@@ -1016,22 +750,49 @@ const localStyles = StyleSheet.create({
     gap: 2,
     minWidth: 0
   },
+  detailDivider: {
+    backgroundColor: 'rgba(100,116,139,0.15)',
+    height: 1,
+    marginLeft: 82
+  },
+  sectionDetailSegment: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderColor: 'rgba(100,116,139,0.08)',
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    overflow: 'hidden'
+  },
+  sectionDetailSegmentFirst: {
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    borderTopWidth: 1,
+    marginTop: -1,
+    ...theme.shadow,
+    shadowOpacity: 0.025,
+    shadowRadius: 10
+  },
+  sectionDetailSegmentLast: {
+    borderBottomLeftRadius: 18,
+    borderBottomRightRadius: 18,
+    borderBottomWidth: 1,
+    marginBottom: 14
+  },
   sectionHeader: {
     alignItems: 'center',
     backgroundColor: colors.glass,
-    borderColor: colors.glassBorder,
+    borderColor: 'rgba(15,118,110,0.14)',
     borderRadius: theme.radii.surface,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
     justifyContent: 'space-between',
-    marginTop: 4,
-    minHeight: 58,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    marginTop: 8,
+    minHeight: 64,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
     ...theme.shadow,
-    shadowOpacity: 0.06,
-    shadowRadius: 16
+    shadowOpacity: 0.09,
+    shadowRadius: 18
   },
   sectionTotal: {
     color: colors.ink,
@@ -1067,11 +828,6 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 22,
     paddingVertical: 20
   },
-  summaryDivider: {
-    alignSelf: 'stretch',
-    backgroundColor: colors.line,
-    width: 1
-  },
   summaryLabel: {
     color: colors.muted,
     fontFamily: fontFamilies.bold,
@@ -1086,16 +842,7 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6
   },
-  summaryMainRow: {
-    flexDirection: 'row',
-    gap: 22
-  },
-  summaryRecordsBlock: {
-    gap: 14,
-    minWidth: 110
-  },
   summaryTotalBlock: {
-    flex: 1,
     gap: 8,
     minWidth: 0
   },
@@ -1104,24 +851,5 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
     justifyContent: 'space-between'
-  },
-  updatedDot: {
-    backgroundColor: colors.primaryDark,
-    borderRadius: 4,
-    height: 8,
-    width: 8
-  },
-  updatedRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 7,
-    minHeight: 20
-  },
-  updatedText: {
-    color: colors.muted,
-    flexShrink: 1,
-    fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    lineHeight: 17
   }
 });

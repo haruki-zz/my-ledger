@@ -323,11 +323,11 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.primaryDark,
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 2,
-    height: 36,
+    height: 27,
     justifyContent: 'center',
-    width: 36
+    width: 27
   },
   netRadioChecked: {
     backgroundColor: colors.tint
@@ -338,9 +338,9 @@ const localStyles = StyleSheet.create({
   },
   netRadioDot: {
     backgroundColor: colors.primaryDark,
-    borderRadius: 8,
-    height: 16,
-    width: 16
+    borderRadius: 6,
+    height: 12,
+    width: 12
   },
   netRadioPressed: {
     transform: [{ scale: 0.96 }]
