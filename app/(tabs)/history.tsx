@@ -38,7 +38,6 @@ import {
 } from '@/src/lib/ledger';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
-  addMonths,
   amountForUser,
   compareMonthKeys,
   currentMonthKey,
@@ -195,6 +194,14 @@ export default function HistoryScreen() {
 
   const userColorById = useMemo(() => {
     const colorsById = new Map<string, string>();
+    if (!currentUserId) {
+      for (const userId of sortedUserIds) {
+        colorsById.set(userId, colors.subtle);
+      }
+
+      return colorsById;
+    }
+
     const fallbackColors = [
       '#F97316',
       ...CHART_PALETTE.filter((color) => (
@@ -234,24 +241,18 @@ export default function HistoryScreen() {
   ), [expenses]);
 
   const monthOptions = useMemo<HistoryFilterOption[]>(() => {
-    const monthKeys = [...expenses.map((expense) => monthKeyFromDateString(expense.spent_on)), currentMonthKey()];
-    const sortedKeys = [...new Set(monthKeys)].sort(compareMonthKeys);
-    const firstMonth = sortedKeys[0];
-    const lastMonth = sortedKeys[sortedKeys.length - 1];
-    const options: HistoryFilterOption[] = [];
-
-    for (
-      let monthKey = firstMonth;
-      compareMonthKeys(monthKey, lastMonth) <= 0;
-      monthKey = addMonths(monthKey, 1)
-    ) {
-      options.push({
-        label: formatMonthLabel(monthKey),
-        value: monthKey
-      });
+    const monthKeys = new Set<string>([currentMonthKey()]);
+    for (const expense of expenses) {
+      monthKeys.add(monthKeyFromDateString(expense.spent_on));
     }
 
-    return options.reverse();
+    return [...monthKeys]
+      .sort(compareMonthKeys)
+      .reverse()
+      .map((monthKey) => ({
+        label: formatMonthLabel(monthKey),
+        value: monthKey
+      }));
   }, [expenses]);
 
   const filteredExpenses = useMemo<FilteredExpense[]>(() => {
@@ -320,6 +321,7 @@ export default function HistoryScreen() {
       .map((expense) => expense.spent_on);
 
     if (monthDates.length === 0) {
+      collapseDefaultsMonthRef.current = selectedMonth;
       return;
     }
 
@@ -391,7 +393,6 @@ export default function HistoryScreen() {
             </Text>
           </View>
         </View>
-
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}

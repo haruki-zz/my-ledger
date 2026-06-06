@@ -5,10 +5,11 @@ import {
   JetBrainsMono_800ExtraBold,
   useFonts
 } from '@expo-google-fonts/jetbrains-mono';
+import { Ionicons } from '@expo/vector-icons';
 import { SplashScreen, Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Pressable, Text } from 'react-native';
+import { Pressable } from 'react-native';
 
 import { colors, fontFamilies } from '@/src/components/styles';
 import { AuthProvider } from '@/src/context/AuthContext';
@@ -31,7 +32,7 @@ export default function RootLayout() {
     }
   }, [fontError, fontsLoaded]);
 
-  function dismissNewExpense() {
+  function dismissExpense() {
     if (router.canGoBack()) {
       router.back();
       return;
@@ -45,8 +46,12 @@ export default function RootLayout() {
   }
 
   const resolvedRegularFont = fontError ? fontFamilies.fallback : fontFamilies.regular;
-  const resolvedBoldFont = fontError ? fontFamilies.fallback : fontFamilies.semiBold;
   const resolvedHeaderFont = fontError ? fontFamilies.fallback : fontFamilies.bold;
+  const expenseHeaderLeft = () => (
+    <Pressable accessibilityLabel="Go back" onPress={dismissExpense}>
+      <Ionicons color={colors.ink} name="arrow-back" size={30} />
+    </Pressable>
+  );
 
   return (
     <AuthProvider>
@@ -81,23 +86,23 @@ export default function RootLayout() {
             <Stack.Screen
               name="expenses/new"
               options={{
-                headerLeft: () => (
-                  <Pressable onPress={dismissNewExpense}>
-                    <Text style={{
-                      color: colors.primaryDark,
-                      fontFamily: resolvedBoldFont,
-                      fontSize: 16,
-                      fontWeight: '600'
-                    }}>
-                      Cancel
-                    </Text>
-                  </Pressable>
-                ),
+                headerLeft: expenseHeaderLeft,
+                headerRight: () => null,
+                headerTitleAlign: 'center',
                 presentation: 'modal',
-                title: 'New Expense'
+                title: 'Add Expense'
               }}
             />
-            <Stack.Screen name="expenses/[id]" options={{ headerBackTitle: 'History', title: 'Edit Expense' }} />
+            <Stack.Screen
+              name="expenses/[id]"
+              options={{
+                headerBackTitle: 'History',
+                headerLeft: expenseHeaderLeft,
+                headerRight: () => null,
+                headerTitleAlign: 'center',
+                title: 'Edit Expense'
+              }}
+            />
           </Stack>
         </LedgerProvider>
       </SyncProvider>

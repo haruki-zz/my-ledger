@@ -1,5 +1,7 @@
+import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Keyboard,
@@ -9,6 +11,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type LayoutChangeEvent
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,8 +26,10 @@ import { BentoCard, PillTabs } from '@/src/components/ui';
 import {
   DEFAULT_EXPENSE_CATEGORY_SPLIT_RATIO,
   EXPENSE_CATEGORIES,
-  getExpenseCategorySplitRatio
+  getExpenseCategorySplitRatio,
+  iconNameForExpenseCategory
 } from '@/src/lib/categories';
+import { CHART_PALETTE } from '@/src/lib/chartPalette';
 import { displayName, todayDateString } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { saveExpense } from '@/src/lib/ledger';
@@ -49,14 +54,59 @@ type Props = {
 
 type SplitMode = 'amount' | 'ratio';
 type SplitTextValues = Record<string, string>;
-const MIN_SAVE_BAR_HEIGHT = 92;
+
+type WebDateInputChangeEvent = {
+  currentTarget?: { value?: string };
+  target?: { value?: string };
+};
+
+const MIN_SAVE_BAR_HEIGHT = 86;
+const numberFormatter = new Intl.NumberFormat('en-US');
+const dateLabelFormatter = new Intl.DateTimeFormat('en-US', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric'
+});
+const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
+  weekday: 'short'
+});
 
 function formatSplitNumber(value: number) {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
 }
 
+function sanitizeWholeNumber(value: string) {
+  return value.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '');
+}
+
+function sanitizeRatioInput(value: string) {
+  const cleaned = value.replace(/[^\d.]/g, '');
+  const [whole = '', ...decimalParts] = cleaned.split('.');
+  if (decimalParts.length === 0) {
+    return whole;
+  }
+
+  return `${whole}.${decimalParts.join('')}`;
+}
+
+function formatNumberInput(value: string) {
+  if (!value) {
+    return '';
+  }
+
+  return numberFormatter.format(Number(value));
+}
+
+function formatYenInput(value: string) {
+  return value ? `¥ ${formatNumberInput(value)}` : '¥ ';
+}
+
+function formatYenText(value: number) {
+  return `¥ ${numberFormatter.format(value)}`;
+}
+
 function parsePositiveInteger(value: string) {
-  const trimmedValue = value.trim();
+  const trimmedValue = sanitizeWholeNumber(value.trim());
   if (!trimmedValue) {
     return null;
   }
@@ -66,7 +116,7 @@ function parsePositiveInteger(value: string) {
 }
 
 function parseNonNegativeInteger(value: string) {
-  const trimmedValue = value.trim();
+  const trimmedValue = sanitizeWholeNumber(value.trim());
   if (!trimmedValue) {
     return null;
   }
@@ -102,16 +152,82 @@ function toEmptySplitValues(members: LedgerMemberProfile[]): SplitTextValues {
   return Object.fromEntries(members.map((member) => [member.user_id, '']));
 }
 
+function initialsForName(name: string) {
+  return displayName(name).slice(0, 1).toUpperCase();
+}
+
+function memberAccentColor(member: LedgerMemberProfile, currentUserId: string, index: number) {
+  if (member.user_id === currentUserId) {
+    return colors.primaryDark;
+  }
+
+  return index === 1 ? '#EA580C' : colors.warm;
+}
+
+function parseDateString(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function formatDateString(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0')
+  ].join('-');
+}
+
+function formatDisplayDate(dateString: string) {
+  const date = parseDateString(dateString);
+  if (!date) {
+    return dateString || 'Choose date';
+  }
+
+  return `${dateLabelFormatter.format(date)} (${weekdayFormatter.format(date)})`;
+}
+
+function WebDateInput({
+  max,
+  onChange,
+  value
+}: {
+  max: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return createElement('input', {
+    'aria-label': 'Spent on date',
+    max,
+    onChange: (event: WebDateInputChangeEvent) => onChange(event.currentTarget?.value || event.target?.value || ''),
+    style: webDateInputStyle,
+    type: 'date',
+    value
+  });
+}
+
 export function ExpenseForm({
   ledger,
   members,
   currentUserId,
-  currentProfile,
   expense,
-  profilesById,
   categories
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const compactLayout = width < 680;
   const sortedMembers = useMemo(() => members.slice(0, 2), [members]);
   const categoryRatiosByName = useMemo(
     () => new Map(categories?.map((item) => [
@@ -143,8 +259,9 @@ export function ExpenseForm({
   const [note, setNote] = useState(expense?.note || '');
   const [splitMode, setSplitMode] = useState<SplitMode>('amount');
   const [submitting, setSubmitting] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [saveBarHeight, setSaveBarHeight] = useState(MIN_SAVE_BAR_HEIGHT);
+  const [nativeDatePickerOpen, setNativeDatePickerOpen] = useState(false);
 
   const [amountSplitValues, setAmountSplitValues] = useState<SplitTextValues>(() => {
     if (expense?.splits?.length) {
@@ -182,23 +299,26 @@ export function ExpenseForm({
     return configuredOptions;
   }, [categories, expense?.category]);
 
-  const recordedByName = displayName(
-    expense ? profilesById[expense.recorded_by]?.display_name : currentProfile?.display_name
-  );
   const hasSavedSharedSplits = expense?.ownership === 'shared' && Boolean(expense.splits.length);
   const canApplyPresetSplits = !splitValuesTouched && !hasSavedSharedSplits;
-  const saveBarBottom = Platform.OS === 'web' ? 0 : keyboardHeight;
   const saveBarPaddingBottom = Math.max(insets.bottom, 12);
   const formBottomPadding = Math.max(saveBarHeight, MIN_SAVE_BAR_HEIGHT) + 24;
+  const amountYen = parsePositiveInteger(amount) || 0;
+  const amountDisplayValue = formatYenInput(amount);
+  const today = todayDateString();
+  const validationMessage = validateForm();
+  const canSave = !validationMessage && !submitting;
+  const selectedDate = parseDateString(spentOn) || parseDateString(today) || new Date();
+  const isEditing = Boolean(expense);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardHeight(event.endCoordinates.height);
+    const showSubscription = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      setKeyboardHeight(0);
+      setKeyboardVisible(false);
     });
 
     return () => {
@@ -253,13 +373,13 @@ export function ExpenseForm({
   }
 
   function applyPresetSplits(nextCategory: string, nextAmount = amount) {
-    const presetRatios = getPresetSplitRatios(nextCategory);
-    setRatioValues(toRatioValues(sortedMembers, presetRatios));
+    const nextPresetRatios = getPresetSplitRatios(nextCategory);
+    setRatioValues(toRatioValues(sortedMembers, nextPresetRatios));
     setLastEditedAmountUserId(null);
 
-    const amountYen = parsePositiveInteger(nextAmount);
-    if (amountYen) {
-      setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, presetRatios)));
+    const nextAmountYen = parsePositiveInteger(nextAmount);
+    if (nextAmountYen) {
+      setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, nextPresetRatios)));
     } else {
       setAmountSplitValues(toEmptySplitValues(sortedMembers));
     }
@@ -278,22 +398,34 @@ export function ExpenseForm({
   }
 
   function handleAmountChange(value: string) {
-    setAmount(value);
+    const nextAmount = sanitizeWholeNumber(value);
+    setAmount(nextAmount);
 
-    const amountYen = parsePositiveInteger(value);
-    if (!amountYen || ownership !== 'shared') {
+    const nextAmountYen = parsePositiveInteger(nextAmount);
+    if (!nextAmountYen) {
+      if (ownership === 'shared') {
+        setAmountSplitValues(toEmptySplitValues(sortedMembers));
+      }
+      return;
+    }
+
+    if (ownership !== 'shared') {
       return;
     }
 
     if (lastEditedAmountUserId) {
-      syncAmountComplement(lastEditedAmountUserId, amountSplitValues[lastEditedAmountUserId] || '', amountYen);
+      syncAmountComplement(lastEditedAmountUserId, amountSplitValues[lastEditedAmountUserId] || '', nextAmountYen);
       return;
     }
 
     const ratios = currentRatios();
     if (ratios) {
-      syncAmountValuesFromRatios(amountYen, ratios);
+      syncAmountValuesFromRatios(nextAmountYen, ratios);
     }
+  }
+
+  function clearAmount() {
+    handleAmountChange('');
   }
 
   function selectOwnership(nextOwnership: ExpenseOwnership) {
@@ -309,20 +441,20 @@ export function ExpenseForm({
       return;
     }
 
-    const amountYen = parsePositiveInteger(amount);
-    if (nextMode === 'ratio' && amountYen && sortedMembers.length === 2) {
+    const currentAmountYen = parsePositiveInteger(amount);
+    if (nextMode === 'ratio' && currentAmountYen && sortedMembers.length === 2) {
       const firstAmount = parseNonNegativeInteger(amountSplitValues[sortedMembers[0].user_id] || '');
       const secondAmount = parseNonNegativeInteger(amountSplitValues[sortedMembers[1].user_id] || '');
-      if (firstAmount !== null && secondAmount !== null && firstAmount + secondAmount === amountYen) {
-        const firstRatio = (firstAmount / amountYen) * 100;
+      if (firstAmount !== null && secondAmount !== null && firstAmount + secondAmount === currentAmountYen) {
+        const firstRatio = (firstAmount / currentAmountYen) * 100;
         setRatioValues(toRatioValues(sortedMembers, [firstRatio, 100 - firstRatio]));
       } else {
         setRatioValues(toRatioValues(sortedMembers, getPresetSplitRatios(category)));
       }
     }
 
-    if (nextMode === 'amount' && amountYen) {
-      syncAmountValuesFromRatios(amountYen, currentRatios() || getPresetSplitRatios(category));
+    if (nextMode === 'amount' && currentAmountYen) {
+      syncAmountValuesFromRatios(currentAmountYen, currentRatios() || getPresetSplitRatios(category));
       setLastEditedAmountUserId(null);
     }
 
@@ -330,14 +462,15 @@ export function ExpenseForm({
   }
 
   function setRatioValue(userId: string, value: string) {
+    const nextValue = sanitizeRatioInput(value);
     if (sortedMembers.length !== 2) {
-      setRatioValues((current) => ({ ...current, [userId]: value }));
+      setRatioValues((current) => ({ ...current, [userId]: nextValue }));
       return;
     }
 
     const otherMember = sortedMembers.find((member) => member.user_id !== userId);
-    const parsedRatio = parseRatio(value);
-    const nextValues = { ...ratioValues, [userId]: value };
+    const parsedRatio = parseRatio(nextValue);
+    const nextValues = { ...ratioValues, [userId]: nextValue };
 
     if (otherMember && parsedRatio !== null) {
       nextValues[otherMember.user_id] = formatSplitNumber(100 - parsedRatio);
@@ -347,22 +480,23 @@ export function ExpenseForm({
     setRatioValues(nextValues);
     setLastEditedAmountUserId(null);
 
-    const amountYen = parsePositiveInteger(amount);
-    if (amountYen && otherMember && parsedRatio !== null) {
+    const currentAmountYen = parsePositiveInteger(amount);
+    if (currentAmountYen && otherMember && parsedRatio !== null) {
       const firstRatio = parseRatio(nextValues[sortedMembers[0].user_id] || '') || 0;
       const secondRatio = parseRatio(nextValues[sortedMembers[1].user_id] || '') || 0;
-      syncAmountValuesFromRatios(amountYen, [firstRatio, secondRatio]);
+      syncAmountValuesFromRatios(currentAmountYen, [firstRatio, secondRatio]);
     }
   }
 
   function setAmountSplitValue(userId: string, value: string) {
+    const nextValue = sanitizeWholeNumber(value);
     setSplitValuesTouched(true);
     setLastEditedAmountUserId(userId);
-    setAmountSplitValues((current) => ({ ...current, [userId]: value }));
+    setAmountSplitValues((current) => ({ ...current, [userId]: nextValue }));
 
-    const amountYen = parsePositiveInteger(amount);
-    if (amountYen) {
-      syncAmountComplement(userId, value, amountYen);
+    const currentAmountYen = parsePositiveInteger(amount);
+    if (currentAmountYen) {
+      syncAmountComplement(userId, nextValue, currentAmountYen);
     }
   }
 
@@ -412,40 +546,67 @@ export function ExpenseForm({
     return splits;
   }
 
+  function validateForm() {
+    const currentAmountYen = parsePositiveInteger(amount);
+    if (!currentAmountYen) {
+      return 'Enter an amount greater than 0';
+    }
+
+    if (!category.trim()) {
+      return 'Choose a category';
+    }
+
+    if (!parseDateString(spentOn)) {
+      return 'Choose a valid date';
+    }
+
+    if (spentOn > today) {
+      return 'Future dates are not allowed';
+    }
+
+    if (ownership === 'shared') {
+      try {
+        buildSplits(currentAmountYen);
+      } catch (splitError) {
+        return splitError instanceof Error ? splitError.message : 'Check split values';
+      }
+    }
+
+    return null;
+  }
+
+  function dismissForm() {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/(tabs)/history');
+    }
+  }
+
   async function submit() {
+    const currentAmountYen = parsePositiveInteger(amount);
+    const currentValidationMessage = validateForm();
+    if (!currentAmountYen || currentValidationMessage) {
+      Alert.alert('Save Failed', currentValidationMessage || 'Check the form values');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      const amountYen = Number(amount);
-      if (!Number.isInteger(amountYen) || amountYen <= 0) {
-        throw new Error('Amount must be a whole yen value greater than 0');
-      }
-
-      if (!category.trim()) {
-        throw new Error('Choose a category');
-      }
-
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(spentOn)) {
-        throw new Error('Date format must be YYYY-MM-DD');
-      }
-
       await saveExpense({
         id: expense?.id,
         ledgerId: ledger.id,
-        amountYen,
+        amountYen: currentAmountYen,
         category: category.trim(),
         paidBy,
         ownership,
         spentOn,
         note,
-        splits: buildSplits(amountYen)
+        splits: buildSplits(currentAmountYen)
       });
 
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(tabs)/history');
-      }
+      dismissForm();
     } catch (submitError) {
       Alert.alert('Save Failed', submitError instanceof Error ? submitError.message : 'Check the form values');
     } finally {
@@ -453,226 +614,876 @@ export function ExpenseForm({
     }
   }
 
+  function handleNativeDateChange(event: DateTimePickerEvent, nextDate?: Date) {
+    if (Platform.OS === 'android') {
+      setNativeDatePickerOpen(false);
+    }
+
+    if (event.type === 'dismissed' || !nextDate) {
+      return;
+    }
+
+    setSpentOn(formatDateString(nextDate));
+  }
+
   function handleSaveBarLayout(event: LayoutChangeEvent) {
     setSaveBarHeight(event.nativeEvent.layout.height);
+  }
+
+  function splitRatioLabel(member: LedgerMemberProfile) {
+    if (!amountYen) {
+      return '--%';
+    }
+
+    if (splitMode === 'ratio') {
+      const ratio = parseRatio(ratioValues[member.user_id] || '');
+      return ratio === null ? '--%' : `${formatSplitNumber(ratio)}%`;
+    }
+
+    const splitAmount = parseNonNegativeInteger(amountSplitValues[member.user_id] || '');
+    if (splitAmount === null) {
+      return '--%';
+    }
+
+    return `${formatSplitNumber((splitAmount / amountYen) * 100)}%`;
+  }
+
+  function splitAmountPreview(member: LedgerMemberProfile) {
+    if (splitMode === 'amount') {
+      const splitAmount = parseNonNegativeInteger(amountSplitValues[member.user_id] || '');
+      return splitAmount === null ? formatYenText(0) : formatYenText(splitAmount);
+    }
+
+    const ratio = parseRatio(ratioValues[member.user_id] || '');
+    if (!amountYen || ratio === null) {
+      return formatYenText(0);
+    }
+
+    return formatYenText(Math.round((amountYen * ratio) / 100));
+  }
+
+  function categoryOptionColor(option: string) {
+    const optionIndex = Math.max(0, categoryOptions.indexOf(option));
+    return CHART_PALETTE[optionIndex % CHART_PALETTE.length] || colors.primaryDark;
   }
 
   return (
     <View style={styles.page}>
       <KeyboardAwareScrollView
         style={styles.page}
-        contentContainerStyle={[styles.content, { paddingBottom: formBottomPadding }]}
+        contentContainerStyle={[
+          styles.content,
+          localStyles.content,
+          { paddingBottom: formBottomPadding }
+        ]}
       >
-      <BentoCard variant="form" style={localStyles.formCard}>
-        <Text style={styles.upperLabel}>Amount (JPY)</Text>
-        <TextInput
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-          inputMode="numeric"
-          keyboardType="number-pad"
-          onChangeText={handleAmountChange}
-          placeholder="¥0"
-          returnKeyType="done"
-          style={[styles.input, localStyles.amountInput]}
-          submitBehavior="blurAndSubmit"
-          value={amount}
-        />
+        <BentoCard variant="form" style={localStyles.amountCard}>
+          <View style={localStyles.cardHeaderRow}>
+            <Text style={localStyles.inputTitle}>Amount</Text>
+            {amount ? (
+              <Pressable
+                accessibilityLabel="Clear amount"
+                onPress={clearAmount}
+                style={localStyles.clearButton}
+              >
+                <Ionicons color={colors.muted} name="close" size={24} />
+              </Pressable>
+            ) : (
+              <View style={localStyles.clearButtonPlaceholder} />
+            )}
+          </View>
+          <TextInput
+            accessibilityLabel="Expense amount"
+            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            inputMode="numeric"
+            keyboardType="number-pad"
+            onChangeText={handleAmountChange}
+            placeholder="¥ 0"
+            placeholderTextColor={colors.subtle}
+            returnKeyType="done"
+            selection={{ end: amountDisplayValue.length, start: amountDisplayValue.length }}
+            style={localStyles.amountInput}
+            submitBehavior="blurAndSubmit"
+            value={amountDisplayValue}
+          />
+        </BentoCard>
 
-        <Text style={styles.upperLabel}>Category</Text>
-        <View style={styles.dropdown}>
-          <Pressable
-            onPress={() => runAfterKeyboardDismiss(toggleCategoryMenu, { delayMs: 80 })}
-            style={[styles.dropdownTrigger, categoryMenuOpen && styles.dropdownTriggerActive]}
-          >
-            <Text style={category ? styles.dropdownValue : styles.dropdownPlaceholder}>
-              {category || 'Choose a category'}
-            </Text>
-            <Text style={styles.dropdownIndicator}>{categoryMenuOpen ? '⌃' : '⌄'}</Text>
-          </Pressable>
-          {categoryMenuOpen ? (
-            <View style={styles.dropdownMenu}>
-              {categoryOptions.length === 0 ? (
-                <View style={styles.dropdownOption}>
-                  <Text style={styles.muted}>No categories yet. Add one in Settings first.</Text>
+        <View style={[localStyles.sectionStack, compactLayout && localStyles.sectionStackCompact]}>
+          <BentoCard variant="form" style={[localStyles.categoryCard, compactLayout && localStyles.fullWidthField]}>
+            <Text style={localStyles.inputTitle}>Category</Text>
+            <Pressable
+              accessibilityLabel="Choose category"
+              onPress={() => runAfterKeyboardDismiss(toggleCategoryMenu, { delayMs: 80 })}
+              style={({ pressed }) => [
+                localStyles.categoryTrigger,
+                categoryMenuOpen && localStyles.controlActive,
+                pressed && localStyles.pressed
+              ]}
+            >
+              <View style={localStyles.categoryInputBox}>
+                <View style={localStyles.categorySelectedContent}>
+                  {category ? (
+                    <Ionicons
+                      color={categoryOptionColor(category)}
+                      name={iconNameForExpenseCategory(category)}
+                      size={22}
+                    />
+                  ) : null}
+                  <Text
+                    ellipsizeMode="tail"
+                    numberOfLines={1}
+                    style={category ? localStyles.categoryValue : localStyles.placeholderText}
+                  >
+                    {category || 'Choose a category'}
+                  </Text>
                 </View>
-              ) : null}
-              {categoryOptions.map((option) => {
-                const selected = option === category;
+                <Ionicons color={colors.ink} name={categoryMenuOpen ? 'chevron-up' : 'chevron-down'} size={22} />
+              </View>
+            </Pressable>
+            {categoryMenuOpen ? (
+              <View style={localStyles.dropdownMenu}>
+                {categoryOptions.length === 0 ? (
+                  <View style={localStyles.dropdownOption}>
+                    <Text style={styles.muted}>No categories yet. Add one in Settings first.</Text>
+                  </View>
+                ) : null}
+                {categoryOptions.map((option) => {
+                  const selected = option === category;
+                  return (
+                    <Pressable
+                      accessibilityLabel={`Select ${option}`}
+                      key={option}
+                      onPress={() => runAfterKeyboardDismiss(() => selectCategory(option))}
+                      style={({ pressed }) => [
+                        localStyles.dropdownOption,
+                        selected && localStyles.dropdownOptionActive,
+                        pressed && localStyles.pressed
+                      ]}
+                    >
+                      <Ionicons color={categoryOptionColor(option)} name={iconNameForExpenseCategory(option)} size={20} />
+                      <Text style={[localStyles.dropdownOptionText, selected && localStyles.dropdownOptionTextActive]}>
+                        {option}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+          </BentoCard>
+
+          <BentoCard variant="form" style={[localStyles.paidByCard, compactLayout && localStyles.fullWidthField]}>
+            <Text style={localStyles.inputTitle}>Paid By</Text>
+            <View style={localStyles.memberSelector}>
+              {sortedMembers.map((member, index) => {
+                const selected = member.user_id === paidBy;
+                const name = displayName(member.profile.display_name);
+                const accent = memberAccentColor(member, currentUserId, index);
                 return (
                   <Pressable
-                    key={option}
-                    onPress={() => runAfterKeyboardDismiss(() => selectCategory(option))}
-                    style={[styles.dropdownOption, selected && styles.dropdownOptionActive]}
+                    accessibilityLabel={`Paid by ${name}`}
+                    accessibilityRole="button"
+                    key={member.user_id}
+                    onPress={() => runAfterKeyboardDismiss(() => setPaidBy(member.user_id))}
+                    style={({ pressed }) => [
+                      localStyles.memberOption,
+                      selected && { borderColor: accent, backgroundColor: accent },
+                      pressed && localStyles.pressed
+                    ]}
                   >
-                    <Text style={[styles.dropdownOptionText, selected && styles.dropdownOptionTextActive]}>
-                      {option}
+                    <View style={[
+                      localStyles.avatar,
+                      {
+                        backgroundColor: selected ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.72)',
+                        borderColor: selected ? 'rgba(255,255,255,0.72)' : accent
+                      }
+                    ]}>
+                      <Text style={[localStyles.avatarText, { color: accent }]}>
+                        {initialsForName(name)}
+                      </Text>
+                    </View>
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.memberName, selected && localStyles.memberNameSelected]}>
+                      {name}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
-          ) : null}
+          </BentoCard>
         </View>
 
-        <Text style={styles.upperLabel}>Paid By</Text>
-        <PillTabs
-          accessibilityLabel="Paid by"
-          onChange={(nextPaidBy) => runAfterKeyboardDismiss(() => setPaidBy(nextPaidBy))}
-          options={sortedMembers.map((member) => ({
-            label: displayName(member.profile.display_name),
-            value: member.user_id
-          }))}
-          value={paidBy}
-        />
+        <BentoCard variant="form" style={localStyles.ownershipCard}>
+          <View accessibilityLabel="Expense ownership" style={localStyles.ownershipSelector}>
+            {[
+              { label: 'Personal', value: 'personal' as const },
+              { label: 'Shared', value: 'shared' as const }
+            ].map((option) => {
+              const selected = option.value === ownership;
+              return (
+                <Pressable
+                  accessibilityLabel={`${option.label} expense`}
+                  accessibilityRole="button"
+                  key={option.value}
+                  onPress={() => runAfterKeyboardDismiss(() => selectOwnership(option.value))}
+                  style={({ pressed }) => [
+                    localStyles.ownershipOption,
+                    selected && localStyles.ownershipOptionActive,
+                    pressed && localStyles.pressed
+                  ]}
+                >
+                  <Text style={[localStyles.ownershipText, selected && localStyles.ownershipTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </BentoCard>
 
-        <Text style={styles.upperLabel}>Recorded By</Text>
-        <View style={[styles.input, { justifyContent: 'center' }]}>
-          <Text style={styles.body}>{recordedByName}</Text>
+        <View style={[localStyles.twoColumnRow, compactLayout && localStyles.twoColumnRowCompact]}>
+          <BentoCard variant="form" style={[localStyles.fieldCard, compactLayout && localStyles.fullWidthField]}>
+            <Text style={styles.upperLabel}>Spent On</Text>
+            {Platform.OS === 'web' ? (
+              <WebDateInput max={today} onChange={setSpentOn} value={spentOn} />
+            ) : (
+              <>
+                <Pressable
+                  accessibilityLabel="Choose spent on date"
+                  onPress={() => runAfterKeyboardDismiss(() => setNativeDatePickerOpen((current) => !current))}
+                  style={({ pressed }) => [localStyles.dateTrigger, pressed && localStyles.pressed]}
+                >
+                  <Ionicons color={colors.ink} name="calendar-outline" size={24} />
+                  <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.dateText}>
+                    {formatDisplayDate(spentOn)}
+                  </Text>
+                  <Ionicons color={colors.ink} name={nativeDatePickerOpen ? 'chevron-up' : 'chevron-down'} size={22} />
+                </Pressable>
+                {nativeDatePickerOpen ? (
+                  <DateTimePicker
+                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                    maximumDate={parseDateString(today) || undefined}
+                    mode="date"
+                    onChange={handleNativeDateChange}
+                    value={selectedDate}
+                  />
+                ) : null}
+              </>
+            )}
+          </BentoCard>
+
+          <BentoCard variant="form" style={[localStyles.fieldCard, compactLayout && localStyles.fullWidthField]}>
+            <Text style={styles.upperLabel}>Note (Optional)</Text>
+            <TextInput
+              accessibilityLabel="Expense note"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+              multiline
+              onChangeText={setNote}
+              placeholder="Optional"
+              placeholderTextColor={colors.subtle}
+              style={localStyles.noteInput}
+              value={note}
+            />
+          </BentoCard>
         </View>
-
-        <Text style={styles.upperLabel}>Ownership</Text>
-        <PillTabs
-          accessibilityLabel="Expense ownership"
-          onChange={(nextOwnership) => runAfterKeyboardDismiss(() => selectOwnership(nextOwnership))}
-          options={[
-            { label: 'Personal', value: 'personal' },
-            { label: 'Shared', value: 'shared' }
-          ]}
-          value={ownership}
-        />
 
         {ownership === 'shared' ? (
-          <View style={{ gap: 12 }}>
-            <Text style={styles.upperLabel}>Split</Text>
-            <PillTabs
-              accessibilityLabel="Split method"
-              onChange={(nextMode) => runAfterKeyboardDismiss(() => selectSplitMode(nextMode))}
-              options={[
-                { label: 'Amount', value: 'amount' },
-                { label: 'Ratio', value: 'ratio' }
-              ]}
-              value={splitMode}
-            />
+          <BentoCard variant="form" style={localStyles.splitCard}>
+            <View style={localStyles.splitHeader}>
+              <Text style={styles.upperLabel}>Split Method</Text>
+              <PillTabs
+                accessibilityLabel="Split method"
+                onChange={(nextMode) => runAfterKeyboardDismiss(() => selectSplitMode(nextMode))}
+                options={[
+                  { label: 'Amount', value: 'amount' },
+                  { label: 'Ratio', value: 'ratio' }
+                ]}
+                size="sm"
+                style={localStyles.splitTabs}
+                value={splitMode}
+              />
+            </View>
 
-            {sortedMembers.map((member) => (
-              <View key={member.user_id} style={localStyles.splitRow}>
-                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.splitName}>
-                  {displayName(member.profile.display_name)}
-                </Text>
-                <TextInput
-                  inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                  inputMode="numeric"
-                  keyboardType={splitMode === 'amount' ? 'number-pad' : 'decimal-pad'}
-                  onChangeText={(value) =>
-                    splitMode === 'amount'
-                      ? setAmountSplitValue(member.user_id, value)
-                      : setRatioValue(member.user_id, value)
-                  }
-                  placeholder={splitMode === 'amount' ? 'Example: 600' : 'Example: 50'}
-                  returnKeyType="done"
-                  style={[styles.input, localStyles.splitInput]}
-                  submitBehavior="blurAndSubmit"
-                  value={
-                    splitMode === 'amount'
-                      ? amountSplitValues[member.user_id] || ''
-                      : ratioValues[member.user_id] || ''
-                  }
-                />
-              </View>
-            ))}
-          </View>
+            <View style={localStyles.splitRows}>
+              {sortedMembers.map((member, index) => {
+                const name = displayName(member.profile.display_name);
+                const accent = memberAccentColor(member, currentUserId, index);
+                const inputValue = splitMode === 'amount'
+                  ? formatNumberInput(amountSplitValues[member.user_id] || '')
+                  : ratioValues[member.user_id] || '';
+                return (
+                  <View key={member.user_id} style={[localStyles.splitRow, compactLayout && localStyles.splitRowCompact]}>
+                    <View style={[localStyles.splitMember, compactLayout && localStyles.splitMemberCompact]}>
+                      <View style={[localStyles.splitAvatar, { borderColor: accent }]}>
+                        <Text style={[localStyles.splitAvatarText, { color: accent }]}>{initialsForName(name)}</Text>
+                      </View>
+                      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.splitName}>
+                        {name}
+                      </Text>
+                    </View>
+
+                    <View style={[localStyles.splitValueArea, compactLayout && localStyles.splitValueAreaCompact]}>
+                      <View style={localStyles.splitInputShell}>
+                        <Text style={localStyles.splitInputPrefix}>{splitMode === 'amount' ? '¥' : '%'}</Text>
+                        <TextInput
+                          accessibilityLabel={`${name} split ${splitMode}`}
+                          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                          inputMode="numeric"
+                          keyboardType={splitMode === 'amount' ? 'number-pad' : 'decimal-pad'}
+                          onChangeText={(value) =>
+                            splitMode === 'amount'
+                              ? setAmountSplitValue(member.user_id, value)
+                              : setRatioValue(member.user_id, value)
+                          }
+                          placeholder={splitMode === 'amount' ? '0' : '50'}
+                          placeholderTextColor={colors.subtle}
+                          returnKeyType="done"
+                          style={[localStyles.splitInput, { color: accent }]}
+                          submitBehavior="blurAndSubmit"
+                          value={inputValue}
+                        />
+                      </View>
+                      <View style={[localStyles.percentBadge, { borderColor: accent }]}>
+                        <Text style={[localStyles.percentBadgeText, { color: accent }]}>
+                          {splitRatioLabel(member)}
+                        </Text>
+                      </View>
+                      <Text style={localStyles.splitPreview}>{splitAmountPreview(member)}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={localStyles.totalRow}>
+              <Text style={localStyles.totalLabel}>Total</Text>
+              <Text style={localStyles.totalAmount}>{formatYenText(amountYen)}</Text>
+            </View>
+            <View style={localStyles.infoRow}>
+              <Ionicons color={colors.muted} name="information-circle-outline" size={20} />
+              <Text style={localStyles.infoText}>Amounts will auto-balance to match the total.</Text>
+            </View>
+          </BentoCard>
         ) : null}
 
         <AndroidKeyboardDoneButton />
-
-        <Text style={styles.upperLabel}>Date</Text>
-        <TextInput
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-          onChangeText={setSpentOn}
-          placeholder="YYYY-MM-DD"
-          returnKeyType="done"
-          style={styles.input}
-          submitBehavior="blurAndSubmit"
-          value={spentOn}
-        />
-
-        <Text style={styles.upperLabel}>Note</Text>
-        <TextInput
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-          multiline
-          onChangeText={setNote}
-          placeholder="Optional"
-          style={[styles.input, { minHeight: 84, textAlignVertical: 'top' }]}
-          value={note}
-        />
-      </BentoCard>
-
-      <Text style={[styles.muted, { color: colors.muted }]}>Data is written directly to Supabase. Editing does not change the original recorder.</Text>
       </KeyboardAwareScrollView>
 
       <View
         onLayout={handleSaveBarLayout}
+        pointerEvents={keyboardVisible ? 'none' : 'auto'}
         style={[
           localStyles.saveBar,
+          keyboardVisible && localStyles.saveBarKeyboardHidden,
           {
-            bottom: saveBarBottom,
+            bottom: 0,
             paddingBottom: saveBarPaddingBottom
           }
         ]}
       >
-        <Pressable
-          disabled={submitting}
-          onPress={() => runAfterKeyboardDismiss(submit)}
-          style={[styles.button, localStyles.saveButton]}
-        >
-          <Text style={styles.buttonText}>{submitting ? 'Saving...' : 'Save'}</Text>
-        </Pressable>
+        <View style={localStyles.actionRow}>
+          <Pressable
+            accessibilityLabel="Cancel expense form"
+            onPress={() => runAfterKeyboardDismiss(dismissForm)}
+            style={({ pressed }) => [localStyles.cancelButton, pressed && localStyles.pressed]}
+          >
+            <Text style={localStyles.cancelButtonText}>Cancel</Text>
+          </Pressable>
+          <Pressable
+            accessibilityLabel={isEditing ? 'Save changes' : 'Save expense'}
+            disabled={!canSave}
+            onPress={() => runAfterKeyboardDismiss(submit)}
+            style={({ pressed }) => [
+              localStyles.saveButton,
+              !canSave && localStyles.saveButtonDisabled,
+              pressed && canSave && localStyles.pressed
+            ]}
+          >
+            <Text style={localStyles.saveButtonText}>
+              {submitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Save Expense'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
 }
 
+const webDateInputStyle = {
+  backgroundColor: 'rgba(255,255,255,0.86)',
+  border: `1px solid ${colors.line}`,
+  borderRadius: theme.radii.control,
+  color: colors.ink,
+  fontFamily: `${fontFamilies.regular}, ${fontFamilies.fallback}`,
+  fontSize: 16,
+  minHeight: 48,
+  outline: 'none',
+  padding: '10px 12px',
+  width: '100%'
+};
+
 const localStyles = StyleSheet.create({
-  amountInput: {
-    fontFamily: fontFamilies.bold,
-    fontSize: 28,
-    fontWeight: '700',
-    minHeight: 96,
-    textAlign: 'center'
+  actionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12
   },
-  formCard: {
-    gap: 18,
-    padding: 20
+  amountCard: {
+    gap: 0,
+    minHeight: 92,
+    paddingBottom: 12,
+    paddingHorizontal: 18,
+    paddingTop: 10
+  },
+  amountInput: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.bold,
+    fontSize: 40,
+    fontWeight: '700',
+    letterSpacing: 0,
+    minHeight: 46,
+    paddingVertical: 0
+  },
+  avatar: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 1.5,
+    height: 32,
+    justifyContent: 'center',
+    width: 32
+  },
+  avatarText: {
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700'
+  },
+  cancelButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 56,
+    paddingHorizontal: 20
+  },
+  cancelButtonText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 16,
+    fontWeight: '600'
+  },
+  cardHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 36
+  },
+  categoryCard: {
+    flex: 1,
+    gap: 10,
+    minHeight: 104,
+    minWidth: 0,
+    padding: 16
+  },
+  categoryInputBox: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.surface,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+    minHeight: 54,
+    minWidth: 0,
+    paddingHorizontal: 14
+  },
+  categorySelectedContent: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 9,
+    minWidth: 0
+  },
+  categoryTrigger: {
+    alignItems: 'center',
+    borderColor: 'transparent',
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 0,
+    minHeight: 50
+  },
+  categoryValue: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 19,
+    fontWeight: '700'
+  },
+  clearButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(17,24,39,0.05)',
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36
+  },
+  clearButtonPlaceholder: {
+    height: 36,
+    width: 36
+  },
+  content: {
+    maxWidth: 760
+  },
+  controlActive: {
+    borderColor: colors.primary
+  },
+  dateText: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 16,
+    fontWeight: '600'
+  },
+  dateTrigger: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 48
+  },
+  dropdownMenu: {
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    overflow: 'hidden',
+    ...theme.shadow
+  },
+  dropdownOption: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 46,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  dropdownOptionActive: {
+    backgroundColor: colors.tint
+  },
+  dropdownOptionText: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 15
+  },
+  dropdownOptionTextActive: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.bold,
+    fontWeight: '700'
+  },
+  fieldCard: {
+    flex: 1,
+    gap: 10,
+    minHeight: 96,
+    minWidth: 0,
+    padding: 18
+  },
+  fullWidthField: {
+    width: '100%'
+  },
+  infoRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingTop: 4
+  },
+  infoText: {
+    color: colors.muted,
+    flex: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 13
+  },
+  inputTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase'
+  },
+  memberName: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 14,
+    fontWeight: '600'
+  },
+  memberNameSelected: {
+    color: '#FFFFFF'
+  },
+  memberOption: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.62)',
+    borderColor: 'transparent',
+    borderRadius: theme.radii.control,
+    borderWidth: 1.5,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 42,
+    minWidth: 0,
+    paddingHorizontal: 9
+  },
+  memberSelector: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(17,24,39,0.03)',
+    borderColor: colors.line,
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    padding: 3
+  },
+  noteInput: {
+    color: colors.ink,
+    fontFamily: fontFamilies.regular,
+    fontSize: 16,
+    minHeight: 50,
+    paddingVertical: 0,
+    textAlignVertical: 'top'
+  },
+  ownershipCard: {
+    padding: 12
+  },
+  ownershipOption: {
+    alignItems: 'center',
+    borderColor: 'transparent',
+    borderRadius: 16,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 36,
+    paddingHorizontal: 14
+  },
+  ownershipOptionActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent
+  },
+  ownershipSelector: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(15,118,110,0.08)',
+    borderColor: colors.line,
+    borderRadius: 20,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 4,
+    padding: 4
+  },
+  ownershipText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 14,
+    fontWeight: '600'
+  },
+  ownershipTextActive: {
+    color: '#FFFFFF',
+    fontFamily: fontFamilies.bold,
+    fontWeight: '700'
+  },
+  paidByCard: {
+    flex: 1,
+    gap: 10,
+    minHeight: 104,
+    minWidth: 0,
+    padding: 16
+  },
+  percentBadge: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.78)',
+    borderRadius: 16,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+    minWidth: 72,
+    paddingHorizontal: 10
+  },
+  percentBadgeText: {
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 17,
+    fontWeight: '600'
+  },
+  placeholderText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 17
+  },
+  pressed: {
+    opacity: 0.72
   },
   saveBar: {
-    backgroundColor: colors.glass,
+    backgroundColor: 'rgba(255,255,255,0.90)',
     borderColor: colors.glassBorder,
     borderTopWidth: 1,
     left: 0,
     paddingHorizontal: 20,
-    paddingTop: 12,
+    paddingTop: 14,
     position: 'absolute',
     right: 0,
     ...theme.shadow
   },
+  saveBarKeyboardHidden: {
+    opacity: 0,
+    transform: [{ translateY: MIN_SAVE_BAR_HEIGHT + 24 }]
+  },
   saveButton: {
-    minHeight: 56
+    alignItems: 'center',
+    backgroundColor: colors.primaryDark,
+    borderRadius: theme.radii.control,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 56,
+    paddingHorizontal: 18
+  },
+  saveButtonDisabled: {
+    backgroundColor: 'rgba(17,24,39,0.18)'
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 16,
+    fontWeight: '600'
+  },
+  sectionStack: {
+    flexDirection: 'row',
+    gap: 18
+  },
+  sectionStackCompact: {
+    flexDirection: 'column'
+  },
+  splitAvatar: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderRadius: 28,
+    borderWidth: 1.5,
+    height: 56,
+    justifyContent: 'center',
+    width: 56
+  },
+  splitAvatarText: {
+    fontFamily: fontFamilies.bold,
+    fontSize: 26,
+    fontWeight: '700'
+  },
+  splitCard: {
+    gap: 14,
+    padding: 18
+  },
+  splitHeader: {
+    gap: 10
   },
   splitInput: {
     flex: 1,
     fontFamily: fontFamilies.bold,
+    fontSize: 34,
     fontWeight: '700',
+    letterSpacing: 0,
+    minHeight: 52,
+    paddingVertical: 0,
     textAlign: 'right'
+  },
+  splitInputPrefix: {
+    color: colors.ink,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 22,
+    fontWeight: '600'
+  },
+  splitInputShell: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 148
+  },
+  splitMember: {
+    alignItems: 'center',
+    flex: 0.82,
+    flexDirection: 'row',
+    gap: 12,
+    minWidth: 0
+  },
+  splitMemberCompact: {
+    flex: 0,
+    width: '100%'
   },
   splitName: {
     color: colors.ink,
-    flex: 0.45,
-    fontFamily: fontFamilies.bold,
-    fontSize: 16,
-    fontWeight: '700'
+    flex: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 18,
+    fontWeight: '600'
+  },
+  splitPreview: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    minWidth: 74,
+    textAlign: 'right'
   },
   splitRow: {
     alignItems: 'center',
+    borderBottomColor: colors.line,
+    borderBottomWidth: 1,
     flexDirection: 'row',
-    gap: 12
+    gap: 12,
+    minHeight: 104,
+    paddingVertical: 12
+  },
+  splitRowCompact: {
+    alignItems: 'stretch',
+    flexDirection: 'column'
+  },
+  splitRows: {
+    borderColor: colors.line,
+    borderRadius: theme.radii.surface,
+    borderWidth: 1,
+    overflow: 'hidden',
+    paddingHorizontal: 12
+  },
+  splitTabs: {
+    alignSelf: 'stretch'
+  },
+  splitValueArea: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'flex-end',
+    minWidth: 0
+  },
+  splitValueAreaCompact: {
+    width: '100%'
+  },
+  totalAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 19,
+    fontWeight: '600'
+  },
+  totalLabel: {
+    color: colors.ink,
+    fontFamily: fontFamilies.regular,
+    fontSize: 18
+  },
+  totalRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  twoColumnRow: {
+    flexDirection: 'row',
+    gap: 18
+  },
+  twoColumnRowCompact: {
+    flexDirection: 'column'
   }
 });
