@@ -9,6 +9,8 @@ import {
 } from '@/src/components/TransferChecklistShared';
 import { TransferItemsOverlay } from '@/src/components/TransferItemsOverlay';
 import { BentoCard } from '@/src/components/ui';
+import { tintFromAccent } from '@/src/lib/color';
+import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import type { TransferConfirmationUpdate } from '@/src/lib/ledger';
 import type { LedgerMemberProfile, TransferChecklistItemRow } from '@/src/types/database';
@@ -45,6 +47,9 @@ export function TransferChecklistCard({
   const nameByUserId = useMemo(() => (
     new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]))
   ), [members]);
+  const userColorById = useMemo(() => (
+    buildUserColorMap(members.map((member) => member.user_id), currentUserId)
+  ), [currentUserId, members]);
   const netSummary = useMemo(() => buildNetSummary(items, members), [items, members]);
   const participantItems = useMemo(() => (
     currentUserId ? items.filter((item) => isParticipant(item, currentUserId)) : []
@@ -60,6 +65,10 @@ export function TransferChecklistCard({
     }
 
     return nameByUserId.get(userId) || 'Unnamed user';
+  }
+
+  function userColor(userId: string | null) {
+    return userId ? userColorById.get(userId) || DEFAULT_USER_COLOR : DEFAULT_USER_COLOR;
   }
 
   function directionLabel() {
@@ -119,9 +128,9 @@ export function TransferChecklistCard({
               ) : netSummary.count > 0 ? (
                 <>
                   <View style={localStyles.transferDirectionRow}>
-                    <UserPill label={userName(netSummary.payerUserId)} tone="payer" />
+                    <UserPill color={userColor(netSummary.payerUserId)} label={userName(netSummary.payerUserId)} />
                     <Text style={localStyles.transferDirectionText}>to</Text>
-                    <UserPill label={userName(netSummary.payeeUserId)} tone="payee" />
+                    <UserPill color={userColor(netSummary.payeeUserId)} label={userName(netSummary.payeeUserId)} />
                   </View>
                   <Text style={styles.muted}>
                     {netSummary.count} open {netSummary.count === 1 ? 'item' : 'items'}
@@ -163,20 +172,18 @@ export function TransferChecklistCard({
   );
 }
 
-function UserPill({ label, tone }: { label: string; tone: 'payer' | 'payee' }) {
-  const isPayer = tone === 'payer';
-
+function UserPill({ color, label }: { color: string; label: string }) {
   return (
     <View style={[
       localStyles.userPill,
-      { backgroundColor: isPayer ? colors.tint : 'rgba(249,115,22,0.10)' }
+      { backgroundColor: tintFromAccent(color) }
     ]}>
       <Text
         ellipsizeMode="tail"
         numberOfLines={1}
         style={[
           localStyles.userPillText,
-          { color: isPayer ? colors.primaryDark : '#F97316' }
+          { color }
         ]}
       >
         {label}

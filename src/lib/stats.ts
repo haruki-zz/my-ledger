@@ -1,4 +1,4 @@
-import { CHART_PALETTE } from './chartPalette';
+import { buildUserColorMap, colorForCategory, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './entityColors';
 import type { Expense } from '../types/database';
 
 export type DashboardRange = 'all' | 'current' | 'other';
@@ -72,9 +72,8 @@ export type DashboardPeriodStats = DashboardStats & {
 };
 
 export const DASHBOARD_CATEGORY_LIMIT = 5;
-export const DASHBOARD_OTHER_CATEGORY_COLOR = '#98A2B3';
+export const DASHBOARD_OTHER_CATEGORY_COLOR = OTHER_CATEGORY_COLOR;
 
-const CATEGORY_COLORS = CHART_PALETTE;
 const monthFormatter = new Intl.DateTimeFormat('en', {
   month: 'short',
   year: 'numeric'
@@ -239,13 +238,14 @@ export function buildDashboardPeriodStats(input: {
   );
   const totalYen = periodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
   const previousTotalYen = comparisonExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
-  const memberTotals = userIds.map((userId, index) => {
+  const userColorById = buildUserColorMap(userIds, input.currentUserId);
+  const memberTotals = userIds.map((userId) => {
     const amountYen = periodExpenses.reduce((sum, expense) => sum + amountForUser(expense, userId), 0);
     return {
       userId,
       amountYen,
       percentage: totalYen > 0 ? (amountYen / totalYen) * 100 : 0,
-      color: index === 0 ? CATEGORY_COLORS[0] : '#F97316'
+      color: userColorById.get(userId) || DEFAULT_USER_COLOR
     };
   });
   const dailyUserSeries = buildDashboardDailyUserSeries({
@@ -297,11 +297,11 @@ export function buildDashboardStats(input: {
 
   const categories = [...amountsByCategory.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([category, amountYen], index) => ({
+    .map(([category, amountYen]) => ({
       category,
       amountYen,
       percentage: totalYen > 0 ? (amountYen / totalYen) * 100 : 0,
-      color: CATEGORY_COLORS[index % CATEGORY_COLORS.length]
+      color: colorForCategory(category)
     }));
 
   return {
@@ -408,7 +408,7 @@ export function buildDashboardCategoryStats(input: {
       percentage: input.totalYen > 0 ? (amountYen / input.totalYen) * 100 : 0,
       color: index === DASHBOARD_CATEGORY_LIMIT - 1 && shouldAggregateOther
         ? DASHBOARD_OTHER_CATEGORY_COLOR
-        : CATEGORY_COLORS[index % CATEGORY_COLORS.length],
+        : colorForCategory(category),
       sourceCategories
     };
   });

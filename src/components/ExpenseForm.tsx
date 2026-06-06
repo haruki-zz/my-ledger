@@ -29,7 +29,7 @@ import {
   getExpenseCategorySplitRatio,
   iconNameForExpenseCategory
 } from '@/src/lib/categories';
-import { CHART_PALETTE } from '@/src/lib/chartPalette';
+import { buildUserColorMap, colorForCategory } from '@/src/lib/entityColors';
 import { displayName, todayDateString } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { saveExpense } from '@/src/lib/ledger';
@@ -156,14 +156,6 @@ function initialsForName(name: string) {
   return displayName(name).slice(0, 1).toUpperCase();
 }
 
-function memberAccentColor(member: LedgerMemberProfile, currentUserId: string, index: number) {
-  if (member.user_id === currentUserId) {
-    return colors.primaryDark;
-  }
-
-  return index === 1 ? '#EA580C' : colors.warm;
-}
-
 function parseDateString(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return null;
@@ -229,6 +221,9 @@ export function ExpenseForm({
   const { width } = useWindowDimensions();
   const compactLayout = width < 680;
   const sortedMembers = useMemo(() => members.slice(0, 2), [members]);
+  const memberColorById = useMemo(() => (
+    buildUserColorMap(sortedMembers.map((member) => member.user_id), currentUserId)
+  ), [currentUserId, sortedMembers]);
   const categoryRatiosByName = useMemo(
     () => new Map(categories?.map((item) => [
       item.category_name,
@@ -662,11 +657,6 @@ export function ExpenseForm({
     return formatYenText(Math.round((amountYen * ratio) / 100));
   }
 
-  function categoryOptionColor(option: string) {
-    const optionIndex = Math.max(0, categoryOptions.indexOf(option));
-    return CHART_PALETTE[optionIndex % CHART_PALETTE.length] || colors.primaryDark;
-  }
-
   return (
     <View style={styles.page}>
       <KeyboardAwareScrollView
@@ -724,7 +714,7 @@ export function ExpenseForm({
                 <View style={localStyles.categorySelectedContent}>
                   {category ? (
                     <Ionicons
-                      color={categoryOptionColor(category)}
+                      color={colorForCategory(category)}
                       name={iconNameForExpenseCategory(category)}
                       size={22}
                     />
@@ -760,7 +750,7 @@ export function ExpenseForm({
                         pressed && localStyles.pressed
                       ]}
                     >
-                      <Ionicons color={categoryOptionColor(option)} name={iconNameForExpenseCategory(option)} size={20} />
+                      <Ionicons color={colorForCategory(option)} name={iconNameForExpenseCategory(option)} size={20} />
                       <Text style={[localStyles.dropdownOptionText, selected && localStyles.dropdownOptionTextActive]}>
                         {option}
                       </Text>
@@ -774,10 +764,10 @@ export function ExpenseForm({
           <BentoCard variant="form" style={[localStyles.paidByCard, compactLayout && localStyles.fullWidthField]}>
             <Text style={localStyles.inputTitle}>Paid By</Text>
             <View style={localStyles.memberSelector}>
-              {sortedMembers.map((member, index) => {
+              {sortedMembers.map((member) => {
                 const selected = member.user_id === paidBy;
                 const name = displayName(member.profile.display_name);
-                const accent = memberAccentColor(member, currentUserId, index);
+                const accent = memberColorById.get(member.user_id) || colors.primaryDark;
                 return (
                   <Pressable
                     accessibilityLabel={`Paid by ${name}`}
@@ -903,9 +893,9 @@ export function ExpenseForm({
             </View>
 
             <View style={localStyles.splitRows}>
-              {sortedMembers.map((member, index) => {
+              {sortedMembers.map((member) => {
                 const name = displayName(member.profile.display_name);
-                const accent = memberAccentColor(member, currentUserId, index);
+                const accent = memberColorById.get(member.user_id) || colors.primaryDark;
                 const inputValue = splitMode === 'amount'
                   ? formatNumberInput(amountSplitValues[member.user_id] || '')
                   : ratioValues[member.user_id] || '';

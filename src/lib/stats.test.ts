@@ -7,6 +7,7 @@ import {
   type DashboardPeriod
 } from './stats';
 import { EXPENSE_CATEGORIES, iconNameForExpenseCategory } from './categories';
+import { buildUserColorMap, colorForCategory, DEFAULT_USER_COLOR } from './entityColors';
 import type { Expense } from '@/src/types/database';
 
 const CURRENT_USER_ID = 'user-a';
@@ -29,6 +30,26 @@ describe('expense category icons', () => {
     expect(iconNameForExpenseCategory('FOOD')).toBe('restaurant-outline');
     expect(iconNameForExpenseCategory('food & dining')).toBe('restaurant-outline');
     expect(iconNameForExpenseCategory('Unknown Category')).toBe('ellipsis-horizontal');
+  });
+});
+
+describe('entity colors', () => {
+  it('uses the same category color in dashboard stats and shared category helpers', () => {
+    const stats = buildStats('month', [
+      expense({ amountYen: 1000, category: 'Shopping', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Rent', spentOn: '2026-06-01' })
+    ]);
+
+    expect(stats.categories.find((category) => category.category === 'Shopping')?.color).toBe(colorForCategory('Shopping'));
+    expect(colorForCategory('shopping')).toBe(colorForCategory('Shopping'));
+  });
+
+  it('assigns stable colors for current user and other ledger members', () => {
+    const colorsById = buildUserColorMap([OTHER_USER_ID, CURRENT_USER_ID, 'user-c'], CURRENT_USER_ID);
+
+    expect(colorsById.get(CURRENT_USER_ID)).toBe(DEFAULT_USER_COLOR);
+    expect(colorsById.get(OTHER_USER_ID)).toBe(colorsById.get(OTHER_USER_ID));
+    expect(colorsById.get(OTHER_USER_ID)).not.toBe(colorsById.get('user-c'));
   });
 });
 

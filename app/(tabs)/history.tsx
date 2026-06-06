@@ -27,8 +27,8 @@ import {
 } from '@/src/components/history/HistoryExpenseModals';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
-import { CHART_PALETTE } from '@/src/lib/chartPalette';
 import { iconNameForExpenseCategory } from '@/src/lib/categories';
+import { buildUserColorMap, colorForCategory } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
@@ -192,37 +192,9 @@ export default function HistoryScreen() {
     })
   ), [profileDisplayName, userOptionIds]);
 
-  const userColorById = useMemo(() => {
-    const colorsById = new Map<string, string>();
-    if (!currentUserId) {
-      for (const userId of sortedUserIds) {
-        colorsById.set(userId, colors.subtle);
-      }
-
-      return colorsById;
-    }
-
-    const fallbackColors = [
-      '#F97316',
-      ...CHART_PALETTE.filter((color) => (
-        color !== colors.primary &&
-        color !== colors.primaryDark &&
-        color !== '#F97316'
-      ))
-    ];
-    let fallbackColorIndex = 0;
-
-    for (const userId of sortedUserIds) {
-      if (userId === currentUserId) {
-        colorsById.set(userId, colors.primaryDark);
-      } else {
-        colorsById.set(userId, fallbackColors[fallbackColorIndex % fallbackColors.length]);
-        fallbackColorIndex += 1;
-      }
-    }
-
-    return colorsById;
-  }, [currentUserId, sortedUserIds]);
+  const userColorById = useMemo(() => (
+    buildUserColorMap(sortedUserIds, currentUserId)
+  ), [currentUserId, sortedUserIds]);
 
   const userOptions = useMemo<HistoryFilterOption[]>(() => (
     sortedUserIds.map((userId) => ({
@@ -564,7 +536,14 @@ function SectionHeader({
   totalYen: number;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [localStyles.sectionHeader, pressed && localStyles.pressed]}>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        localStyles.sectionHeader,
+        collapsed ? localStyles.sectionHeaderCollapsed : localStyles.sectionHeaderExpanded,
+        pressed && localStyles.pressed
+      ]}
+    >
       <View style={localStyles.sectionDateBlock}>
         <Text style={localStyles.sectionDate}>{formatSectionDate(date)}</Text>
         <Text style={localStyles.sectionWeekday}>{formatWeekday(date)} · {count} records</Text>
@@ -630,7 +609,7 @@ function rowTitle(expense: Expense) {
 }
 
 function rowSubtitle(expense: Expense) {
-  return expense.note?.trim() ? expense.category : expense.ownership === 'shared' ? 'Shared expense' : 'Personal expense';
+  return expense.note?.trim() ? expense.category : expense.ownership === 'shared' ? 'Shared' : 'Personal';
 }
 
 function formatHistoryDate(dateString: string) {
@@ -677,22 +656,8 @@ function todayDateString() {
   ].join('-');
 }
 
-function colorForCategory(category: string) {
-  return CHART_PALETTE[hashString(category) % CHART_PALETTE.length] || colors.primaryDark;
-}
-
 function uniqueUserIds(userIds: string[]) {
   return [...new Set(userIds.filter(Boolean))];
-}
-
-function hashString(value: string) {
-  let hash = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
-  }
-
-  return Math.abs(hash);
 }
 
 const localStyles = StyleSheet.create({
@@ -764,10 +729,6 @@ const localStyles = StyleSheet.create({
     overflow: 'hidden'
   },
   sectionDetailSegmentFirst: {
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 1,
-    marginTop: -1,
     ...theme.shadow,
     shadowOpacity: 0.025,
     shadowRadius: 10
@@ -780,9 +741,8 @@ const localStyles = StyleSheet.create({
   },
   sectionHeader: {
     alignItems: 'center',
-    backgroundColor: colors.glass,
-    borderColor: 'rgba(15,118,110,0.14)',
-    borderRadius: theme.radii.surface,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderColor: 'rgba(100,116,139,0.08)',
     borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
@@ -794,6 +754,16 @@ const localStyles = StyleSheet.create({
     ...theme.shadow,
     shadowOpacity: 0.09,
     shadowRadius: 18
+  },
+  sectionHeaderCollapsed: {
+    borderRadius: theme.radii.surface,
+    marginBottom: 14
+  },
+  sectionHeaderExpanded: {
+    borderTopLeftRadius: theme.radii.surface,
+    borderTopRightRadius: theme.radii.surface,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0
   },
   sectionTotal: {
     color: colors.ink,

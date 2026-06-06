@@ -8,8 +8,10 @@ import { displayName, formatCompactYen, formatYen } from '@/src/lib/format';
 import type { DailyUserStat } from '@/src/lib/stats';
 
 type DailyChartProps = {
+  currentUserColor?: string;
   currentUserId: string | null;
   currentUserName: string;
+  otherUserColor?: string;
   otherUserId: string | null;
   otherUserName: string;
   series: DailyUserStat[];
@@ -25,15 +27,16 @@ const PADDING_BOTTOM = 34;
 const PLOT_WIDTH = WIDTH - PADDING_LEFT - PADDING_RIGHT;
 const PLOT_HEIGHT = HEIGHT - PADDING_TOP - PADDING_BOTTOM;
 const CURRENT_COLOR = theme.chart.primary;
-const OTHER_COLOR = '#F97316';
 const tooltipDateFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
 });
 
 export function DailyChart({
+  currentUserColor = CURRENT_COLOR,
   currentUserId,
   currentUserName,
+  otherUserColor = CURRENT_COLOR,
   otherUserId,
   otherUserName,
   series,
@@ -154,7 +157,7 @@ export function DailyChart({
             <Fragment key={point.date}>
               {point.currentHeight > 0 ? (
                 <Rect
-                  fill={CURRENT_COLOR}
+                  fill={currentUserColor}
                   height={Math.max(point.currentHeight, 2)}
                   rx={3}
                   width={barWidth}
@@ -164,7 +167,7 @@ export function DailyChart({
               ) : null}
               {point.otherHeight > 0 ? (
                 <Rect
-                  fill={OTHER_COLOR}
+                  fill={otherUserColor}
                   height={Math.max(point.otherHeight, 2)}
                   rx={3}
                   width={barWidth}
@@ -179,7 +182,7 @@ export function DailyChart({
         {selectedPoint && tooltip ? (
           <>
             <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={7} stroke="rgba(15,118,110,0.26)" strokeWidth={4} />
-            <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={3} stroke={CURRENT_COLOR} strokeWidth={2} />
+            <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={3} stroke={currentUserColor} strokeWidth={2} />
             <Path d={`M ${selectedPoint.x - 6} ${tooltip.y + tooltip.height} L ${selectedPoint.x} ${tooltip.y + tooltip.height + 7} L ${selectedPoint.x + 6} ${tooltip.y + tooltip.height} Z`} fill="#172033" />
             <Rect fill="#172033" height={tooltip.height} rx={8} width={tooltip.width} x={tooltip.x} y={tooltip.y} />
             <SvgText fill="rgba(255,255,255,0.72)" fontFamily={fontFamilies.regular} fontSize={10} x={tooltip.x + 10} y={tooltip.y + 16}>

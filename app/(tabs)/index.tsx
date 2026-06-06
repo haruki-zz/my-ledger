@@ -10,6 +10,8 @@ import { TransferChecklistCard } from '@/src/components/TransferChecklistCard';
 import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
+import { tintFromAccent } from '@/src/lib/color';
+import { buildUserColorMap } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   addMonths,
@@ -76,6 +78,14 @@ export default function DashboardScreen() {
   const memberStats = stats.memberTotals;
   const currentMemberStat = memberStats.find((member) => member.userId === currentUserId);
   const otherMemberStat = memberStats.find((member) => member.userId === otherUserId);
+  const userIds = useMemo(() => (
+    members.map((member) => member.user_id)
+  ), [members]);
+  const userColorById = useMemo(() => (
+    buildUserColorMap(userIds, currentUserId)
+  ), [currentUserId, userIds]);
+  const currentUserColor = currentUserId ? userColorById.get(currentUserId) || colors.primaryDark : colors.primaryDark;
+  const otherUserColor = otherUserId ? userColorById.get(otherUserId) || colors.warm : colors.warm;
   const drillAnimatedStyle = {
     opacity: drillProgress,
     transform: [
@@ -248,7 +258,7 @@ export default function DashboardScreen() {
                 <View style={localStyles.memberSplitRow}>
                   <MemberSplit
                     amountYen={currentMemberStat?.amountYen || 0}
-                    color={colors.primaryDark}
+                    color={currentUserColor}
                     label={currentUserName}
                   />
                   {otherUserId ? (
@@ -256,7 +266,7 @@ export default function DashboardScreen() {
                       <View style={localStyles.memberDivider} />
                       <MemberSplit
                         amountYen={otherMemberStat?.amountYen || 0}
-                        color="#F97316"
+                        color={otherUserColor}
                         label={otherUserName}
                       />
                     </>
@@ -307,15 +317,17 @@ export default function DashboardScreen() {
 
               <View style={localStyles.trendActions}>
                 <View style={localStyles.dailyTrendLegend}>
-                  {currentUserId ? <UserLegendPill color={colors.primaryDark} label={currentUserName} /> : null}
-                  {otherUserId ? <UserLegendPill color="#F97316" label={otherUserName} /> : null}
+                  {currentUserId ? <UserLegendPill color={currentUserColor} label={currentUserName} /> : null}
+                  {otherUserId ? <UserLegendPill color={otherUserColor} label={otherUserName} /> : null}
                 </View>
               </View>
             </View>
 
             <DailyChart
+              currentUserColor={currentUserColor}
               currentUserId={currentUserId}
               currentUserName={currentUserName}
+              otherUserColor={otherUserColor}
               otherUserId={otherUserId}
               otherUserName={otherUserName}
               series={stats.dailyUserSeries}
@@ -332,7 +344,7 @@ function UserLegendPill({ color, label }: { color: string; label: string }) {
   return (
     <View style={[
       localStyles.userLegendPill,
-      { backgroundColor: color === '#F97316' ? 'rgba(249,115,22,0.10)' : colors.tint }
+      { backgroundColor: tintFromAccent(color) }
     ]}>
       <View style={[localStyles.userLegendDot, { backgroundColor: color }]} />
       <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.userLegendText, { color }]}>
@@ -353,7 +365,7 @@ function MemberSplit({
 }) {
   return (
     <View style={localStyles.memberSplit}>
-      <View style={[localStyles.memberNamePill, { backgroundColor: color === colors.primaryDark ? colors.tint : 'rgba(249,115,22,0.10)' }]}>
+      <View style={[localStyles.memberNamePill, { backgroundColor: tintFromAccent(color) }]}>
         <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.memberNamePillText, { color }]}>
           {label}
         </Text>
