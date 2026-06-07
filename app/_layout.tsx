@@ -78,7 +78,6 @@ export default function RootLayout() {
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             {/* Settings detail screens */}
             <Stack.Screen name="settings/account" options={{ headerBackTitle: 'Settings', title: 'Account' }} />
-            <Stack.Screen name="settings/categories" options={{ headerBackTitle: 'Settings', title: 'Categories' }} />
             <Stack.Screen name="settings/ledgers" options={{ headerBackTitle: 'Settings', title: 'Ledgers' }} />
             <Stack.Screen name="settings/sync" options={{ headerBackTitle: 'Settings', title: 'Sync Status' }} />
             <Stack.Screen name="settings/ledger/[id]" options={{ headerBackTitle: 'Ledgers', title: 'Ledger Details' }} />

@@ -1,7 +1,7 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { createElement, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Keyboard,
@@ -30,7 +30,6 @@ import {
   categoryColor,
   categoryIconName,
   categoryLabel,
-  categorySplitRatio,
   resolveCategory,
   subcategoryPresets
 } from '@/src/lib/categorySystem';
@@ -46,7 +45,6 @@ import type {
   Expense,
   ExpenseOwnership,
   Ledger,
-  LedgerCategory,
   LedgerMemberProfile,
   Profile,
   RecurringExpenseRule
@@ -59,7 +57,6 @@ type Props = {
   currentProfile?: Profile;
   expense?: Expense;
   profilesById: Record<string, Profile>;
-  categories?: LedgerCategory[];
   recurringRules?: RecurringExpenseRule[];
 };
 
@@ -197,7 +194,6 @@ export function ExpenseForm({
   members,
   currentUserId,
   expense,
-  categories,
   recurringRules = []
 }: Props) {
   const insets = useSafeAreaInsets();
@@ -207,27 +203,6 @@ export function ExpenseForm({
   const memberColorById = useMemo(() => (
     buildUserColorMap(sortedMembers.map((member) => member.user_id), currentUserId)
   ), [currentUserId, sortedMembers]);
-  const categoryRatiosById = useMemo(
-    () => new Map(categories?.map((item) => [
-      item.category_id || resolveCategory({ category: item.category_name }).categoryId,
-      [item.split_ratio_a, item.split_ratio_b] as const
-    ]) || []),
-    [categories]
-  );
-
-  const getPresetSplitRatios = useCallback((nextCategoryId: string): readonly [number, number] => {
-    const categoryConfig = categoryRatiosById.get(nextCategoryId);
-    if (categoryConfig) {
-      return categoryConfig;
-    }
-
-    if (categories) {
-      return DEFAULT_CATEGORY_SPLIT_RATIO;
-    }
-
-    return categorySplitRatio(nextCategoryId);
-  }, [categories, categoryRatiosById]);
-
   const initialCategory = useMemo(() => resolveCategory({
     categoryId: expense?.category_id,
     category: expense?.category,
@@ -253,7 +228,7 @@ export function ExpenseForm({
 
     const amountYen = parsePositiveInteger(amount);
     if (amountYen && sortedMembers.length === 2) {
-      return toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, getPresetSplitRatios(categoryId)));
+      return toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, DEFAULT_CATEGORY_SPLIT_RATIO));
     }
 
     return toEmptySplitValues(sortedMembers);
@@ -281,7 +256,7 @@ export function ExpenseForm({
   }, [activeFixedSubcategoryKeys, categoryId, expense?.subcategory, subcategory]);
 
   const hasSavedSharedSplits = expense?.ownership === 'shared' && Boolean(expense.splits.length);
-  const canApplyPresetSplits = !splitValuesTouched && !hasSavedSharedSplits;
+  const canApplyDefaultSplits = !splitValuesTouched && !hasSavedSharedSplits;
   const saveBarPaddingBottom = Math.max(insets.bottom, 12);
   const formBottomPadding = Math.max(saveBarHeight, MIN_SAVE_BAR_HEIGHT) + 24;
   const amountYen = parsePositiveInteger(amount) || 0;
@@ -340,13 +315,12 @@ export function ExpenseForm({
     }));
   }
 
-  function applyPresetSplits(nextCategoryId: string, nextAmount = amount) {
-    const nextPresetRatios = getPresetSplitRatios(nextCategoryId);
+  function applyDefaultSplits(nextAmount = amount) {
     setLastEditedAmountUserId(null);
 
     const nextAmountYen = parsePositiveInteger(nextAmount);
     if (nextAmountYen) {
-      setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, nextPresetRatios)));
+      setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, DEFAULT_CATEGORY_SPLIT_RATIO)));
     } else {
       setAmountSplitValues(toEmptySplitValues(sortedMembers));
     }
@@ -356,8 +330,8 @@ export function ExpenseForm({
     setCategoryId(nextCategoryId);
     setSubcategory('');
     setCategoryMenuOpen(false);
-    if (ownership === 'shared' && canApplyPresetSplits) {
-      applyPresetSplits(nextCategoryId);
+    if (ownership === 'shared' && canApplyDefaultSplits) {
+      applyDefaultSplits();
     }
   }
 
@@ -386,7 +360,7 @@ export function ExpenseForm({
       return;
     }
 
-    setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, getPresetSplitRatios(categoryId))));
+    setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, DEFAULT_CATEGORY_SPLIT_RATIO)));
   }
 
   function clearAmount() {
@@ -394,8 +368,8 @@ export function ExpenseForm({
   }
 
   function selectOwnership(nextOwnership: ExpenseOwnership) {
-    if (nextOwnership === 'shared' && ownership !== 'shared' && canApplyPresetSplits) {
-      applyPresetSplits(categoryId);
+    if (nextOwnership === 'shared' && ownership !== 'shared' && canApplyDefaultSplits) {
+      applyDefaultSplits();
     }
 
     setOwnership(nextOwnership);

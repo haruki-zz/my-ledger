@@ -9,12 +9,11 @@ import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   getExpense,
   getErrorMessage,
-  getLedgerCategories,
   getLedgerMembers,
   getProfiles,
   getRecurringExpenseRules
 } from '@/src/lib/ledger';
-import type { Expense, Ledger, LedgerCategory, LedgerMemberProfile, Profile, RecurringExpenseRule } from '@/src/types/database';
+import type { Expense, Ledger, LedgerMemberProfile, Profile, RecurringExpenseRule } from '@/src/types/database';
 
 export default function EditExpenseScreen() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -22,7 +21,6 @@ export default function EditExpenseScreen() {
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
-  const [categories, setCategories] = useState<LedgerCategory[] | undefined>(undefined);
   const [recurringRules, setRecurringRules] = useState<RecurringExpenseRule[]>([]);
   const [expense, setExpense] = useState<Expense | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -59,15 +57,10 @@ export default function EditExpenseScreen() {
         throw new Error('This expense does not belong to the current ledger');
       }
 
-      const nextMembers = await getLedgerMembers(currentLedger.id);
-      let nextCategories: LedgerCategory[] | undefined;
-      try {
-        const ledgerCategories = await getLedgerCategories(currentLedger.id);
-        nextCategories = ledgerCategories.length > 0 ? ledgerCategories : undefined;
-      } catch (categoriesError) {
-        console.warn('Falling back to default categories:', getErrorMessage(categoriesError));
-      }
-      const nextRecurringRules = await getRecurringExpenseRules(currentLedger.id);
+      const [nextMembers, nextRecurringRules] = await Promise.all([
+        getLedgerMembers(currentLedger.id),
+        getRecurringExpenseRules(currentLedger.id)
+      ]);
       const profileIds = [
         ...nextMembers.map((member) => member.user_id),
         currentExpense.paid_by,
@@ -79,7 +72,6 @@ export default function EditExpenseScreen() {
       setCurrentUserId(user.id);
       setLedger(currentLedger);
       setMembers(nextMembers);
-      setCategories(nextCategories);
       setRecurringRules(nextRecurringRules);
       setExpense(currentExpense);
       setProfiles(nextProfiles);
@@ -114,7 +106,6 @@ export default function EditExpenseScreen() {
     <ExpenseForm
       currentProfile={profiles[currentUserId]}
       currentUserId={currentUserId}
-      categories={categories}
       expense={expense}
       ledger={ledger}
       members={members}
