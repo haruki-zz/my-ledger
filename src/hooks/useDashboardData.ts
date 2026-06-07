@@ -75,9 +75,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
       const [nextMembers, firstExpenseSpentOn, nextExpenses] = await Promise.all([
         getLedgerMembers(activeLedger.id),
         getFirstExpenseSpentOn(activeLedger.id),
-        getExpensesByMonth(activeLedger.id, dateRange.comparisonStartDateString, dateRange.endDateString, {
-          refreshFirst: true
-        })
+        getExpensesByMonth(activeLedger.id, dateRange.comparisonStartDateString, dateRange.endDateString)
       ]);
 
       const nextOtherUserId = nextMembers.find((member) => member.user_id !== userId)?.user_id || null;

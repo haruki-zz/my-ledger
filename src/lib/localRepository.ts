@@ -1,4 +1,9 @@
 import { supabase } from '@/src/lib/supabase';
+import {
+  getPrimaryCategory,
+  mapLegacyCategoryToId,
+  resolveCategory
+} from '@/src/lib/categorySystem';
 import { getLocalDb, withLocalTransaction } from '@/src/lib/localDb';
 import { emitLedgerDataChanged } from '@/src/lib/localEvents';
 import {
@@ -17,6 +22,7 @@ import type {
   LedgerMember,
   LedgerMemberProfile,
   Profile,
+  RecurringExpenseRule,
   TransferChecklistItemRow
 } from '@/src/types/database';
 
@@ -34,11 +40,21 @@ type LocalCategoryRow = LedgerCategory & {
   last_synced_updated_at: string | null;
 };
 
+type LocalRecurringRuleRow = RecurringExpenseRule & {
+  is_active: boolean | number;
+  local_status: string;
+  deleted_locally: number;
+  base_updated_at: string | null;
+  last_synced_updated_at: string | null;
+};
+
 type SaveExpensePayload = {
   id: string;
   ledgerId: string;
   amountYen: number;
-  category: string;
+  categoryId: string;
+  category: string | null;
+  subcategory: string | null;
   paidBy: string;
   ownership: ExpenseRow['ownership'];
   spentOn: string;
@@ -49,10 +65,28 @@ type SaveExpensePayload = {
 type SaveCategoryPayload = {
   id: string;
   ledgerId: string;
-  categoryName: string;
+  categoryId: string;
+  categoryName: string | null;
   splitRatioA: number;
   splitRatioB: number;
   sortOrder: number;
+};
+
+type SaveRecurringRulePayload = {
+  id: string;
+  ledgerId: string;
+  name: string;
+  categoryId: string;
+  subcategory: string | null;
+  amountYen: number;
+  paidBy: string;
+  splitRatioA: number;
+  splitRatioB: number;
+  generateDay: number;
+  startMonth: string;
+  endMonth: string | null;
+  timezone: string;
+  isActive: boolean;
 };
 
 type DrainRequester = () => void;
@@ -154,16 +188,20 @@ export async function discardLocalSyncQueueItem(sequence: number) {
       if (row.entity_type === 'expense') {
         await db.runAsync('DELETE FROM expense_splits WHERE expense_id = ?', row.entity_id);
         await db.runAsync('DELETE FROM expenses WHERE id = ?', row.entity_id);
-      } else {
+      } else if (row.entity_type === 'category') {
         await db.runAsync('DELETE FROM ledger_categories WHERE id = ?', row.entity_id);
+      } else {
+        await db.runAsync('DELETE FROM recurring_expense_rules WHERE id = ?', row.entity_id);
       }
     }
   });
 
   if (row.entity_type === 'expense') {
     await refreshExpenses(row.ledger_id);
-  } else {
+  } else if (row.entity_type === 'category') {
     await refreshLedgerCategories(row.ledger_id);
+  } else {
+    await refreshRecurringRules(row.ledger_id);
   }
   emitLedgerDataChanged(row.ledger_id);
 }
@@ -450,7 +488,9 @@ export async function saveLocalExpense(input: {
   id?: string | null;
   ledgerId: string;
   amountYen: number;
-  category: string;
+  categoryId: string;
+  category: string | null;
+  subcategory: string | null;
   paidBy: string;
   ownership: ExpenseRow['ownership'];
   spentOn: string;
@@ -467,11 +507,19 @@ export async function saveLocalExpense(input: {
   const expenseId = input.id || createUuid();
   const action: SyncAction = existing ? 'edit' : 'create';
   const baseUpdatedAt = existing?.updated_at || null;
+  const resolvedCategory = resolveCategory({
+    categoryId: input.categoryId,
+    category: input.category,
+    subcategory: input.subcategory
+  });
+  const legacyCategoryLabel = input.category || resolvedCategory.label;
   const payload: SaveExpensePayload = {
     id: expenseId,
     ledgerId: input.ledgerId,
     amountYen: input.amountYen,
-    category: input.category,
+    categoryId: resolvedCategory.categoryId,
+    category: legacyCategoryLabel,
+    subcategory: resolvedCategory.subcategory,
     paidBy: input.paidBy,
     ownership: input.ownership,
     spentOn: input.spentOn,
@@ -482,13 +530,18 @@ export async function saveLocalExpense(input: {
   await withLocalTransaction(async () => {
     await db.runAsync(
       `INSERT OR REPLACE INTO expenses (
-         id, ledger_id, amount_yen, category, paid_by, recorded_by, ownership, spent_on, note,
+         id, ledger_id, amount_yen, category, category_id, subcategory, recurring_rule_id, recurring_month,
+         paid_by, recorded_by, ownership, spent_on, note,
          created_at, updated_at, local_status, deleted_locally, base_updated_at, last_synced_updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
       expenseId,
       input.ledgerId,
       input.amountYen,
-      input.category,
+      legacyCategoryLabel,
+      resolvedCategory.categoryId,
+      resolvedCategory.subcategory,
+      existing?.recurring_rule_id || null,
+      existing?.recurring_month || null,
       input.paidBy,
       existing?.recorded_by || currentUserId,
       input.ownership,
@@ -543,10 +596,10 @@ export async function deleteLocalExpense(expenseId: string) {
 export async function getCachedLedgerCategories(ledgerId: string): Promise<LedgerCategory[]> {
   const db = await getLocalDb();
   return db.getAllAsync<LedgerCategory>(
-    `SELECT id, ledger_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at
+    `SELECT id, ledger_id, category_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at
      FROM ledger_categories
      WHERE ledger_id = ? AND deleted_locally = 0
-     ORDER BY sort_order ASC, category_name ASC`,
+     ORDER BY sort_order ASC, category_id ASC`,
     ledgerId
   );
 }
@@ -561,7 +614,7 @@ export async function refreshLedgerCategories(ledgerId: string) {
     .select('*')
     .eq('ledger_id', ledgerId)
     .order('sort_order', { ascending: true })
-    .order('category_name', { ascending: true });
+    .order('category_id', { ascending: true });
 
   if (error) {
     throw error;
@@ -591,27 +644,168 @@ export async function refreshLedgerCategories(ledgerId: string) {
   emitLedgerDataChanged(ledgerId);
 }
 
+export async function getCachedRecurringRules(ledgerId: string): Promise<RecurringExpenseRule[]> {
+  const db = await getLocalDb();
+  const rows = await db.getAllAsync<LocalRecurringRuleRow>(
+    `SELECT id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, split_ratio_a, split_ratio_b,
+       generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at
+     FROM recurring_expense_rules
+     WHERE ledger_id = ? AND deleted_locally = 0
+     ORDER BY is_active DESC, category_id ASC, subcategory ASC, name ASC`,
+    ledgerId
+  );
+  return rows.map(mapLocalRecurringRule);
+}
+
+export async function refreshRecurringRules(ledgerId: string) {
+  if (!online) {
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('recurring_expense_rules')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .order('is_active', { ascending: false })
+    .order('category_id', { ascending: true })
+    .order('subcategory', { ascending: true })
+    .order('name', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const ruleIds = (data || []).map((rule) => rule.id);
+  const db = await getLocalDb();
+  await withLocalTransaction(async () => {
+    for (const rule of data || []) {
+      await upsertRemoteRecurringRule(db, rule as RecurringExpenseRule);
+    }
+    if (ruleIds.length > 0) {
+      const placeholders = ruleIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM recurring_expense_rules
+         WHERE ledger_id = ? AND local_status = 'synced' AND id NOT IN (${placeholders})`,
+        [ledgerId, ...ruleIds]
+      );
+    } else {
+      await db.runAsync(
+        `DELETE FROM recurring_expense_rules
+         WHERE ledger_id = ? AND local_status = 'synced'`,
+        ledgerId
+      );
+    }
+  });
+  emitLedgerDataChanged(ledgerId);
+}
+
 export async function refreshLedgerLocalData(ledgerId: string) {
   await Promise.allSettled([
     refreshExpenses(ledgerId),
     refreshLedgerCategories(ledgerId),
-    refreshLedgerMembers(ledgerId)
+    refreshLedgerMembers(ledgerId),
+    refreshRecurringRules(ledgerId)
   ]);
+}
+
+export async function saveLocalRecurringRule(input: {
+  id?: string | null;
+  ledgerId: string;
+  name: string;
+  categoryId: string;
+  subcategory: string | null;
+  amountYen: number;
+  paidBy: string;
+  splitRatioA: number;
+  splitRatioB: number;
+  generateDay: number;
+  startMonth: string;
+  endMonth: string | null;
+  timezone?: string | null;
+  isActive: boolean;
+}) {
+  if (!currentUserId) {
+    throw new Error('Please sign in first');
+  }
+
+  const db = await getLocalDb();
+  const now = new Date().toISOString();
+  const ruleId = input.id || createUuid();
+  const existing = input.id
+    ? await db.getFirstAsync<LocalRecurringRuleRow>('SELECT * FROM recurring_expense_rules WHERE id = ?', input.id)
+    : null;
+  const action: SyncAction = existing && existing.deleted_locally === 0 ? 'edit' : 'create';
+  const baseUpdatedAt = existing?.updated_at || null;
+  const primaryCategory = getPrimaryCategory(input.categoryId);
+  const timezone = input.timezone?.trim() || 'Asia/Tokyo';
+  const payload: SaveRecurringRulePayload = {
+    id: ruleId,
+    ledgerId: input.ledgerId,
+    name: input.name.trim(),
+    categoryId: primaryCategory.id,
+    subcategory: input.subcategory?.trim() || null,
+    amountYen: input.amountYen,
+    paidBy: input.paidBy,
+    splitRatioA: input.splitRatioA,
+    splitRatioB: input.splitRatioB,
+    generateDay: input.generateDay,
+    startMonth: input.startMonth,
+    endMonth: input.endMonth,
+    timezone,
+    isActive: input.isActive
+  };
+
+  await withLocalTransaction(async () => {
+    await db.runAsync(
+      `INSERT OR REPLACE INTO recurring_expense_rules (
+         id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, split_ratio_a, split_ratio_b,
+         generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
+         local_status, deleted_locally, base_updated_at, last_synced_updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+      ruleId,
+      input.ledgerId,
+      payload.name,
+      primaryCategory.id,
+      payload.subcategory,
+      input.amountYen,
+      input.paidBy,
+      input.splitRatioA,
+      input.splitRatioB,
+      input.generateDay,
+      input.startMonth,
+      input.endMonth,
+      timezone,
+      input.isActive ? 1 : 0,
+      existing?.created_by || currentUserId,
+      existing?.created_at || now,
+      now,
+      baseUpdatedAt,
+      existing?.updated_at || null
+    );
+    await enqueueMutation(db, 'recurring_rule', ruleId, input.ledgerId, action, payload, baseUpdatedAt);
+  });
+
+  emitLedgerDataChanged(input.ledgerId);
+  requestSyncDrain();
+  return (await getCachedRecurringRules(input.ledgerId)).find((rule) => rule.id === ruleId);
 }
 
 export async function saveLocalLedgerCategory(input: {
   ledgerId: string;
-  categoryName: string;
+  categoryId: string;
+  categoryName?: string | null;
   splitRatioA: number;
   splitRatioB: number;
   sortOrder: number;
 }) {
   const db = await getLocalDb();
   const now = new Date().toISOString();
+  const primaryCategory = getPrimaryCategory(input.categoryId);
+  const categoryName = input.categoryName || primaryCategory.label;
   const existing = await db.getFirstAsync<LocalCategoryRow>(
-    'SELECT * FROM ledger_categories WHERE ledger_id = ? AND category_name = ?',
+    'SELECT * FROM ledger_categories WHERE ledger_id = ? AND category_id = ?',
     input.ledgerId,
-    input.categoryName
+    primaryCategory.id
   );
   const categoryId = existing?.id || createUuid();
   const action: SyncAction = existing && existing.deleted_locally === 0 ? 'edit' : 'create';
@@ -619,7 +813,8 @@ export async function saveLocalLedgerCategory(input: {
   const payload: SaveCategoryPayload = {
     id: categoryId,
     ledgerId: input.ledgerId,
-    categoryName: input.categoryName,
+    categoryId: primaryCategory.id,
+    categoryName,
     splitRatioA: input.splitRatioA,
     splitRatioB: input.splitRatioB,
     sortOrder: input.sortOrder
@@ -628,12 +823,13 @@ export async function saveLocalLedgerCategory(input: {
   await withLocalTransaction(async () => {
     await db.runAsync(
       `INSERT OR REPLACE INTO ledger_categories (
-         id, ledger_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at,
+         id, ledger_id, category_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at,
          local_status, deleted_locally, base_updated_at, last_synced_updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
       categoryId,
       input.ledgerId,
-      input.categoryName,
+      primaryCategory.id,
+      categoryName,
       input.splitRatioA,
       input.splitRatioB,
       input.sortOrder,
@@ -685,7 +881,7 @@ export async function deleteLocalLedgerCategory(ledgerId: string, categoryName: 
 export async function getCachedTransferItems(ledgerId: string): Promise<TransferChecklistItemRow[]> {
   const db = await getLocalDb();
   return db.getAllAsync<TransferChecklistItemRow>(
-    `SELECT expense_id, ledger_id, category, spent_on, expense_created_at, expense_updated_at,
+    `SELECT expense_id, ledger_id, category, category_id, subcategory, spent_on, expense_created_at, expense_updated_at,
        payer_user_id, payee_user_id, amount_yen, payer_completed_at, payee_completed_at
      FROM transfer_checklist_snapshot
      WHERE ledger_id = ?
@@ -700,14 +896,21 @@ export async function cacheTransferItems(ledgerId: string, items: TransferCheckl
   await withLocalTransaction(async () => {
     await db.runAsync('DELETE FROM transfer_checklist_snapshot WHERE ledger_id = ?', ledgerId);
     for (const item of items) {
+      const resolvedCategory = resolveCategory({
+        categoryId: item.category_id,
+        category: item.category,
+        subcategory: item.subcategory
+      });
       await db.runAsync(
         `INSERT OR REPLACE INTO transfer_checklist_snapshot (
-           expense_id, ledger_id, category, spent_on, expense_created_at, expense_updated_at,
+           expense_id, ledger_id, category, category_id, subcategory, spent_on, expense_created_at, expense_updated_at,
            payer_user_id, payee_user_id, amount_yen, payer_completed_at, payee_completed_at, cached_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         item.expense_id,
         item.ledger_id,
-        item.category,
+        item.category || resolvedCategory.label,
+        resolvedCategory.categoryId,
+        resolvedCategory.subcategory,
         item.spent_on,
         item.expense_created_at,
         item.expense_updated_at,
@@ -800,7 +1003,9 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
       p_expense_id: payload.id,
       p_ledger_id: payload.ledgerId,
       p_amount_yen: payload.amountYen,
+      p_category_id: payload.categoryId,
       p_category: payload.category,
+      p_subcategory: payload.subcategory,
       p_paid_by: payload.paidBy,
       p_ownership: payload.ownership,
       p_spent_on: payload.spentOn,
@@ -812,6 +1017,36 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
       throw error;
     }
     await cacheSyncedExpense(data as ExpenseRow, payload.splits);
+    return;
+  }
+
+  if (row.entity_type === 'recurring_rule') {
+    if (row.action === 'delete') {
+      throw new Error('Recurring rule delete is not supported; deactivate the rule instead');
+    }
+
+    const payload = row.payload as SaveRecurringRulePayload;
+    const { data, error } = await supabase.rpc('save_recurring_expense_rule_offline', {
+      p_rule_id: payload.id,
+      p_ledger_id: payload.ledgerId,
+      p_name: payload.name,
+      p_category_id: payload.categoryId,
+      p_subcategory: payload.subcategory,
+      p_amount_yen: payload.amountYen,
+      p_paid_by: payload.paidBy,
+      p_split_ratio_a: payload.splitRatioA,
+      p_split_ratio_b: payload.splitRatioB,
+      p_generate_day: payload.generateDay,
+      p_start_month: payload.startMonth,
+      p_end_month: payload.endMonth,
+      p_timezone: payload.timezone,
+      p_is_active: payload.isActive,
+      p_base_updated_at: row.base_updated_at
+    });
+    if (error) {
+      throw error;
+    }
+    await cacheSyncedRecurringRule(data as RecurringExpenseRule);
     return;
   }
 
@@ -835,6 +1070,7 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
   const { data, error } = await supabase.rpc('save_ledger_category_offline', {
     p_category_id: payload.id,
     p_ledger_id: payload.ledgerId,
+    p_primary_category_id: payload.categoryId,
     p_category_name: payload.categoryName,
     p_split_ratio_a: payload.splitRatioA,
     p_split_ratio_b: payload.splitRatioB,
@@ -882,6 +1118,19 @@ async function cacheSyncedCategory(category: LedgerCategory) {
   });
 }
 
+async function cacheSyncedRecurringRule(rule: RecurringExpenseRule) {
+  const db = await getLocalDb();
+  await withLocalTransaction(async () => {
+    await upsertRemoteRecurringRule(db, rule, true);
+    await db.runAsync(
+      'INSERT OR REPLACE INTO sync_dedupe (entity_type, entity_id, updated_at) VALUES (?, ?, ?)',
+      'recurring_rule',
+      rule.id,
+      rule.updated_at
+    );
+  });
+}
+
 async function enqueueMutation(
   tx: LocalTransaction,
   entityType: SyncEntityType,
@@ -909,8 +1158,10 @@ async function enqueueMutation(
     if (entityType === 'expense') {
       await tx.runAsync('DELETE FROM expense_splits WHERE expense_id = ?', entityId);
       await tx.runAsync('DELETE FROM expenses WHERE id = ?', entityId);
-    } else {
+    } else if (entityType === 'category') {
       await tx.runAsync('DELETE FROM ledger_categories WHERE id = ?', entityId);
+    } else {
+      await tx.runAsync('DELETE FROM recurring_expense_rules WHERE id = ?', entityId);
     }
     return;
   }
@@ -1023,16 +1274,26 @@ async function upsertRemoteExpense(tx: LocalTransaction, expense: ExpenseRow, fo
   if (!force && local && local.local_status !== 'synced') {
     return;
   }
+  const resolvedCategory = resolveCategory({
+    categoryId: expense.category_id,
+    category: expense.category,
+    subcategory: expense.subcategory
+  });
 
   await tx.runAsync(
     `INSERT OR REPLACE INTO expenses (
-       id, ledger_id, amount_yen, category, paid_by, recorded_by, ownership, spent_on, note,
+       id, ledger_id, amount_yen, category, category_id, subcategory, recurring_rule_id, recurring_month,
+       paid_by, recorded_by, ownership, spent_on, note,
        created_at, updated_at, local_status, deleted_locally, base_updated_at, last_synced_updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
     expense.id,
     expense.ledger_id,
     expense.amount_yen,
-    expense.category,
+    expense.category || resolvedCategory.label,
+    resolvedCategory.categoryId,
+    resolvedCategory.subcategory,
+    expense.recurring_rule_id,
+    expense.recurring_month,
     expense.paid_by,
     expense.recorded_by,
     expense.ownership,
@@ -1049,15 +1310,18 @@ async function upsertRemoteCategory(tx: LocalTransaction, category: LedgerCatego
   if (!force && local && local.local_status !== 'synced') {
     return;
   }
+  const primaryCategoryId = category.category_id || mapLegacyCategoryToId(category.category_name);
+  const primaryCategory = getPrimaryCategory(primaryCategoryId);
 
   await tx.runAsync(
     `INSERT OR REPLACE INTO ledger_categories (
-       id, ledger_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at,
+       id, ledger_id, category_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at,
        local_status, deleted_locally, base_updated_at, last_synced_updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
     category.id,
     category.ledger_id,
-    category.category_name,
+    primaryCategory.id,
+    category.category_name || primaryCategory.label,
     category.split_ratio_a,
     category.split_ratio_b,
     category.sort_order,
@@ -1067,13 +1331,73 @@ async function upsertRemoteCategory(tx: LocalTransaction, category: LedgerCatego
   );
 }
 
+async function upsertRemoteRecurringRule(tx: LocalTransaction, rule: RecurringExpenseRule, force = false) {
+  const local = await tx.getFirstAsync<LocalRecurringRuleRow>('SELECT * FROM recurring_expense_rules WHERE id = ?', rule.id);
+  if (!force && local && local.local_status !== 'synced') {
+    return;
+  }
+  const primaryCategory = getPrimaryCategory(rule.category_id);
+
+  await tx.runAsync(
+    `INSERT OR REPLACE INTO recurring_expense_rules (
+       id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, split_ratio_a, split_ratio_b,
+       generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
+       local_status, deleted_locally, base_updated_at, last_synced_updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
+    rule.id,
+    rule.ledger_id,
+    rule.name,
+    primaryCategory.id,
+    rule.subcategory,
+    rule.amount_yen,
+    rule.paid_by,
+    rule.split_ratio_a,
+    rule.split_ratio_b,
+    rule.generate_day,
+    rule.start_month,
+    rule.end_month,
+    rule.timezone,
+    rule.is_active ? 1 : 0,
+    rule.created_by,
+    rule.created_at,
+    rule.updated_at,
+    rule.updated_at
+  );
+}
+
 async function markLocalEntityStatus(entityType: SyncEntityType, entityId: string, status: string) {
   const db = await getLocalDb();
   if (entityType === 'expense') {
     await db.runAsync('UPDATE expenses SET local_status = ? WHERE id = ?', status, entityId);
     return;
   }
-  await db.runAsync('UPDATE ledger_categories SET local_status = ? WHERE id = ?', status, entityId);
+  if (entityType === 'category') {
+    await db.runAsync('UPDATE ledger_categories SET local_status = ? WHERE id = ?', status, entityId);
+    return;
+  }
+  await db.runAsync('UPDATE recurring_expense_rules SET local_status = ? WHERE id = ?', status, entityId);
+}
+
+function mapLocalRecurringRule(row: LocalRecurringRuleRow): RecurringExpenseRule {
+  return {
+    id: row.id,
+    ledger_id: row.ledger_id,
+    name: row.name,
+    category_id: row.category_id,
+    subcategory: row.subcategory,
+    amount_yen: row.amount_yen,
+    paid_by: row.paid_by,
+    split_ratio_a: row.split_ratio_a,
+    split_ratio_b: row.split_ratio_b,
+    generate_day: row.generate_day,
+    start_month: row.start_month,
+    end_month: row.end_month,
+    timezone: row.timezone,
+    is_active: Boolean(row.is_active),
+    created_by: row.created_by,
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
 }
 
 function safeJsonParse(value: string) {

@@ -113,7 +113,7 @@ export default function SettingsScreen() {
     >
       <View>
         <Text style={styles.title}>Settings</Text>
-        <Text style={styles.muted}>Account, ledgers, and shared categories</Text>
+        <Text style={styles.muted}>Account, ledgers, and category rules</Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -138,7 +138,14 @@ export default function SettingsScreen() {
           icon="pricetags-outline"
           onPress={() => router.push('/settings/categories')}
           showDivider
-          title="Categories"
+          title="Category Rules"
+        />
+        <InsetActionRow
+          description="Monthly shared expenses"
+          icon="repeat-outline"
+          onPress={() => router.push('/settings/recurring')}
+          showDivider
+          title="Fixed Monthly Expenses"
         />
         <InsetActionRow
           description={`${sync.pending} pending · ${sync.failed} failed · ${sync.conflict} conflicts`}

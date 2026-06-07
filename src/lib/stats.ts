@@ -1,4 +1,5 @@
-import { buildUserColorMap, colorForCategory, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './entityColors';
+import { buildUserColorMap, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './entityColors';
+import { categoryColor, categoryLabel, resolveCategory } from './categorySystem';
 import type { Expense } from '../types/database';
 
 export type DashboardRange = 'all' | 'current' | 'other';
@@ -85,10 +86,6 @@ const dayFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
 });
-const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
-  weekday: 'short'
-});
-
 function padDatePart(value: number) {
   return String(value).padStart(2, '0');
 }
@@ -169,7 +166,7 @@ function resolveTodayDateRange(todayDate: Date): DashboardDateRange {
     comparisonStartDateString: yesterdayString,
     comparisonEndDateString: yesterdayString,
     label: formatRangeLabel(todayString, todayString),
-    comparisonLabel: `vs ${formatRangeLabel(yesterdayString, yesterdayString)}`
+    comparisonLabel: 'vs yesterday'
   };
 }
 
@@ -189,7 +186,7 @@ function resolveWeekDateRange(todayDate: Date): DashboardDateRange {
     comparisonStartDateString: formatDateString(comparisonStart),
     comparisonEndDateString: formatDateString(comparisonEnd),
     label: formatRangeLabel(weekStartString, todayString),
-    comparisonLabel: `vs last ${formatWeekdayRangeLabel(comparisonStart, comparisonEnd)}`
+    comparisonLabel: 'vs last week'
   };
 }
 
@@ -214,9 +211,7 @@ function resolveMonthDateRange(monthKey: string, todayDate: Date): DashboardDate
     comparisonStartDateString: comparisonStartString,
     comparisonEndDateString: comparisonEndString,
     label: selectedIsCurrentMonth ? formatRangeLabel(monthStartString, monthEndString) : formatMonthLabel(effectiveMonthKey),
-    comparisonLabel: selectedIsCurrentMonth
-      ? `vs ${formatRangeLabel(comparisonStartString, comparisonEndString)}`
-      : `vs ${formatMonthLabel(comparisonMonthKey)}`
+    comparisonLabel: `vs ${formatShortMonthLabel(comparisonMonthKey)}`
   };
 }
 
@@ -291,17 +286,19 @@ export function buildDashboardStats(input: {
 
     totalYen += amountYen;
     count += 1;
-    amountsByCategory.set(expense.category, (amountsByCategory.get(expense.category) || 0) + amountYen);
+    const categoryId = expenseCategoryId(expense);
+    amountsByCategory.set(categoryId, (amountsByCategory.get(categoryId) || 0) + amountYen);
     amountsByDate.set(expense.spent_on, (amountsByDate.get(expense.spent_on) || 0) + amountYen);
   }
 
   const categories = [...amountsByCategory.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([category, amountYen]) => ({
-      category,
+    .sort(compareCategoryEntries)
+    .map(([categoryId, amountYen]) => ({
+      category: categoryLabel(categoryId),
       amountYen,
       percentage: totalYen > 0 ? (amountYen / totalYen) * 100 : 0,
-      color: colorForCategory(category)
+      color: categoryColor(categoryId),
+      sourceCategories: [categoryId]
     }));
 
   return {
@@ -323,7 +320,7 @@ export function buildCategoryMonthlyTrend(input: {
 }): MonthlyCategoryTrendStat[] {
   return buildCategoryMonthlyTrendForCategories({
     ...input,
-    categories: [input.category]
+    categories: [resolveCategory({ category: input.category }).categoryId]
   });
 }
 
@@ -344,7 +341,7 @@ export function buildCategoryMonthlyTrendForCategories(input: {
   const categorySet = new Set(input.categories);
 
   for (const expense of input.expenses) {
-    if (!categorySet.has(expense.category)) {
+    if (!categorySet.has(expenseCategoryId(expense))) {
       continue;
     }
 
@@ -374,13 +371,13 @@ export function buildDashboardCategoryStats(input: {
 }): CategoryStat[] {
   const amountsByCategory = new Map<string, number>();
   for (const expense of input.expenses) {
-    amountsByCategory.set(expense.category, (amountsByCategory.get(expense.category) || 0) + expense.amount_yen);
+    const categoryId = expenseCategoryId(expense);
+    amountsByCategory.set(categoryId, (amountsByCategory.get(categoryId) || 0) + expense.amount_yen);
   }
 
-  const sortedCategories = [...amountsByCategory.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  const otherEntry = sortedCategories.find(([category]) => category === 'Other');
-  const sortedNamedCategories = sortedCategories.filter(([category]) => category !== 'Other');
+  const sortedCategories = [...amountsByCategory.entries()].sort(compareCategoryEntries);
+  const otherEntry = sortedCategories.find(([category]) => category === 'other');
+  const sortedNamedCategories = sortedCategories.filter(([category]) => category !== 'other');
   const shouldAggregateOther = sortedCategories.length > DASHBOARD_CATEGORY_LIMIT;
   const aggregateSources = shouldAggregateOther
     ? [
@@ -392,26 +389,41 @@ export function buildDashboardCategoryStats(input: {
     ? [
         ...sortedNamedCategories.slice(0, DASHBOARD_CATEGORY_LIMIT - 1),
         [
-          'Other',
+          'other',
           aggregateSources.reduce((sum, [, amountYen]) => sum + amountYen, 0)
         ] as [string, number]
       ]
-    : sortedCategories;
+    : [
+        ...sortedNamedCategories,
+        ...(otherEntry ? [otherEntry] : [])
+      ];
 
-  return visibleEntries.map(([category, amountYen], index) => {
+  return visibleEntries.map(([categoryId, amountYen], index) => {
     const sourceCategories = shouldAggregateOther && index === DASHBOARD_CATEGORY_LIMIT - 1
       ? aggregateSources.map(([sourceCategory]) => sourceCategory)
-      : [category];
+      : [categoryId];
     return {
-      category,
+      category: categoryLabel(categoryId),
       amountYen,
       percentage: input.totalYen > 0 ? (amountYen / input.totalYen) * 100 : 0,
       color: index === DASHBOARD_CATEGORY_LIMIT - 1 && shouldAggregateOther
         ? DASHBOARD_OTHER_CATEGORY_COLOR
-        : colorForCategory(category),
+        : categoryColor(categoryId),
       sourceCategories
     };
   });
+}
+
+function compareCategoryEntries(a: [string, number], b: [string, number]) {
+  if (a[0] === 'other' && b[0] !== 'other') {
+    return 1;
+  }
+
+  if (b[0] === 'other' && a[0] !== 'other') {
+    return -1;
+  }
+
+  return b[1] - a[1] || categoryLabel(a[0]).localeCompare(categoryLabel(b[0]));
 }
 
 export function buildDashboardDailyUserSeriesForCategories(input: {
@@ -423,7 +435,7 @@ export function buildDashboardDailyUserSeriesForCategories(input: {
 }) {
   const categorySet = new Set(input.categories);
   return buildDashboardDailyUserSeries({
-    expenses: input.expenses.filter((expense) => categorySet.has(expense.category)),
+    expenses: input.expenses.filter((expense) => categorySet.has(expenseCategoryId(expense))),
     startDateString: input.startDateString,
     endDateString: input.endDateString,
     userIds: input.userIds
@@ -516,6 +528,14 @@ function amountsByDate(expenses: Expense[]) {
   return nextAmountsByDate;
 }
 
+export function expenseCategoryId(expense: Pick<Expense, 'category' | 'category_id' | 'subcategory'>) {
+  return resolveCategory({
+    categoryId: expense.category_id,
+    category: expense.category,
+    subcategory: expense.subcategory
+  }).categoryId;
+}
+
 function buildComparisonStat(totalYen: number, previousTotalYen: number, label: string): ComparisonStat {
   const deltaYen = totalYen - previousTotalYen;
   return {
@@ -594,14 +614,6 @@ function formatRangeLabel(startDateString: string, endDateString: string) {
   }
 
   return `${dayFormatter.format(start)}-${dayFormatter.format(end)}`;
-}
-
-function formatWeekdayRangeLabel(start: Date, end: Date) {
-  if (formatDateString(start) === formatDateString(end)) {
-    return weekdayFormatter.format(start);
-  }
-
-  return `${weekdayFormatter.format(start)}-${weekdayFormatter.format(end)}`;
 }
 
 function parseMonthKey(monthKey: string) {

@@ -4,8 +4,7 @@ import { colors, fontFamilies, theme } from '@/src/components/styles';
 import {
   STACK_CARD_MIN_HEIGHT,
   TransferItemCard,
-  completedAtForUser,
-  counterpartyForUser
+  completedAtForUser
 } from '@/src/components/TransferChecklistShared';
 import type { TransferChecklistItemRow } from '@/src/types/database';
 
@@ -70,8 +69,6 @@ export function TransferStackPreview({
       <View pointerEvents="none" style={stackStyles.stackLayer}>
         <TransferItemCard
           canToggle={false}
-          counterpartyCompleted={Boolean(completedAtForUser(topItem, counterpartyForUser(topItem, currentUserId)))}
-          counterpartyUserId={counterpartyForUser(topItem, currentUserId)}
           currentCompleted={Boolean(completedAtForUser(topItem, currentUserId))}
           item={topItem}
           saving={false}

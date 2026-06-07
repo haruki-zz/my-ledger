@@ -7,6 +7,7 @@ import {
   Keyboard,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,22 +25,31 @@ import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollVie
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { BentoCard, PillTabs } from '@/src/components/ui';
 import {
-  DEFAULT_EXPENSE_CATEGORY_SPLIT_RATIO,
-  EXPENSE_CATEGORIES,
-  getExpenseCategorySplitRatio,
-  iconNameForExpenseCategory
-} from '@/src/lib/categories';
-import { buildUserColorMap, colorForCategory } from '@/src/lib/entityColors';
+  DEFAULT_CATEGORY_SPLIT_RATIO,
+  PRIMARY_CATEGORIES,
+  categoryColor,
+  categoryIconName,
+  categoryLabel,
+  categorySplitRatio,
+  resolveCategory,
+  subcategoryPresets
+} from '@/src/lib/categorySystem';
+import { buildUserColorMap } from '@/src/lib/entityColors';
 import { displayName, todayDateString } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { saveExpense } from '@/src/lib/ledger';
+import {
+  activeRecurringSubcategoryKeys,
+  recurringRuleSubcategoryKey
+} from '@/src/lib/recurring';
 import type {
   Expense,
   ExpenseOwnership,
   Ledger,
   LedgerCategory,
   LedgerMemberProfile,
-  Profile
+  Profile,
+  RecurringExpenseRule
 } from '@/src/types/database';
 
 type Props = {
@@ -50,6 +60,7 @@ type Props = {
   expense?: Expense;
   profilesById: Record<string, Profile>;
   categories?: LedgerCategory[];
+  recurringRules?: RecurringExpenseRule[];
 };
 
 type SplitMode = 'amount' | 'ratio';
@@ -215,7 +226,8 @@ export function ExpenseForm({
   members,
   currentUserId,
   expense,
-  categories
+  categories,
+  recurringRules = []
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -224,29 +236,35 @@ export function ExpenseForm({
   const memberColorById = useMemo(() => (
     buildUserColorMap(sortedMembers.map((member) => member.user_id), currentUserId)
   ), [currentUserId, sortedMembers]);
-  const categoryRatiosByName = useMemo(
+  const categoryRatiosById = useMemo(
     () => new Map(categories?.map((item) => [
-      item.category_name,
+      item.category_id || resolveCategory({ category: item.category_name }).categoryId,
       [item.split_ratio_a, item.split_ratio_b] as const
     ]) || []),
     [categories]
   );
 
-  const getPresetSplitRatios = useCallback((nextCategory: string): readonly [number, number] => {
-    const categoryConfig = categoryRatiosByName.get(nextCategory);
+  const getPresetSplitRatios = useCallback((nextCategoryId: string): readonly [number, number] => {
+    const categoryConfig = categoryRatiosById.get(nextCategoryId);
     if (categoryConfig) {
       return categoryConfig;
     }
 
     if (categories) {
-      return DEFAULT_EXPENSE_CATEGORY_SPLIT_RATIO;
+      return DEFAULT_CATEGORY_SPLIT_RATIO;
     }
 
-    return getExpenseCategorySplitRatio(nextCategory);
-  }, [categories, categoryRatiosByName]);
+    return categorySplitRatio(nextCategoryId);
+  }, [categories, categoryRatiosById]);
 
+  const initialCategory = useMemo(() => resolveCategory({
+    categoryId: expense?.category_id,
+    category: expense?.category,
+    subcategory: expense?.subcategory
+  }), [expense?.category, expense?.category_id, expense?.subcategory]);
   const [amount, setAmount] = useState(expense ? String(expense.amount_yen) : '');
-  const [category, setCategory] = useState(expense?.category.trim() || '');
+  const [categoryId, setCategoryId] = useState<string>(initialCategory.categoryId);
+  const [subcategory, setSubcategory] = useState(initialCategory.subcategory || '');
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [paidBy, setPaidBy] = useState(expense?.paid_by || currentUserId);
   const [ownership, setOwnership] = useState<ExpenseOwnership>(expense?.ownership || 'personal');
@@ -265,7 +283,7 @@ export function ExpenseForm({
 
     const amountYen = parsePositiveInteger(amount);
     if (amountYen && sortedMembers.length === 2) {
-      return toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, getPresetSplitRatios(category)));
+      return toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, getPresetSplitRatios(categoryId)));
     }
 
     return toEmptySplitValues(sortedMembers);
@@ -277,22 +295,25 @@ export function ExpenseForm({
       return toRatioValues(sortedMembers, [firstRatio, 100 - firstRatio]);
     }
 
-    return toRatioValues(sortedMembers, getPresetSplitRatios(category));
+    return toRatioValues(sortedMembers, getPresetSplitRatios(categoryId));
   });
   const [lastEditedAmountUserId, setLastEditedAmountUserId] = useState<string | null>(null);
   const [splitValuesTouched, setSplitValuesTouched] = useState(false);
 
-  const categoryOptions = useMemo(() => {
-    const configuredOptions = categories === undefined
-      ? [...EXPENSE_CATEGORIES]
-      : categories.map((item) => item.category_name);
-    const existingCategory = expense?.category.trim();
-    if (existingCategory && !configuredOptions.includes(existingCategory)) {
-      return [...configuredOptions, existingCategory];
-    }
+  const activeFixedSubcategoryKeys = useMemo(
+    () => activeRecurringSubcategoryKeys(recurringRules),
+    [recurringRules]
+  );
+  const currentSubcategoryPresets = useMemo(() => {
+    const selectedSubcategory = subcategory.trim();
+    return subcategoryPresets(categoryId).filter((option) => {
+      if (expense?.subcategory === option || selectedSubcategory === option) {
+        return true;
+      }
 
-    return configuredOptions;
-  }, [categories, expense?.category]);
+      return !activeFixedSubcategoryKeys.has(recurringRuleSubcategoryKey(categoryId, option));
+    });
+  }, [activeFixedSubcategoryKeys, categoryId, expense?.subcategory, subcategory]);
 
   const hasSavedSharedSplits = expense?.ownership === 'shared' && Boolean(expense.splits.length);
   const canApplyPresetSplits = !splitValuesTouched && !hasSavedSharedSplits;
@@ -305,6 +326,15 @@ export function ExpenseForm({
   const canSave = !validationMessage && !submitting;
   const selectedDate = parseDateString(spentOn) || parseDateString(today) || new Date();
   const isEditing = Boolean(expense);
+  const isGeneratedExpense = Boolean(expense?.recurring_rule_id);
+  const matchesActiveFixedSubcategory = useMemo(() => {
+    const trimmedSubcategory = subcategory.trim();
+    if (!trimmedSubcategory || isGeneratedExpense) {
+      return false;
+    }
+
+    return activeFixedSubcategoryKeys.has(recurringRuleSubcategoryKey(categoryId, trimmedSubcategory));
+  }, [activeFixedSubcategoryKeys, categoryId, isGeneratedExpense, subcategory]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -367,8 +397,8 @@ export function ExpenseForm({
     }));
   }
 
-  function applyPresetSplits(nextCategory: string, nextAmount = amount) {
-    const nextPresetRatios = getPresetSplitRatios(nextCategory);
+  function applyPresetSplits(nextCategoryId: string, nextAmount = amount) {
+    const nextPresetRatios = getPresetSplitRatios(nextCategoryId);
     setRatioValues(toRatioValues(sortedMembers, nextPresetRatios));
     setLastEditedAmountUserId(null);
 
@@ -380,11 +410,12 @@ export function ExpenseForm({
     }
   }
 
-  function selectCategory(option: string) {
-    setCategory(option);
+  function selectCategory(nextCategoryId: string) {
+    setCategoryId(nextCategoryId);
+    setSubcategory('');
     setCategoryMenuOpen(false);
     if (ownership === 'shared' && canApplyPresetSplits) {
-      applyPresetSplits(option);
+      applyPresetSplits(nextCategoryId);
     }
   }
 
@@ -425,7 +456,7 @@ export function ExpenseForm({
 
   function selectOwnership(nextOwnership: ExpenseOwnership) {
     if (nextOwnership === 'shared' && ownership !== 'shared' && canApplyPresetSplits) {
-      applyPresetSplits(category);
+      applyPresetSplits(categoryId);
     }
 
     setOwnership(nextOwnership);
@@ -444,12 +475,12 @@ export function ExpenseForm({
         const firstRatio = (firstAmount / currentAmountYen) * 100;
         setRatioValues(toRatioValues(sortedMembers, [firstRatio, 100 - firstRatio]));
       } else {
-        setRatioValues(toRatioValues(sortedMembers, getPresetSplitRatios(category)));
+        setRatioValues(toRatioValues(sortedMembers, getPresetSplitRatios(categoryId)));
       }
     }
 
     if (nextMode === 'amount' && currentAmountYen) {
-      syncAmountValuesFromRatios(currentAmountYen, currentRatios() || getPresetSplitRatios(category));
+      syncAmountValuesFromRatios(currentAmountYen, currentRatios() || getPresetSplitRatios(categoryId));
       setLastEditedAmountUserId(null);
     }
 
@@ -547,7 +578,7 @@ export function ExpenseForm({
       return 'Enter an amount greater than 0';
     }
 
-    if (!category.trim()) {
+    if (!categoryId) {
       return 'Choose a category';
     }
 
@@ -578,11 +609,28 @@ export function ExpenseForm({
     }
   }
 
-  async function submit() {
+  async function submit(skipFixedSubcategoryConfirm = false) {
     const currentAmountYen = parsePositiveInteger(amount);
     const currentValidationMessage = validateForm();
     if (!currentAmountYen || currentValidationMessage) {
       Alert.alert('Save Failed', currentValidationMessage || 'Check the form values');
+      return;
+    }
+
+    if (!skipFixedSubcategoryConfirm && matchesActiveFixedSubcategory) {
+      Alert.alert(
+        'Save as regular expense?',
+        'This subcategory is already configured as a fixed monthly expense. Save this as an additional regular expense?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Save Anyway',
+            onPress: () => {
+              void submit(true);
+            }
+          }
+        ]
+      );
       return;
     }
 
@@ -593,7 +641,9 @@ export function ExpenseForm({
         id: expense?.id,
         ledgerId: ledger.id,
         amountYen: currentAmountYen,
-        category: category.trim(),
+        categoryId,
+        category: categoryLabel(categoryId),
+        subcategory: subcategory.trim() || null,
         paidBy,
         ownership,
         spentOn,
@@ -701,6 +751,12 @@ export function ExpenseForm({
         <View style={[localStyles.sectionStack, compactLayout && localStyles.sectionStackCompact]}>
           <BentoCard variant="form" style={[localStyles.categoryCard, compactLayout && localStyles.fullWidthField]}>
             <Text style={localStyles.inputTitle}>Category</Text>
+            {isGeneratedExpense ? (
+              <View style={localStyles.generatedNotice}>
+                <Ionicons color={colors.primaryDark} name="repeat-outline" size={18} />
+                <Text style={localStyles.generatedNoticeText}>Generated from fixed monthly expense</Text>
+              </View>
+            ) : null}
             <Pressable
               accessibilityLabel="Choose category"
               onPress={() => runAfterKeyboardDismiss(toggleCategoryMenu, { delayMs: 80 })}
@@ -712,19 +768,17 @@ export function ExpenseForm({
             >
               <View style={localStyles.categoryInputBox}>
                 <View style={localStyles.categorySelectedContent}>
-                  {category ? (
-                    <Ionicons
-                      color={colorForCategory(category)}
-                      name={iconNameForExpenseCategory(category)}
-                      size={22}
-                    />
-                  ) : null}
+                  <Ionicons
+                    color={categoryColor(categoryId)}
+                    name={categoryIconName(categoryId)}
+                    size={22}
+                  />
                   <Text
                     ellipsizeMode="tail"
                     numberOfLines={1}
-                    style={category ? localStyles.categoryValue : localStyles.placeholderText}
+                    style={localStyles.categoryValue}
                   >
-                    {category || 'Choose a category'}
+                    {categoryLabel(categoryId)}
                   </Text>
                 </View>
                 <Ionicons color={colors.ink} name={categoryMenuOpen ? 'chevron-up' : 'chevron-down'} size={22} />
@@ -732,33 +786,70 @@ export function ExpenseForm({
             </Pressable>
             {categoryMenuOpen ? (
               <View style={localStyles.dropdownMenu}>
-                {categoryOptions.length === 0 ? (
-                  <View style={localStyles.dropdownOption}>
-                    <Text style={styles.muted}>No categories yet. Add one in Settings first.</Text>
-                  </View>
-                ) : null}
-                {categoryOptions.map((option) => {
-                  const selected = option === category;
+                {PRIMARY_CATEGORIES.map((option) => {
+                  const selected = option.id === categoryId;
                   return (
                     <Pressable
-                      accessibilityLabel={`Select ${option}`}
-                      key={option}
-                      onPress={() => runAfterKeyboardDismiss(() => selectCategory(option))}
+                      accessibilityLabel={`Select ${option.label}`}
+                      key={option.id}
+                      onPress={() => runAfterKeyboardDismiss(() => selectCategory(option.id))}
                       style={({ pressed }) => [
                         localStyles.dropdownOption,
                         selected && localStyles.dropdownOptionActive,
                         pressed && localStyles.pressed
                       ]}
                     >
-                      <Ionicons color={colorForCategory(option)} name={iconNameForExpenseCategory(option)} size={20} />
+                      <Ionicons color={option.color} name={option.icon} size={20} />
                       <Text style={[localStyles.dropdownOptionText, selected && localStyles.dropdownOptionTextActive]}>
-                        {option}
+                        {option.label}
                       </Text>
                     </Pressable>
                   );
                 })}
               </View>
             ) : null}
+
+            <View style={localStyles.subcategoryBlock}>
+              <Text style={styles.upperLabel}>Subcategory</Text>
+              <ScrollView
+                horizontal
+                keyboardShouldPersistTaps="handled"
+                showsHorizontalScrollIndicator={false}
+                style={localStyles.subcategoryScroller}
+              >
+                <View style={localStyles.subcategoryChipRow}>
+                  {currentSubcategoryPresets.map((option) => {
+                    const selected = option === subcategory.trim();
+                    return (
+                      <Pressable
+                        key={option}
+                        onPress={() => runAfterKeyboardDismiss(() => setSubcategory(selected ? '' : option))}
+                        style={({ pressed }) => [
+                          localStyles.subcategoryChip,
+                          selected && localStyles.subcategoryChipActive,
+                          pressed && localStyles.pressed
+                        ]}
+                      >
+                        <Text style={[localStyles.subcategoryChipText, selected && localStyles.subcategoryChipTextActive]}>
+                          {option}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+              <TextInput
+                accessibilityLabel="Expense subcategory"
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                onChangeText={setSubcategory}
+                placeholder="Optional tag"
+                placeholderTextColor={colors.subtle}
+                returnKeyType="done"
+                style={localStyles.subcategoryInput}
+                submitBehavior="blurAndSubmit"
+                value={subcategory}
+              />
+            </View>
           </BentoCard>
 
           <BentoCard variant="form" style={[localStyles.paidByCard, compactLayout && localStyles.fullWidthField]}>
@@ -1181,6 +1272,25 @@ const localStyles = StyleSheet.create({
   fullWidthField: {
     width: '100%'
   },
+  generatedNotice: {
+    alignItems: 'center',
+    backgroundColor: colors.tint,
+    borderColor: 'rgba(15,118,110,0.14)',
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  generatedNoticeText: {
+    color: colors.primaryDark,
+    flex: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17
+  },
   infoRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1306,6 +1416,53 @@ const localStyles = StyleSheet.create({
     color: colors.muted,
     fontFamily: fontFamilies.regular,
     fontSize: 17
+  },
+  subcategoryBlock: {
+    gap: 8
+  },
+  subcategoryChip: {
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderColor: colors.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 34,
+    paddingHorizontal: 11
+  },
+  subcategoryChipActive: {
+    backgroundColor: colors.tint,
+    borderColor: 'rgba(15,118,110,0.22)'
+  },
+  subcategoryChipRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingRight: 4
+  },
+  subcategoryChipText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  subcategoryChipTextActive: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.bold,
+    fontWeight: '700'
+  },
+  subcategoryInput: {
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    color: colors.ink,
+    fontFamily: fontFamilies.regular,
+    fontSize: 15,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 8
+  },
+  subcategoryScroller: {
+    flexGrow: 0
   },
   pressed: {
     opacity: 0.72

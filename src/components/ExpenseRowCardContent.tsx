@@ -18,6 +18,7 @@ export type ExpenseRowCardContentData = {
   leadingIcon?: keyof typeof Ionicons.glyphMap;
   leadingIconColor?: string;
   subtitle?: string;
+  subtitleColor?: string;
   timeLabel?: string;
   title?: string;
 };
@@ -38,6 +39,7 @@ export function ExpenseRowCardContent({
   leadingIcon,
   leadingIconColor = colors.primaryDark,
   subtitle,
+  subtitleColor,
   timeLabel,
   title,
   style
@@ -55,6 +57,7 @@ export function ExpenseRowCardContent({
         leadingIcon={leadingIcon}
         leadingIconColor={leadingIconColor}
         rowSubtitle={rowSubtitle}
+        subtitleColor={subtitleColor}
         rowTitle={rowTitle}
         style={style}
         timeLabel={timeLabel}
@@ -70,8 +73,9 @@ export function ExpenseRowCardContent({
       dateLabel={dateLabel}
       leadingIcon={leadingIcon}
       leadingIconColor={leadingIconColor}
-      rowSubtitle={rowSubtitle}
-      rowTitle={rowTitle}
+        rowSubtitle={rowSubtitle}
+        subtitleColor={subtitleColor}
+        rowTitle={rowTitle}
       style={style}
       timeLabel={timeLabel}
     />
@@ -82,6 +86,7 @@ type RowContentLayoutProps = ExpenseRowCardContentData & {
   rowSubtitle?: string;
   rowTitle: string;
   style?: StyleProp<ViewStyle>;
+  subtitleColor?: string;
 };
 
 function StandardRowContent({
@@ -92,6 +97,7 @@ function StandardRowContent({
   leadingIconColor = colors.primaryDark,
   rowSubtitle,
   rowTitle,
+  subtitleColor,
   style,
   timeLabel
 }: RowContentLayoutProps) {
@@ -122,7 +128,7 @@ function StandardRowContent({
           ) : null}
         </View>
         {rowSubtitle ? (
-          <Text ellipsizeMode="tail" numberOfLines={1} style={rowCardStyles.subtitle}>
+          <Text ellipsizeMode="tail" numberOfLines={1} style={[rowCardStyles.subtitle, subtitleColor ? { color: subtitleColor } : null]}>
             {rowSubtitle}
           </Text>
         ) : null}
@@ -144,6 +150,7 @@ function CompactRowContent({
   leadingIconColor = colors.primaryDark,
   rowSubtitle,
   rowTitle,
+  subtitleColor,
   style,
   timeLabel
 }: RowContentLayoutProps) {
@@ -164,7 +171,15 @@ function CompactRowContent({
           {rowTitle}
         </Text>
         {rowSubtitle ? (
-          <Text ellipsizeMode="tail" numberOfLines={1} style={[rowCardStyles.subtitle, rowCardStyles.subtitleCompact]}>
+          <Text
+            ellipsizeMode="tail"
+            numberOfLines={1}
+            style={[
+              rowCardStyles.subtitle,
+              rowCardStyles.subtitleCompact,
+              subtitleColor ? { color: subtitleColor } : null
+            ]}
+          >
             {rowSubtitle}
           </Text>
         ) : null}

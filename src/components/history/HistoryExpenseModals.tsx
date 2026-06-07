@@ -3,6 +3,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { IconButton } from '@/src/components/ui';
+import { categoryWithSubcategory } from '@/src/lib/categorySystem';
 import { formatYen } from '@/src/lib/format';
 import type { Expense } from '@/src/types/database';
 
@@ -62,8 +63,11 @@ export function ExpenseDetailModal({
           </View>
 
           <View style={modalStyles.detailGrid}>
-            <DetailLine icon="pricetag-outline" label="Category" value={expense.category} />
+            <DetailLine icon="pricetag-outline" label="Category" value={categoryWithSubcategory(expense)} />
             <DetailLine icon="calendar-outline" label="Date" value={formatHistoryDate(expense.spent_on)} />
+            {expense.recurring_rule_id ? (
+              <DetailLine icon="repeat-outline" label="Source" value="Generated from fixed monthly expense" />
+            ) : null}
             <DetailLine icon="time-outline" label="Recorded" value={formatCreatedAt(expense.created_at)} />
             <DetailLine icon="card-outline" label="Paid by" value={profileDisplayName(expense.paid_by)} />
             <DetailLine icon="person-outline" label="Recorded by" value={profileDisplayName(expense.recorded_by)} />
@@ -164,7 +168,7 @@ function DetailLine({
 }
 
 function expenseTitle(expense: Expense) {
-  return expense.note?.trim() || expense.category;
+  return expense.note?.trim() || categoryWithSubcategory(expense);
 }
 
 const modalStyles = StyleSheet.create({

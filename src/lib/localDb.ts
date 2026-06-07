@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'my-ledger-offline.db';
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 const WEB_DATABASE_OPEN_TIMEOUT_MS = 2500;
 const LOCAL_DB_OPEN_TIMEOUT = Symbol('local-db-open-timeout');
 
@@ -165,7 +165,11 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
           id TEXT PRIMARY KEY NOT NULL,
           ledger_id TEXT NOT NULL,
           amount_yen INTEGER NOT NULL,
-          category TEXT NOT NULL,
+          category TEXT,
+          category_id TEXT,
+          subcategory TEXT,
+          recurring_rule_id TEXT,
+          recurring_month TEXT,
           paid_by TEXT NOT NULL,
           recorded_by TEXT NOT NULL,
           ownership TEXT NOT NULL,
@@ -189,10 +193,35 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
         CREATE TABLE IF NOT EXISTS ledger_categories (
           id TEXT PRIMARY KEY NOT NULL,
           ledger_id TEXT NOT NULL,
-          category_name TEXT NOT NULL,
+          category_id TEXT,
+          category_name TEXT,
           split_ratio_a INTEGER NOT NULL,
           split_ratio_b INTEGER NOT NULL,
           sort_order INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          local_status TEXT NOT NULL DEFAULT 'synced',
+          deleted_locally INTEGER NOT NULL DEFAULT 0,
+          base_updated_at TEXT,
+          last_synced_updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS recurring_expense_rules (
+          id TEXT PRIMARY KEY NOT NULL,
+          ledger_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          category_id TEXT NOT NULL,
+          subcategory TEXT,
+          amount_yen INTEGER NOT NULL,
+          paid_by TEXT NOT NULL,
+          split_ratio_a INTEGER NOT NULL,
+          split_ratio_b INTEGER NOT NULL,
+          generate_day INTEGER NOT NULL,
+          start_month TEXT NOT NULL,
+          end_month TEXT,
+          timezone TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_by TEXT NOT NULL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           local_status TEXT NOT NULL DEFAULT 'synced',
@@ -205,6 +234,8 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
           expense_id TEXT PRIMARY KEY NOT NULL,
           ledger_id TEXT NOT NULL,
           category TEXT NOT NULL,
+          category_id TEXT,
+          subcategory TEXT,
           spent_on TEXT NOT NULL,
           expense_created_at TEXT NOT NULL,
           expense_updated_at TEXT NOT NULL,
@@ -247,10 +278,128 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
         ON expenses(ledger_id, spent_on DESC, created_at DESC);
 
         CREATE INDEX IF NOT EXISTS ledger_categories_sort_idx
-        ON ledger_categories(ledger_id, sort_order, category_name);
+        ON ledger_categories(ledger_id, sort_order, category_id);
+
+        CREATE INDEX IF NOT EXISTS recurring_expense_rules_ledger_idx
+        ON recurring_expense_rules(ledger_id, is_active, category_id, subcategory);
 
         CREATE INDEX IF NOT EXISTS sync_queue_status_idx
         ON sync_queue(status, next_attempt_at, sequence);
+      `);
+    }
+
+    if (currentVersion >= 1 && currentVersion < 2) {
+      await addColumnIfMissing(db, 'expenses', 'category_id', 'TEXT');
+      await addColumnIfMissing(db, 'expenses', 'subcategory', 'TEXT');
+      await addColumnIfMissing(db, 'ledger_categories', 'category_id', 'TEXT');
+      await addColumnIfMissing(db, 'transfer_checklist_snapshot', 'category_id', 'TEXT');
+      await addColumnIfMissing(db, 'transfer_checklist_snapshot', 'subcategory', 'TEXT');
+
+      await db.execAsync(`
+        UPDATE expenses
+        SET category_id = CASE lower(trim(category))
+          WHEN 'rent' THEN 'housing'
+          WHEN '房租' THEN 'housing'
+          WHEN 'food & dining' THEN 'food_dining'
+          WHEN '餐饮' THEN 'food_dining'
+          WHEN 'household' THEN 'household'
+          WHEN '日用品' THEN 'household'
+          WHEN 'transport' THEN 'transport'
+          WHEN '交通' THEN 'transport'
+          WHEN 'utilities' THEN 'utilities'
+          WHEN '水电燃气' THEN 'utilities'
+          WHEN 'communications' THEN 'communications'
+          WHEN '通信' THEN 'communications'
+          WHEN 'healthcare' THEN 'healthcare'
+          WHEN '医疗' THEN 'healthcare'
+          WHEN 'entertainment' THEN 'entertainment'
+          WHEN '娱乐' THEN 'entertainment'
+          WHEN 'shopping' THEN 'shopping'
+          WHEN '购物' THEN 'shopping'
+          WHEN 'travel' THEN 'travel'
+          WHEN '旅行' THEN 'travel'
+          WHEN 'other' THEN 'other'
+          WHEN '其他' THEN 'other'
+          ELSE 'other'
+        END
+        WHERE category_id IS NULL;
+
+        UPDATE expenses
+        SET subcategory = trim(category)
+        WHERE subcategory IS NULL
+          AND category IS NOT NULL
+          AND trim(category) <> ''
+          AND lower(trim(category)) NOT IN (
+            'food & dining', '餐饮', 'household', '日用品', 'transport', '交通',
+            'utilities', '水电燃气', 'communications', '通信', 'healthcare', '医疗',
+            'entertainment', '娱乐', 'shopping', '购物', 'travel', '旅行',
+            'other', '其他'
+          );
+
+        UPDATE ledger_categories
+        SET category_id = CASE lower(trim(category_name))
+          WHEN 'rent' THEN 'housing'
+          WHEN '房租' THEN 'housing'
+          WHEN 'food & dining' THEN 'food_dining'
+          WHEN '餐饮' THEN 'food_dining'
+          WHEN 'household' THEN 'household'
+          WHEN '日用品' THEN 'household'
+          WHEN 'transport' THEN 'transport'
+          WHEN '交通' THEN 'transport'
+          WHEN 'utilities' THEN 'utilities'
+          WHEN '水电燃气' THEN 'utilities'
+          WHEN 'communications' THEN 'communications'
+          WHEN '通信' THEN 'communications'
+          WHEN 'healthcare' THEN 'healthcare'
+          WHEN '医疗' THEN 'healthcare'
+          WHEN 'entertainment' THEN 'entertainment'
+          WHEN '娱乐' THEN 'entertainment'
+          WHEN 'shopping' THEN 'shopping'
+          WHEN '购物' THEN 'shopping'
+          WHEN 'travel' THEN 'travel'
+          WHEN '旅行' THEN 'travel'
+          WHEN 'other' THEN 'other'
+          WHEN '其他' THEN 'other'
+          ELSE 'other'
+        END
+        WHERE category_id IS NULL;
+
+        CREATE INDEX IF NOT EXISTS ledger_categories_sort_idx_v2
+        ON ledger_categories(ledger_id, sort_order, category_id);
+      `);
+    }
+
+    if (currentVersion > 0 && currentVersion < 3) {
+      await addColumnIfMissing(db, 'expenses', 'recurring_rule_id', 'TEXT');
+      await addColumnIfMissing(db, 'expenses', 'recurring_month', 'TEXT');
+
+      await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS recurring_expense_rules (
+          id TEXT PRIMARY KEY NOT NULL,
+          ledger_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          category_id TEXT NOT NULL,
+          subcategory TEXT,
+          amount_yen INTEGER NOT NULL,
+          paid_by TEXT NOT NULL,
+          split_ratio_a INTEGER NOT NULL,
+          split_ratio_b INTEGER NOT NULL,
+          generate_day INTEGER NOT NULL,
+          start_month TEXT NOT NULL,
+          end_month TEXT,
+          timezone TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_by TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          local_status TEXT NOT NULL DEFAULT 'synced',
+          deleted_locally INTEGER NOT NULL DEFAULT 0,
+          base_updated_at TEXT,
+          last_synced_updated_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS recurring_expense_rules_ledger_idx
+        ON recurring_expense_rules(ledger_id, is_active, category_id, subcategory);
       `);
     }
 
@@ -262,6 +411,20 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
   });
 }
 
+async function addColumnIfMissing(
+  db: SQLite.SQLiteDatabase,
+  tableName: string,
+  columnName: string,
+  columnDefinition: string
+) {
+  const columns = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
+  if (columns.some((column) => column.name === columnName)) {
+    return;
+  }
+
+  await db.execAsync(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
+}
+
 export async function clearLocalBusinessData() {
   try {
     await withLocalTransaction(async () => {
@@ -270,6 +433,7 @@ export async function clearLocalBusinessData() {
         DELETE FROM sync_dedupe;
         DELETE FROM sync_queue;
         DELETE FROM transfer_checklist_snapshot;
+        DELETE FROM recurring_expense_rules;
         DELETE FROM ledger_categories;
         DELETE FROM expense_splits;
         DELETE FROM expenses;

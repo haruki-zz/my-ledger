@@ -1,37 +1,44 @@
-import { EXPENSE_CATEGORIES } from './categories';
 import { CHART_PALETTE } from './chartPalette';
+import { categoryColor, isPrimaryCategoryId, mapLegacyCategoryToId, PRIMARY_CATEGORIES } from './categorySystem';
 
-export const DEFAULT_USER_COLOR = '#0F766E';
+export const DEFAULT_USER_COLOR = '#F4661B';
 export const OTHER_CATEGORY_COLOR = '#98A2B3';
 
 const USER_FALLBACK_PALETTE = [
-  '#F97316',
-  '#6366F1',
-  '#14B8A6',
-  '#F59E0B',
-  '#8B5CF6',
-  '#22C55E',
-  '#2563EB',
-  '#D946EF',
-  '#06B6D4',
-  '#84CC16',
-  '#E11D48',
-  '#64748B'
+  '#00857C',
+  '#4338CA',
+  '#0E7490',
+  '#A16207',
+  '#7F1D1D',
+  '#581C87',
+  '#14532D',
+  '#9D174D',
+  '#075985',
+  '#365314',
+  '#BE123C',
+  '#334155'
 ] as const;
 
 const defaultCategoryColorByKey = new Map(
-  EXPENSE_CATEGORIES.map((category, index) => [
-    normalizeEntityKey(category),
-    category === 'Other'
-      ? OTHER_CATEGORY_COLOR
-      : CHART_PALETTE[index % CHART_PALETTE.length]
+  PRIMARY_CATEGORIES.map((category) => [
+    normalizeEntityKey(category.label),
+    category.color
   ])
 );
 
 export function colorForCategory(category: string) {
+  if (isPrimaryCategoryId(category)) {
+    return categoryColor(category);
+  }
+
   const normalizedCategory = normalizeEntityKey(category);
   if (!normalizedCategory) {
     return OTHER_CATEGORY_COLOR;
+  }
+
+  const legacyCategoryId = mapLegacyCategoryToId(category);
+  if (legacyCategoryId !== 'other' || normalizedCategory === 'other' || normalizedCategory === '其他') {
+    return categoryColor(legacyCategoryId);
   }
 
   const defaultColor = defaultCategoryColorByKey.get(normalizedCategory);

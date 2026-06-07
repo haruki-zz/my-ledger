@@ -18,7 +18,6 @@ import {
   TRANSFER_OVERLAY_MAX_WIDTH,
   TransferItemCard,
   completedAtForUser,
-  counterpartyForUser,
   isParticipant
 } from '@/src/components/TransferChecklistShared';
 import { IconButton } from '@/src/components/ui';
@@ -30,6 +29,7 @@ type TransferItemsOverlayProps = {
   onClose: () => void;
   onToggleItem: (item: TransferChecklistItemRow) => void;
   saving: boolean;
+  userColor: (userId: string | null) => string;
   userName: (userId: string | null) => string;
   visible: boolean;
 };
@@ -51,6 +51,7 @@ export function TransferItemsOverlay({
   onClose,
   onToggleItem,
   saving,
+  userColor,
   userName,
   visible
 }: TransferItemsOverlayProps) {
@@ -186,21 +187,18 @@ export function TransferItemsOverlay({
             >
               {items.map((item) => {
                 const currentCompleted = Boolean(completedAtForUser(item, currentUserId));
-                const counterpartyUserId = counterpartyForUser(item, currentUserId);
-                const counterpartyCompleted = Boolean(completedAtForUser(item, counterpartyUserId));
                 const canToggle = Boolean(currentUserId && isParticipant(item, currentUserId));
 
                 return (
                   <TransferItemCard
                     canToggle={canToggle}
-                    counterpartyCompleted={counterpartyCompleted}
-                    counterpartyUserId={counterpartyUserId}
                     currentCompleted={currentCompleted}
                     item={item}
                     key={item.expense_id}
                     onToggle={() => onToggleItem(item)}
                     saving={saving}
                     showToggle
+                    userColor={userColor}
                     userName={userName}
                   />
                 );

@@ -165,6 +165,7 @@ export function TransferChecklistCard({
         onClose={() => setOverlayVisible(false)}
         onToggleItem={toggleItem}
         saving={saving}
+        userColor={userColor}
         userName={userName}
         visible={overlayVisible}
       />

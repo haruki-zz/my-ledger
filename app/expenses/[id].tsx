@@ -11,9 +11,10 @@ import {
   getErrorMessage,
   getLedgerCategories,
   getLedgerMembers,
-  getProfiles
+  getProfiles,
+  getRecurringExpenseRules
 } from '@/src/lib/ledger';
-import type { Expense, Ledger, LedgerCategory, LedgerMemberProfile, Profile } from '@/src/types/database';
+import type { Expense, Ledger, LedgerCategory, LedgerMemberProfile, Profile, RecurringExpenseRule } from '@/src/types/database';
 
 export default function EditExpenseScreen() {
   const params = useLocalSearchParams<{ id: string }>();
@@ -22,6 +23,7 @@ export default function EditExpenseScreen() {
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [categories, setCategories] = useState<LedgerCategory[] | undefined>(undefined);
+  const [recurringRules, setRecurringRules] = useState<RecurringExpenseRule[]>([]);
   const [expense, setExpense] = useState<Expense | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
@@ -65,6 +67,7 @@ export default function EditExpenseScreen() {
       } catch (categoriesError) {
         console.warn('Falling back to default categories:', getErrorMessage(categoriesError));
       }
+      const nextRecurringRules = await getRecurringExpenseRules(currentLedger.id);
       const profileIds = [
         ...nextMembers.map((member) => member.user_id),
         currentExpense.paid_by,
@@ -77,6 +80,7 @@ export default function EditExpenseScreen() {
       setLedger(currentLedger);
       setMembers(nextMembers);
       setCategories(nextCategories);
+      setRecurringRules(nextRecurringRules);
       setExpense(currentExpense);
       setProfiles(nextProfiles);
     } catch (loadError) {
@@ -115,6 +119,7 @@ export default function EditExpenseScreen() {
       ledger={ledger}
       members={members}
       profilesById={profiles}
+      recurringRules={recurringRules}
     />
   );
 }

@@ -222,7 +222,7 @@ export default function DashboardScreen() {
             <BentoCard variant="hero" style={localStyles.heroCard}>
               <Animated.View style={[localStyles.heroContent, drillAnimatedStyle]}>
                 <View style={localStyles.heroTopRow}>
-                  <Text style={localStyles.monthlyTotalLabel}>Monthly Total</Text>
+                  <Text style={localStyles.monthlyTotalLabel}>Total</Text>
                   <PillTabs
                     accessibilityLabel="Dashboard period"
                     onChange={selectPeriod}
@@ -238,17 +238,20 @@ export default function DashboardScreen() {
                 </Text>
 
                 <View style={localStyles.comparisonRow}>
+                  <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.comparisonAmountText, { color: comparisonColor(stats.comparison.direction) }]}>
+                    {formatComparisonAmount(Math.abs(stats.comparison.deltaYen))}
+                  </Text>
                   <Ionicons
                     color={comparisonColor(stats.comparison.direction)}
                     name={comparisonIcon(stats.comparison.direction)}
                     size={18}
                   />
                   <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.comparisonText, { color: comparisonColor(stats.comparison.direction) }]}>
-                    {comparisonLabel(stats.comparison)}
+                    {stats.comparison.label}
                   </Text>
                   <View style={localStyles.percentBadge}>
                     <Text style={localStyles.percentBadgeText}>
-                      {stats.comparison.percentage === null ? '--' : `${Math.abs(stats.comparison.percentage).toFixed(1)}%`}
+                      {formatComparisonPercentage(stats.comparison.percentage)}
                     </Text>
                   </View>
                 </View>
@@ -384,17 +387,27 @@ function formatEnglishMonthLabel(monthKey: string) {
   return monthLabelFormatter.format(new Date(year, month - 1, 1));
 }
 
-function comparisonLabel(comparison: {
-  deltaYen: number;
-  direction: 'under' | 'over' | 'same';
-  label: string;
-}) {
-  const amount = formatYen(Math.abs(comparison.deltaYen));
-  if (comparison.direction === 'same') {
-    return `${amount} same ${comparison.label}`;
+function formatComparisonAmount(amountYen: number) {
+  if (amountYen <= 100) {
+    return formatYen(amountYen);
   }
 
-  return `${amount} ${comparison.direction} ${comparison.label}`;
+  const value = amountYen / 1000;
+  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+  return `¥${rounded}k`;
+}
+
+function formatComparisonPercentage(percentage: number | null) {
+  if (percentage === null) {
+    return '--';
+  }
+
+  if (percentage === 0) {
+    return '0.0%';
+  }
+
+  const sign = percentage > 0 ? '+' : '-';
+  return `${sign}${Math.abs(percentage).toFixed(1)}%`;
 }
 
 function comparisonColor(direction: 'under' | 'over' | 'same') {
@@ -450,6 +463,13 @@ const localStyles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 20,
     minWidth: 0
+  },
+  comparisonAmountText: {
+    fontFamily: fontFamilies.bold,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
+    flexShrink: 0
   },
   dashboardContent: {
     gap: 18

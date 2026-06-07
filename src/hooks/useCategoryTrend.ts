@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getExpensesByMonth } from '@/src/lib/ledger';
+import { resolveCategory } from '@/src/lib/categorySystem';
 import {
   addMonths,
   buildCategoryMonthlyTrendForCategories,
@@ -35,7 +36,11 @@ export function useCategoryTrend(input: UseCategoryTrendInput) {
 
     const ledgerId = input.ledgerId;
     const category = input.category;
-    const categoryNames = input.categoryNames && input.categoryNames.length > 0 ? input.categoryNames : category ? [category] : [];
+    const categoryNames = input.categoryNames && input.categoryNames.length > 0
+      ? input.categoryNames
+      : category
+        ? [resolveCategory({ category }).categoryId]
+        : [];
 
     if (!ledgerId || categoryNames.length === 0) {
       setExpenses([]);
@@ -88,7 +93,7 @@ export function useCategoryTrend(input: UseCategoryTrendInput) {
     const categoryNames = input.categoryNames && input.categoryNames.length > 0
       ? input.categoryNames
       : input.category
-        ? [input.category]
+        ? [resolveCategory({ category: input.category }).categoryId]
         : [];
     if (categoryNames.length === 0) {
       return [];

@@ -2,6 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { tintFromAccent } from '@/src/lib/color';
+import { categoryWithSubcategory } from '@/src/lib/categorySystem';
+import { DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { formatYen } from '@/src/lib/format';
 import type { TransferChecklistItemRow } from '@/src/types/database';
 
@@ -12,13 +15,12 @@ const noop = () => undefined;
 export type TransferItemCardProps = {
   canToggle: boolean;
   children?: React.ReactNode;
-  counterpartyCompleted: boolean;
-  counterpartyUserId: string | null;
   currentCompleted: boolean;
   item: TransferChecklistItemRow;
   onToggle?: () => void;
   saving: boolean;
   showToggle: boolean;
+  userColor?: (userId: string | null) => string;
   userName: (userId: string | null) => string;
 };
 
@@ -30,13 +32,12 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
 export function TransferItemCard({
   canToggle,
   children,
-  counterpartyCompleted,
-  counterpartyUserId,
   currentCompleted,
   item,
   onToggle,
   saving,
   showToggle,
+  userColor = defaultUserColor,
   userName
 }: TransferItemCardProps) {
   return (
@@ -52,22 +53,30 @@ export function TransferItemCard({
 
       <View style={sharedStyles.itemText}>
         <View style={sharedStyles.itemTitleRow}>
-          <Text ellipsizeMode="tail" numberOfLines={1} style={sharedStyles.itemTitle}>
-            {userName(item.payer_user_id)} to {userName(item.payee_user_id)}
-          </Text>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={sharedStyles.itemAmount}>
+          <View style={sharedStyles.transferUsersRow}>
+            <TransferUserPill color={userColor(item.payer_user_id)} label={userName(item.payer_user_id)} />
+            <Text style={sharedStyles.transferDirectionText}>to</Text>
+            <TransferUserPill color={userColor(item.payee_user_id)} label={userName(item.payee_user_id)} />
+          </View>
+          <Text numberOfLines={1} style={sharedStyles.itemAmount}>
             {formatYen(item.amount_yen)}
           </Text>
         </View>
 
         <Text ellipsizeMode="tail" numberOfLines={1} style={styles.muted}>
-          {item.category} / {formatTransferDate(item.spent_on)}
-        </Text>
-
-        <Text ellipsizeMode="tail" numberOfLines={1} style={sharedStyles.statusText}>
-          {statusLabel(currentCompleted, counterpartyCompleted, counterpartyUserId, userName)}
+          {categoryWithSubcategory(item)} / {formatTransferDate(item.spent_on)}
         </Text>
       </View>
+    </View>
+  );
+}
+
+function TransferUserPill({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={[sharedStyles.transferUserPill, { backgroundColor: tintFromAccent(color) }]}>
+      <Text ellipsizeMode="tail" numberOfLines={1} style={[sharedStyles.transferUserPillText, { color }]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -134,54 +143,29 @@ export function isParticipant(item: TransferChecklistItemRow, userId: string | n
   return Boolean(userId && (item.payer_user_id === userId || item.payee_user_id === userId));
 }
 
-export function statusLabel(
-  currentCompleted: boolean,
-  counterpartyCompleted: boolean,
-  counterpartyUserId: string | null,
-  userName: (userId: string | null) => string
-) {
-  if (currentCompleted && counterpartyCompleted) {
-    return 'Settled';
-  }
-
-  if (currentCompleted) {
-    return `Waiting for ${userName(counterpartyUserId)}`;
-  }
-
-  if (counterpartyCompleted) {
-    return `${userName(counterpartyUserId)} confirmed`;
-  }
-
-  return 'Needs both confirmations';
-}
-
 function formatTransferDate(dateString: string) {
   const [year, month, day] = dateString.split('-').map(Number);
   return dateFormatter.format(new Date(year, month - 1, day));
+}
+
+function defaultUserColor() {
+  return DEFAULT_USER_COLOR;
 }
 
 export const sharedStyles = StyleSheet.create({
   itemAmount: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
-    fontSize: 18,
+    flexShrink: 0,
+    fontSize: 20,
     fontWeight: '700',
-    lineHeight: 24,
-    maxWidth: 128,
+    lineHeight: 26,
+    minWidth: 104,
     textAlign: 'right'
   },
   itemText: {
     flex: 1,
     gap: 3,
-    minWidth: 0
-  },
-  itemTitle: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 21,
     minWidth: 0
   },
   itemTitleRow: {
@@ -192,13 +176,6 @@ export const sharedStyles = StyleSheet.create({
   },
   previewTransferCard: {
     paddingTop: 36
-  },
-  statusText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 17
   },
   toggle: {
     alignItems: 'center',
@@ -233,5 +210,34 @@ export const sharedStyles = StyleSheet.create({
     padding: 14,
     paddingTop: 18,
     ...theme.shadow
+  },
+  transferDirectionText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18
+  },
+  transferUserPill: {
+    borderRadius: 999,
+    maxWidth: 112,
+    minHeight: 22,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 3
+  },
+  transferUserPillText: {
+    fontFamily: fontFamilies.bold,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0,
+    lineHeight: 15
+  },
+  transferUsersRow: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    minWidth: 0
   }
 });

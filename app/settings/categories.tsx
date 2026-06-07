@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 
@@ -10,13 +11,13 @@ import { colors, styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
+import { PRIMARY_CATEGORIES, resolveCategory } from '@/src/lib/categorySystem';
 import {
-  deleteLedgerCategory,
   getErrorMessage,
   getLedgerCategories,
   getLedgerMembers,
   seedDefaultLedgerCategories,
-  saveLedgerCategory
+  saveLedgerCategorySetting
 } from '@/src/lib/ledger';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import type { LedgerCategory, LedgerMemberProfile } from '@/src/types/database';
@@ -35,8 +36,7 @@ export default function CategorySettingsScreen() {
   } = useRequiredLedger();
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [categories, setCategories] = useState<LedgerCategory[]>([]);
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingRatioA, setEditingRatioA] = useState('50');
   const [editingRatioB, setEditingRatioB] = useState('50');
   const [loading, setLoading] = useState(true);
@@ -127,14 +127,26 @@ export default function CategorySettingsScreen() {
     return [firstName, secondName] as const;
   }, [members]);
 
-  function beginEditCategory(category: LedgerCategory) {
-    setEditingCategoryName(category.category_name);
-    setEditingRatioA(String(category.split_ratio_a));
-    setEditingRatioB(String(category.split_ratio_b));
+  const categorySettingById = useMemo(() => new Map(
+    categories.map((category) => [
+      category.category_id || resolveCategory({ category: category.category_name }).categoryId,
+      category
+    ])
+  ), [categories]);
+
+  function beginEditCategory(categoryId: string, category: LedgerCategory | undefined) {
+    const categoryDefinition = PRIMARY_CATEGORIES.find((item) => item.id === categoryId);
+    setEditingCategoryId(categoryId);
+    setEditingRatioA(String(category?.split_ratio_a ?? categoryDefinition?.splitRatio[0] ?? 50));
+    setEditingRatioB(String(category?.split_ratio_b ?? categoryDefinition?.splitRatio[1] ?? 50));
   }
 
-  async function saveCategory(category: LedgerCategory) {
+  async function saveCategory(categoryId: string, category: LedgerCategory | undefined) {
     if (!ledger) {
+      return;
+    }
+    const categoryDefinition = PRIMARY_CATEGORIES.find((item) => item.id === categoryId);
+    if (!categoryDefinition) {
       return;
     }
 
@@ -147,77 +159,21 @@ export default function CategorySettingsScreen() {
 
     setSavingCategory(true);
     try {
-      await saveLedgerCategory({
+      await saveLedgerCategorySetting({
         ledgerId: ledger.id,
-        categoryName: category.category_name,
+        categoryId,
+        categoryName: categoryDefinition.label,
         splitRatioA: ratioA,
         splitRatioB: ratioB,
-        sortOrder: category.sort_order
+        sortOrder: category?.sort_order ?? categoryDefinition.sortOrder
       });
-      setEditingCategoryName(null);
+      setEditingCategoryId(null);
       await refresh();
     } catch (saveError) {
       Alert.alert('Save Failed', saveError instanceof Error ? saveError.message : 'Please try again later');
     } finally {
       setSavingCategory(false);
     }
-  }
-
-  async function addCategory() {
-    if (!ledger) {
-      return;
-    }
-
-    const categoryName = newCategoryName.trim();
-    if (!categoryName) {
-      Alert.alert('Category name cannot be empty');
-      return;
-    }
-
-    setSavingCategory(true);
-    try {
-      const nextSortOrder = Math.max(0, ...categories.map((category) => category.sort_order)) + 10;
-      await saveLedgerCategory({
-        ledgerId: ledger.id,
-        categoryName,
-        splitRatioA: 50,
-        splitRatioB: 50,
-        sortOrder: nextSortOrder
-      });
-      setNewCategoryName('');
-      await refresh();
-    } catch (saveError) {
-      Alert.alert('Add Failed', saveError instanceof Error ? saveError.message : 'Please try again later');
-    } finally {
-      setSavingCategory(false);
-    }
-  }
-
-  function confirmDeleteCategory(category: LedgerCategory) {
-    if (!ledger) {
-      return;
-    }
-
-    if (categories.length <= 1) {
-      Alert.alert('Cannot Delete', 'Keep at least one expense category.');
-      return;
-    }
-
-    Alert.alert('Delete Category', `After deleting "${category.category_name}", historical expenses will keep this category name.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteLedgerCategory(ledger.id, category.category_name);
-            await refresh();
-          } catch (deleteError) {
-            Alert.alert('Delete Failed', deleteError instanceof Error ? deleteError.message : 'Please try again later');
-          }
-        }
-      }
-    ]);
   }
 
   if ((ledgerLoading || loading) && !ledger) {
@@ -235,21 +191,24 @@ export default function CategorySettingsScreen() {
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>Categories</Text>
-        <Text style={styles.muted}>Shared expense categories and default split ratios</Text>
+        <Text style={styles.title}>Category Rules</Text>
+        <Text style={styles.muted}>Categories are built in; this ledger can only customize split ratios.</Text>
       </View>
 
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
 
       <BentoCard variant="list">
-        <Text style={styles.h2}>Current Categories</Text>
+        <Text style={styles.h2}>Default Split Ratios</Text>
         <View style={{ gap: 12 }}>
-          {categories.map((category) => {
-            const isEditing = editingCategoryName === category.category_name;
+          {PRIMARY_CATEGORIES.map((categoryDefinition) => {
+            const category = categorySettingById.get(categoryDefinition.id);
+            const splitRatioA = category?.split_ratio_a ?? categoryDefinition.splitRatio[0];
+            const splitRatioB = category?.split_ratio_b ?? categoryDefinition.splitRatio[1];
+            const isEditing = editingCategoryId === categoryDefinition.id;
 
             return (
               <View
-                key={category.id}
+                key={categoryDefinition.id}
                 style={{
                   borderColor: colors.line,
                   backgroundColor: 'rgba(255,255,255,0.58)',
@@ -260,14 +219,26 @@ export default function CategorySettingsScreen() {
                 }}
               >
                 <View style={styles.between}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.h2}>{category.category_name}</Text>
-                    <Text style={styles.muted}>
-                      {memberNames[0]} {category.split_ratio_a}% · {memberNames[1]} {category.split_ratio_b}%
-                    </Text>
+                  <View style={{ alignItems: 'center', flexDirection: 'row', flex: 1, gap: 10, minWidth: 0 }}>
+                    <View style={{
+                      alignItems: 'center',
+                      backgroundColor: 'rgba(15,118,110,0.10)',
+                      borderRadius: 14,
+                      height: 40,
+                      justifyContent: 'center',
+                      width: 40
+                    }}>
+                      <Ionicons color={categoryDefinition.color} name={categoryDefinition.icon} size={22} />
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.h2}>{categoryDefinition.label}</Text>
+                      <Text style={styles.muted}>
+                        {memberNames[0]} {splitRatioA}% · {memberNames[1]} {splitRatioB}%
+                      </Text>
+                    </View>
                   </View>
                   <Pressable
-                    onPress={() => runAfterKeyboardDismiss(() => beginEditCategory(category))}
+                    onPress={() => runAfterKeyboardDismiss(() => beginEditCategory(categoryDefinition.id, category))}
                     style={[styles.button, { minHeight: 40 }]}
                   >
                     <Text style={styles.buttonText}>Edit</Text>
@@ -320,15 +291,15 @@ export default function CategorySettingsScreen() {
                     <AndroidKeyboardDoneButton />
 
                     <View style={styles.row}>
-                      <Pressable
+                        <Pressable
                         disabled={savingCategory}
-                        onPress={() => runAfterKeyboardDismiss(() => saveCategory(category))}
+                        onPress={() => runAfterKeyboardDismiss(() => saveCategory(categoryDefinition.id, category))}
                         style={[styles.button, { flex: 1 }]}
                       >
                         <Text style={styles.buttonText}>{savingCategory ? 'Saving...' : 'Save'}</Text>
                       </Pressable>
                       <Pressable
-                        onPress={() => runAfterKeyboardDismiss(() => setEditingCategoryName(null))}
+                        onPress={() => runAfterKeyboardDismiss(() => setEditingCategoryId(null))}
                         style={[styles.button, styles.secondaryButton, { flex: 1 }]}
                       >
                         <Text style={[styles.buttonText, styles.secondaryButtonText]}>Cancel</Text>
@@ -337,33 +308,11 @@ export default function CategorySettingsScreen() {
                   </View>
                 ) : null}
 
-                <Pressable
-                  onPress={() => runAfterKeyboardDismiss(() => confirmDeleteCategory(category))}
-                  style={[styles.button, styles.dangerButton]}
-                >
-                  <Text style={styles.buttonText}>Delete</Text>
-                </Pressable>
               </View>
             );
           })}
 
-          {categories.length === 0 ? <Text style={styles.muted}>No categories yet.</Text> : null}
-        </View>
-
-        <View style={{ gap: 10 }}>
-          <Text style={styles.label}>New Category</Text>
-          <TextInput
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            onChangeText={setNewCategoryName}
-            placeholder="Example: Coffee"
-            returnKeyType="done"
-            style={styles.input}
-            submitBehavior="blurAndSubmit"
-            value={newCategoryName}
-          />
-          <Pressable disabled={savingCategory} onPress={() => runAfterKeyboardDismiss(addCategory)} style={styles.button}>
-            <Text style={styles.buttonText}>{savingCategory ? 'Adding...' : 'Add'}</Text>
-          </Pressable>
+          {categories.length === 0 ? <Text style={styles.muted}>Using built-in default ratios until this ledger is customized.</Text> : null}
         </View>
       </BentoCard>
     </KeyboardAwareScrollView>

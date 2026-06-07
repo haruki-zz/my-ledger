@@ -7,6 +7,7 @@ import {
   type DashboardPeriod
 } from './stats';
 import { EXPENSE_CATEGORIES, iconNameForExpenseCategory } from './categories';
+import { PRIMARY_CATEGORIES, mapLegacyCategoryToId, resolveCategory } from './categorySystem';
 import { buildUserColorMap, colorForCategory, DEFAULT_USER_COLOR } from './entityColors';
 import type { Expense } from '@/src/types/database';
 
@@ -33,6 +34,49 @@ describe('expense category icons', () => {
   });
 });
 
+describe('primary category system', () => {
+  it('defines unique, sorted primary category ids with display metadata', () => {
+    const ids = PRIMARY_CATEGORIES.map((category) => category.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(PRIMARY_CATEGORIES.map((category) => category.sortOrder)).toEqual(
+      PRIMARY_CATEGORIES.map((category) => category.sortOrder).slice().sort((a, b) => a - b)
+    );
+    for (const category of PRIMARY_CATEGORIES) {
+      expect(category.label).toBeTruthy();
+      expect(category.icon).toBeTruthy();
+      expect(category.color).toMatch(/^#[0-9A-F]{6}$/i);
+    }
+  });
+
+  it('maps legacy English and Chinese categories to stable primary ids', () => {
+    expect(mapLegacyCategoryToId('Rent')).toBe('housing');
+    expect(mapLegacyCategoryToId('房租')).toBe('housing');
+    expect(mapLegacyCategoryToId('Food & Dining')).toBe('food_dining');
+    expect(mapLegacyCategoryToId('餐饮')).toBe('food_dining');
+    expect(mapLegacyCategoryToId('Shopping')).toBe('shopping');
+    expect(mapLegacyCategoryToId('购物')).toBe('shopping');
+  });
+
+  it('preserves renamed and unknown legacy categories as subcategory text', () => {
+    expect(resolveCategory({ category: 'Rent' })).toMatchObject({
+      categoryId: 'housing',
+      subcategory: 'Rent'
+    });
+    expect(resolveCategory({ category: 'Pet Supplies' })).toMatchObject({
+      categoryId: 'other',
+      subcategory: 'Pet Supplies'
+    });
+  });
+
+  it('places beauty, hobby, and sports as primary category subcategory presets', () => {
+    const entertainment = PRIMARY_CATEGORIES.find((category) => category.id === 'entertainment');
+    const shopping = PRIMARY_CATEGORIES.find((category) => category.id === 'shopping');
+
+    expect(entertainment?.subcategories).toEqual(expect.arrayContaining(['Hobby', 'Sports']));
+    expect(shopping?.subcategories).toContain('Beauty & Salon');
+  });
+});
+
 describe('entity colors', () => {
   it('uses the same category color in dashboard stats and shared category helpers', () => {
     const stats = buildStats('month', [
@@ -47,9 +91,24 @@ describe('entity colors', () => {
   it('assigns stable colors for current user and other ledger members', () => {
     const colorsById = buildUserColorMap([OTHER_USER_ID, CURRENT_USER_ID, 'user-c'], CURRENT_USER_ID);
 
-    expect(colorsById.get(CURRENT_USER_ID)).toBe(DEFAULT_USER_COLOR);
-    expect(colorsById.get(OTHER_USER_ID)).toBe(colorsById.get(OTHER_USER_ID));
+    expect(DEFAULT_USER_COLOR).toBe('#F4661B');
+    expect(colorsById.get(CURRENT_USER_ID)).toBe('#F4661B');
+    expect(colorsById.get(OTHER_USER_ID)).toBe('#00857C');
     expect(colorsById.get(OTHER_USER_ID)).not.toBe(colorsById.get('user-c'));
+  });
+
+  it('keeps user colors separate from fixed category colors', () => {
+    const categoryColors = new Set<string>(PRIMARY_CATEGORIES.map((category) => category.color));
+    const colorsById = buildUserColorMap(
+      [CURRENT_USER_ID, ...Array.from({ length: 12 }, (_, index) => `user-${index}`)],
+      CURRENT_USER_ID
+    );
+
+    expect(categoryColors.has('#F4661B')).toBe(false);
+    expect(categoryColors.has('#00857C')).toBe(false);
+    for (const userColor of colorsById.values()) {
+      expect(categoryColors.has(userColor)).toBe(false);
+    }
   });
 });
 
@@ -71,7 +130,7 @@ describe('resolveDashboardDateRange', () => {
       endDateString: '2026-06-03',
       comparisonStartDateString: '2026-05-25',
       comparisonEndDateString: '2026-05-27',
-      comparisonLabel: 'vs last Mon-Wed'
+      comparisonLabel: 'vs last week'
     });
   });
 
@@ -81,7 +140,7 @@ describe('resolveDashboardDateRange', () => {
       endDateString: '2026-06-01',
       comparisonStartDateString: '2026-05-25',
       comparisonEndDateString: '2026-05-25',
-      comparisonLabel: 'vs last Mon'
+      comparisonLabel: 'vs last week'
     });
   });
 
@@ -175,7 +234,7 @@ describe('buildDashboardPeriodStats', () => {
     expect(stats.categories[4]).toMatchObject({
       amountYen: 300,
       percentage: expect.closeTo(14.285, 2),
-      sourceCategories: ['Shopping', 'Travel']
+      sourceCategories: ['shopping', 'travel']
     });
   });
 
@@ -221,8 +280,22 @@ describe('buildDashboardPeriodStats', () => {
     ]);
     expect(stats.categories[4]).toMatchObject({
       amountYen: 550,
-      sourceCategories: ['Shopping', 'Travel', 'Other']
+      sourceCategories: ['shopping', 'travel', 'other']
     });
+  });
+
+  it('keeps a real Other category at the bottom when it is not aggregated', () => {
+    const stats = buildStats('month', [
+      expense({ amountYen: 1000, category: 'Other', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 200, category: 'Transport', spentOn: '2026-06-01' })
+    ]);
+
+    expect(stats.categories.map((category) => category.category)).toEqual([
+      'Food & Dining',
+      'Transport',
+      'Other'
+    ]);
   });
 });
 
@@ -254,6 +327,10 @@ function expense(input: {
     ledger_id: 'ledger-1',
     amount_yen: input.amountYen,
     category: input.category,
+    category_id: mapLegacyCategoryToId(input.category),
+    subcategory: null,
+    recurring_rule_id: null,
+    recurring_month: null,
     paid_by: paidBy,
     recorded_by: CURRENT_USER_ID,
     ownership,

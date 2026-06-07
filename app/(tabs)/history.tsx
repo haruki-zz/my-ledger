@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  PanResponder,
   Pressable,
   RefreshControl,
   SectionList,
@@ -13,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { BentoCard, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
+import { BentoCard, IconButton, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
 import {
   CategoryList,
   FilterControlButton,
@@ -27,8 +28,8 @@ import {
 } from '@/src/components/history/HistoryExpenseModals';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
-import { iconNameForExpenseCategory } from '@/src/lib/categories';
-import { buildUserColorMap, colorForCategory } from '@/src/lib/entityColors';
+import { categoryColor, categoryIconName, categoryWithSubcategory, resolveCategory } from '@/src/lib/categorySystem';
+import { buildUserColorMap } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
@@ -39,8 +40,10 @@ import {
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
   amountForUser,
+  addMonths,
   compareMonthKeys,
   currentMonthKey,
+  expenseCategoryId,
   formatMonthLabel,
   monthKeyFromDateString
 } from '@/src/lib/stats';
@@ -69,6 +72,12 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   hour12: false,
   minute: '2-digit'
 });
+
+const SWIPE_DISTANCE = 36;
+const SWIPE_DIRECTION_RATIO = 2.5;
+const SWIPE_VELOCITY = 0.35;
+const SWIPE_VELOCITY_RATIO = 1.5;
+
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -204,28 +213,24 @@ export default function HistoryScreen() {
   ), [profileDisplayName, sortedUserIds]);
 
   const categoryOptions = useMemo<HistoryFilterOption[]>(() => (
-    [...new Set(expenses.map((expense) => expense.category).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b))
-      .map((category) => ({
-        label: category,
-        value: category
+    [...new Set(expenses.map((expense) => expenseCategoryId(expense)).filter(Boolean))]
+      .sort((a, b) => resolveCategory({ categoryId: a }).label.localeCompare(resolveCategory({ categoryId: b }).label))
+      .map((categoryId) => ({
+        label: resolveCategory({ categoryId }).label,
+        value: categoryId
       }))
   ), [expenses]);
 
-  const monthOptions = useMemo<HistoryFilterOption[]>(() => {
-    const monthKeys = new Set<string>([currentMonthKey()]);
-    for (const expense of expenses) {
-      monthKeys.add(monthKeyFromDateString(expense.spent_on));
+  const minimumMonthKey = useMemo(() => {
+    const expenseMonthKeys = expenses.map((expense) => monthKeyFromDateString(expense.spent_on));
+    if (expenseMonthKeys.length === 0) {
+      return currentMonthKey();
     }
 
-    return [...monthKeys]
-      .sort(compareMonthKeys)
-      .reverse()
-      .map((monthKey) => ({
-        label: formatMonthLabel(monthKey),
-        value: monthKey
-      }));
+    return expenseMonthKeys.sort(compareMonthKeys)[0];
   }, [expenses]);
+  const atCurrentMonth = compareMonthKeys(selectedMonth, currentMonthKey()) >= 0;
+  const atMinimumMonth = minimumMonthKey ? compareMonthKeys(selectedMonth, minimumMonthKey) <= 0 : false;
 
   const filteredExpenses = useMemo<FilteredExpense[]>(() => {
     const nextFilteredExpenses: FilteredExpense[] = [];
@@ -237,7 +242,7 @@ export default function HistoryScreen() {
         continue;
       }
 
-      if (selectedCategories.size > 0 && !selectedCategories.has(expense.category)) {
+      if (selectedCategories.size > 0 && !selectedCategories.has(expenseCategoryId(expense))) {
         continue;
       }
 
@@ -309,6 +314,46 @@ export default function HistoryScreen() {
     toggleDropdown(dropdown);
   }
 
+  const moveMonth = useCallback((amount: number) => {
+    if (amount < 0 && atMinimumMonth) {
+      return;
+    }
+
+    if (amount > 0 && atCurrentMonth) {
+      return;
+    }
+
+    const nextMonth = addMonths(selectedMonth, amount);
+    closeDropdown();
+    selectMonth(nextMonth);
+  }, [atCurrentMonth, atMinimumMonth, closeDropdown, selectMonth, selectedMonth]);
+
+  const monthSwipeResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) => (
+      isIntentionalMonthSwipe(
+        gestureState.dx,
+        gestureState.dy,
+        gestureState.vx,
+        gestureState.vy
+      )
+    ),
+    onPanResponderRelease: (_, gestureState) => {
+      if (!isIntentionalMonthSwipe(gestureState.dx, gestureState.dy, gestureState.vx, gestureState.vy)) {
+        return;
+      }
+
+      if (gestureState.dx > 0 && !atMinimumMonth) {
+        moveMonth(-1);
+      }
+
+      if (gestureState.dx < 0 && !atCurrentMonth) {
+        moveMonth(1);
+      }
+    },
+    onPanResponderTerminationRequest: () => true
+  }), [atCurrentMonth, atMinimumMonth, moveMonth]);
+
   function toggleSection(date: string) {
     setCollapsedSections((current) => {
       const next = new Set(current);
@@ -356,14 +401,32 @@ export default function HistoryScreen() {
 
   const header = (
     <View style={localStyles.headerContent}>
-      <View style={localStyles.topBar}>
-        <View style={localStyles.brandBlock}>
-          <View style={localStyles.brandRow}>
+      <View style={localStyles.monthSwipeArea} {...monthSwipeResponder.panHandlers}>
+        <View style={localStyles.monthAnchor}>
+          <IconButton
+            accessibilityLabel="Previous month"
+            disabled={atMinimumMonth}
+            icon="chevron-back"
+            onPress={() => moveMonth(-1)}
+            size="sm"
+            tone="primary"
+          />
+
+          <View style={localStyles.monthTitleGroup}>
             <Ionicons color={colors.primaryDark} name="calendar" size={24} />
-            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.brandTitle}>
+            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthTitle}>
               {formatMonthLabel(selectedMonth)}
             </Text>
           </View>
+
+          <IconButton
+            accessibilityLabel="Next month"
+            disabled={atCurrentMonth}
+            icon="chevron-forward"
+            onPress={() => moveMonth(1)}
+            size="sm"
+            tone="primary"
+          />
         </View>
       </View>
 
@@ -396,12 +459,6 @@ export default function HistoryScreen() {
             label={selectedCategories.size > 0 ? `Category ${selectedCategories.size}` : 'Category'}
             onPress={() => openDropdown('category')}
           />
-          <FilterControlButton
-            active
-            icon="calendar-outline"
-            label={formatMonthLabel(selectedMonth)}
-            onPress={() => openDropdown('month')}
-          />
         </View>
 
         {activeDropdown ? (
@@ -421,13 +478,6 @@ export default function HistoryScreen() {
                 onToggle={toggleCategory}
                 options={categoryOptions}
                 selectedCategories={selectedCategories}
-              />
-            ) : null}
-            {activeDropdown === 'month' ? (
-              <OptionList
-                onChange={selectMonth}
-                options={monthOptions}
-                selectedValue={selectedMonth}
               />
             ) : null}
           </BentoCard>
@@ -575,6 +625,11 @@ function SectionDetailRow({
   onSplitBreakdown: (item: FilteredExpense) => void;
   onViewDetails: (item: FilteredExpense) => void;
 }) {
+  const displayCategory = categoryWithSubcategory(item.expense);
+  const resolvedCategory = resolveCategory(item.expense);
+  const tagSubtitle = rowSubtitle(item.expense);
+  const tagColor = resolvedCategory.subcategory ? categoryColor(resolvedCategory.categoryId) : undefined;
+
   return (
     <View style={[
       localStyles.sectionDetailSegment,
@@ -587,11 +642,12 @@ function SectionDetailRow({
         content={{
           amount: formatYen(item.displayAmountYen),
           badges: expenseBadges(item.expense),
-          category: item.expense.category,
+          category: displayCategory,
           dateLabel: formatHistoryDate(item.expense.spent_on),
-          leadingIcon: iconNameForExpenseCategory(item.expense.category),
-          leadingIconColor: colorForCategory(item.expense.category),
-          subtitle: rowSubtitle(item.expense),
+          leadingIcon: categoryIconName(resolvedCategory.categoryId),
+          leadingIconColor: categoryColor(resolvedCategory.categoryId),
+          subtitle: tagSubtitle,
+          subtitleColor: tagColor,
           timeLabel: formatExpenseTime(item.expense),
           title: rowTitle(item.expense)
         }}
@@ -605,11 +661,13 @@ function SectionDetailRow({
 }
 
 function rowTitle(expense: Expense) {
-  return expense.note?.trim() || expense.category;
+  const resolvedCategory = resolveCategory(expense);
+  return expense.note?.trim() || resolvedCategory.label;
 }
 
 function rowSubtitle(expense: Expense) {
-  return expense.note?.trim() ? expense.category : expense.ownership === 'shared' ? 'Shared' : 'Personal';
+  const resolvedCategory = resolveCategory(expense);
+  return resolvedCategory.subcategory || undefined;
 }
 
 function formatHistoryDate(dateString: string) {
@@ -660,26 +718,23 @@ function uniqueUserIds(userIds: string[]) {
   return [...new Set(userIds.filter(Boolean))];
 }
 
+function isIntentionalMonthSwipe(dx: number, dy: number, vx: number, vy: number) {
+  const horizontalDistance = Math.abs(dx);
+  const verticalDistance = Math.abs(dy);
+  const horizontalVelocity = Math.abs(vx);
+  const verticalVelocity = Math.abs(vy);
+
+  if (horizontalDistance <= SWIPE_DISTANCE) {
+    return false;
+  }
+
+  return (
+    horizontalDistance > verticalDistance * SWIPE_DIRECTION_RATIO ||
+    (horizontalVelocity > SWIPE_VELOCITY && horizontalVelocity > verticalVelocity * SWIPE_VELOCITY_RATIO)
+  );
+}
+
 const localStyles = StyleSheet.create({
-  brandBlock: {
-    flex: 1,
-    gap: 5,
-    minWidth: 0
-  },
-  brandRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    minWidth: 0
-  },
-  brandTitle: {
-    color: colors.primaryDark,
-    flexShrink: 1,
-    fontFamily: fontFamilies.bold,
-    fontSize: 24,
-    fontWeight: '700',
-    lineHeight: 31
-  },
   dropdownCard: {
     gap: 10,
     padding: 14
@@ -700,6 +755,32 @@ const localStyles = StyleSheet.create({
   },
   listContent: {
     gap: 0
+  },
+  monthAnchor: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 54
+  },
+  monthSwipeArea: {
+    gap: 18
+  },
+  monthTitle: {
+    color: colors.primaryDark,
+    flexShrink: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 24,
+    fontWeight: '700',
+    lineHeight: 31
+  },
+  monthTitleGroup: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+    minWidth: 0,
+    paddingHorizontal: 12
   },
   pressed: {
     opacity: 0.76

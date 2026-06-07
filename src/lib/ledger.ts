@@ -12,6 +12,7 @@ import {
   getCachedLedgerMembers,
   getCachedLedgerMemberships,
   getCachedProfiles,
+  getCachedRecurringRules,
   getCachedTransferItems,
   hasCachedExpensesSnapshot,
   isLocalRepositoryOnline,
@@ -20,9 +21,12 @@ import {
   refreshLedgerMembers,
   refreshMemberships,
   refreshProfiles,
+  refreshRecurringRules,
   saveLocalExpense,
-  saveLocalLedgerCategory
+  saveLocalLedgerCategory,
+  saveLocalRecurringRule
 } from '@/src/lib/localRepository';
+import { currentMonthStartDate } from '@/src/lib/recurring';
 import type {
   Expense,
   ExpenseOwnership,
@@ -33,6 +37,7 @@ import type {
   LedgerMember,
   LedgerMemberProfile,
   Profile,
+  RecurringExpenseRule,
   TransferChecklistItemRow
 } from '@/src/types/database';
 
@@ -178,6 +183,21 @@ export async function getLedgerCategories(ledgerId: string): Promise<LedgerCateg
   }, () => fetchRemoteLedgerCategories(ledgerId));
 }
 
+export async function getRecurringExpenseRules(ledgerId: string): Promise<RecurringExpenseRule[]> {
+  return withLocalFallback(async () => {
+    const cachedRules = await getCachedRecurringRules(ledgerId);
+    try {
+      await refreshRecurringRules(ledgerId);
+      return getCachedRecurringRules(ledgerId);
+    } catch (error) {
+      if (isOfflineError(error)) {
+        return cachedRules;
+      }
+      throw error;
+    }
+  }, () => fetchRemoteRecurringRules(ledgerId));
+}
+
 export async function seedDefaultLedgerCategories(ledgerId: string) {
   const { error } = await supabase.rpc('seed_default_categories', {
     p_ledger_id: ledgerId
@@ -253,18 +273,87 @@ async function ignoreOfflineError(fn: () => Promise<unknown>) {
 
 export type SaveLedgerCategoryInput = {
   ledgerId: string;
-  categoryName: string;
+  categoryId: string;
+  categoryName?: string | null;
   splitRatioA: number;
   splitRatioB: number;
   sortOrder: number;
 };
 
-export async function saveLedgerCategory(input: SaveLedgerCategoryInput): Promise<LedgerCategory> {
+export async function saveLedgerCategorySetting(input: SaveLedgerCategoryInput): Promise<LedgerCategory> {
   const savedCategory = await saveLocalLedgerCategory(input);
   if (!savedCategory) {
-    throw new Error('Could not save category locally');
+    throw new Error('Could not save category setting locally');
   }
   return savedCategory;
+}
+
+export const saveLedgerCategory = saveLedgerCategorySetting;
+
+export type SaveRecurringExpenseRuleInput = {
+  id?: string | null;
+  ledgerId: string;
+  name: string;
+  categoryId: string;
+  subcategory: string | null;
+  amountYen: number;
+  paidBy: string;
+  splitRatioA: number;
+  splitRatioB: number;
+  generateDay: number;
+  startMonth: string;
+  endMonth: string | null;
+  timezone?: string | null;
+  isActive: boolean;
+};
+
+export async function saveRecurringExpenseRule(input: SaveRecurringExpenseRuleInput): Promise<RecurringExpenseRule> {
+  const savedRule = await saveLocalRecurringRule(input);
+  if (!savedRule) {
+    throw new Error('Could not save fixed monthly expense locally');
+  }
+  return savedRule;
+}
+
+export type GenerateRecurringExpenseResult = {
+  rule_id: string;
+  recurring_month: string;
+  expense_id: string | null;
+  status: string;
+  message: string | null;
+};
+
+export async function generateRecurringExpenses(
+  ledgerId: string,
+  untilMonth: string = currentMonthStartDate()
+): Promise<GenerateRecurringExpenseResult[]> {
+  if (!isLocalRepositoryOnline()) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase.rpc('generate_recurring_expenses', {
+      p_ledger_id: ledgerId,
+      p_until_month: untilMonth
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const rows = (data || []) as GenerateRecurringExpenseResult[];
+    const inserted = rows.some((row) => row.status === 'inserted');
+    if (inserted) {
+      await ignoreOfflineError(() => refreshExpenses(ledgerId));
+    }
+
+    return rows;
+  } catch (error) {
+    if (isOfflineError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 export async function deleteLedgerCategory(ledgerId: string, categoryName: string) {
@@ -387,7 +476,9 @@ export type SaveExpenseInput = {
   id?: string | null;
   ledgerId: string;
   amountYen: number;
-  category: string;
+  categoryId: string;
+  category: string | null;
+  subcategory: string | null;
   paidBy: string;
   ownership: ExpenseOwnership;
   spentOn: string;
@@ -501,13 +592,30 @@ async function fetchRemoteLedgerCategories(ledgerId: string): Promise<LedgerCate
     .select('*')
     .eq('ledger_id', ledgerId)
     .order('sort_order', { ascending: true })
-    .order('category_name', { ascending: true });
+    .order('category_id', { ascending: true });
 
   if (error) {
     throw error;
   }
 
   return (data || []) as LedgerCategory[];
+}
+
+async function fetchRemoteRecurringRules(ledgerId: string): Promise<RecurringExpenseRule[]> {
+  const { data, error } = await supabase
+    .from('recurring_expense_rules')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .order('is_active', { ascending: false })
+    .order('category_id', { ascending: true })
+    .order('subcategory', { ascending: true })
+    .order('name', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []) as RecurringExpenseRule[];
 }
 
 async function fetchRemoteProfiles(userIds: string[]): Promise<Record<string, Profile>> {

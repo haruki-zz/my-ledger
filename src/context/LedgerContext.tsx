@@ -7,6 +7,7 @@ import { isLocalDbUnavailableError } from '@/src/lib/localDb';
 import {
   createLedger,
   deleteLedger as deleteLedgerById,
+  generateRecurringExpenses,
   getErrorMessage,
   getMyLedgerMemberships,
   joinLedger,
@@ -18,9 +19,11 @@ import {
   refreshExpenses,
   refreshLedgerCategories,
   refreshLedgerLocalData,
+  refreshRecurringRules,
   refreshMemberships
 } from '@/src/lib/localRepository';
 import { emitLedgerDataChanged } from '@/src/lib/localEvents';
+import { currentMonthStartDate } from '@/src/lib/recurring';
 import { isSupabaseConfigured, supabase } from '@/src/lib/supabase';
 
 const ACTIVE_LEDGER_STORAGE_KEY = 'my-ledger.activeLedgerId';
@@ -152,7 +155,14 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
       return undefined;
     }
 
-    void refreshLedgerLocalData(ledgerId);
+    void (async () => {
+      await refreshLedgerLocalData(ledgerId);
+      try {
+        await generateRecurringExpenses(ledgerId, currentMonthStartDate());
+      } catch (generateError) {
+        console.warn('Could not generate fixed monthly expenses:', getErrorMessage(generateError));
+      }
+    })();
 
     const channel = supabase
       .channel(`ledger-local-refresh-${ledgerId}`)
@@ -178,6 +188,18 @@ export function LedgerProvider({ children }: { children: ReactNode }) {
         },
         () => {
           void refreshLedgerCategories(ledgerId);
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'recurring_expense_rules',
+          filter: `ledger_id=eq.${ledgerId}`
+        },
+        () => {
+          void refreshRecurringRules(ledgerId);
         }
       )
       .on(
