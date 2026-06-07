@@ -23,7 +23,7 @@ import {
 } from '@/src/components/KeyboardDoneAccessory';
 import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { BentoCard, PillTabs } from '@/src/components/ui';
+import { BentoCard } from '@/src/components/ui';
 import {
   DEFAULT_CATEGORY_SPLIT_RATIO,
   PRIMARY_CATEGORIES,
@@ -63,7 +63,6 @@ type Props = {
   recurringRules?: RecurringExpenseRule[];
 };
 
-type SplitMode = 'amount' | 'ratio';
 type SplitTextValues = Record<string, string>;
 
 type WebDateInputChangeEvent = {
@@ -82,22 +81,8 @@ const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
   weekday: 'short'
 });
 
-function formatSplitNumber(value: number) {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
-}
-
 function sanitizeWholeNumber(value: string) {
   return value.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '');
-}
-
-function sanitizeRatioInput(value: string) {
-  const cleaned = value.replace(/[^\d.]/g, '');
-  const [whole = '', ...decimalParts] = cleaned.split('.');
-  if (decimalParts.length === 0) {
-    return whole;
-  }
-
-  return `${whole}.${decimalParts.join('')}`;
 }
 
 function formatNumberInput(value: string) {
@@ -136,23 +121,9 @@ function parseNonNegativeInteger(value: string) {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function parseRatio(value: string) {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) {
-    return null;
-  }
-
-  const parsed = Number(trimmedValue);
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
-}
-
 function calculateAmountsFromRatios(totalAmount: number, ratios: readonly [number, number]) {
   const firstAmount = Math.round((totalAmount * ratios[0]) / 100);
   return [firstAmount, totalAmount - firstAmount] as const;
-}
-
-function toRatioValues(members: LedgerMemberProfile[], ratios: readonly [number, number]): SplitTextValues {
-  return Object.fromEntries(members.map((member, index) => [member.user_id, formatSplitNumber(ratios[index] || 0)]));
 }
 
 function toAmountValues(members: LedgerMemberProfile[], amounts: readonly [number, number]): SplitTextValues {
@@ -263,14 +234,13 @@ export function ExpenseForm({
     subcategory: expense?.subcategory
   }), [expense?.category, expense?.category_id, expense?.subcategory]);
   const [amount, setAmount] = useState(expense ? String(expense.amount_yen) : '');
-  const [categoryId, setCategoryId] = useState<string>(initialCategory.categoryId);
+  const [categoryId, setCategoryId] = useState<string>(expense ? initialCategory.categoryId : '');
   const [subcategory, setSubcategory] = useState(initialCategory.subcategory || '');
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [paidBy, setPaidBy] = useState(expense?.paid_by || currentUserId);
   const [ownership, setOwnership] = useState<ExpenseOwnership>(expense?.ownership || 'personal');
   const [spentOn, setSpentOn] = useState(expense?.spent_on || todayDateString());
   const [note, setNote] = useState(expense?.note || '');
-  const [splitMode, setSplitMode] = useState<SplitMode>('amount');
   const [submitting, setSubmitting] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [saveBarHeight, setSaveBarHeight] = useState(MIN_SAVE_BAR_HEIGHT);
@@ -288,15 +258,6 @@ export function ExpenseForm({
 
     return toEmptySplitValues(sortedMembers);
   });
-  const [ratioValues, setRatioValues] = useState<SplitTextValues>(() => {
-    if (expense?.splits?.length && expense.amount_yen > 0 && sortedMembers.length === 2) {
-      const firstSplit = expense.splits.find((split) => split.user_id === sortedMembers[0].user_id);
-      const firstRatio = firstSplit ? (firstSplit.amount_yen / expense.amount_yen) * 100 : 50;
-      return toRatioValues(sortedMembers, [firstRatio, 100 - firstRatio]);
-    }
-
-    return toRatioValues(sortedMembers, getPresetSplitRatios(categoryId));
-  });
   const [lastEditedAmountUserId, setLastEditedAmountUserId] = useState<string | null>(null);
   const [splitValuesTouched, setSplitValuesTouched] = useState(false);
 
@@ -305,6 +266,10 @@ export function ExpenseForm({
     [recurringRules]
   );
   const currentSubcategoryPresets = useMemo(() => {
+    if (!categoryId) {
+      return [];
+    }
+
     const selectedSubcategory = subcategory.trim();
     return subcategoryPresets(categoryId).filter((option) => {
       if (expense?.subcategory === option || selectedSubcategory === option) {
@@ -329,7 +294,7 @@ export function ExpenseForm({
   const isGeneratedExpense = Boolean(expense?.recurring_rule_id);
   const matchesActiveFixedSubcategory = useMemo(() => {
     const trimmedSubcategory = subcategory.trim();
-    if (!trimmedSubcategory || isGeneratedExpense) {
+    if (!categoryId || !trimmedSubcategory || isGeneratedExpense) {
       return false;
     }
 
@@ -351,28 +316,6 @@ export function ExpenseForm({
       hideSubscription.remove();
     };
   }, []);
-
-  function currentRatios() {
-    if (sortedMembers.length !== 2) {
-      return null;
-    }
-
-    const firstRatio = parseRatio(ratioValues[sortedMembers[0].user_id] || '');
-    const secondRatio = parseRatio(ratioValues[sortedMembers[1].user_id] || '');
-    if (firstRatio !== null && secondRatio !== null && Math.abs(firstRatio + secondRatio - 100) < 0.0001) {
-      return [firstRatio, secondRatio] as const;
-    }
-
-    return null;
-  }
-
-  function syncAmountValuesFromRatios(totalAmount: number, ratios: readonly [number, number]) {
-    if (sortedMembers.length !== 2) {
-      return;
-    }
-
-    setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(totalAmount, ratios)));
-  }
 
   function syncAmountComplement(userId: string, value: string, totalAmount: number) {
     if (sortedMembers.length !== 2) {
@@ -399,7 +342,6 @@ export function ExpenseForm({
 
   function applyPresetSplits(nextCategoryId: string, nextAmount = amount) {
     const nextPresetRatios = getPresetSplitRatios(nextCategoryId);
-    setRatioValues(toRatioValues(sortedMembers, nextPresetRatios));
     setLastEditedAmountUserId(null);
 
     const nextAmountYen = parsePositiveInteger(nextAmount);
@@ -444,10 +386,7 @@ export function ExpenseForm({
       return;
     }
 
-    const ratios = currentRatios();
-    if (ratios) {
-      syncAmountValuesFromRatios(nextAmountYen, ratios);
-    }
+    setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, getPresetSplitRatios(categoryId))));
   }
 
   function clearAmount() {
@@ -460,58 +399,6 @@ export function ExpenseForm({
     }
 
     setOwnership(nextOwnership);
-  }
-
-  function selectSplitMode(nextMode: SplitMode) {
-    if (nextMode === splitMode) {
-      return;
-    }
-
-    const currentAmountYen = parsePositiveInteger(amount);
-    if (nextMode === 'ratio' && currentAmountYen && sortedMembers.length === 2) {
-      const firstAmount = parseNonNegativeInteger(amountSplitValues[sortedMembers[0].user_id] || '');
-      const secondAmount = parseNonNegativeInteger(amountSplitValues[sortedMembers[1].user_id] || '');
-      if (firstAmount !== null && secondAmount !== null && firstAmount + secondAmount === currentAmountYen) {
-        const firstRatio = (firstAmount / currentAmountYen) * 100;
-        setRatioValues(toRatioValues(sortedMembers, [firstRatio, 100 - firstRatio]));
-      } else {
-        setRatioValues(toRatioValues(sortedMembers, getPresetSplitRatios(categoryId)));
-      }
-    }
-
-    if (nextMode === 'amount' && currentAmountYen) {
-      syncAmountValuesFromRatios(currentAmountYen, currentRatios() || getPresetSplitRatios(categoryId));
-      setLastEditedAmountUserId(null);
-    }
-
-    setSplitMode(nextMode);
-  }
-
-  function setRatioValue(userId: string, value: string) {
-    const nextValue = sanitizeRatioInput(value);
-    if (sortedMembers.length !== 2) {
-      setRatioValues((current) => ({ ...current, [userId]: nextValue }));
-      return;
-    }
-
-    const otherMember = sortedMembers.find((member) => member.user_id !== userId);
-    const parsedRatio = parseRatio(nextValue);
-    const nextValues = { ...ratioValues, [userId]: nextValue };
-
-    if (otherMember && parsedRatio !== null) {
-      nextValues[otherMember.user_id] = formatSplitNumber(100 - parsedRatio);
-    }
-
-    setSplitValuesTouched(true);
-    setRatioValues(nextValues);
-    setLastEditedAmountUserId(null);
-
-    const currentAmountYen = parsePositiveInteger(amount);
-    if (currentAmountYen && otherMember && parsedRatio !== null) {
-      const firstRatio = parseRatio(nextValues[sortedMembers[0].user_id] || '') || 0;
-      const secondRatio = parseRatio(nextValues[sortedMembers[1].user_id] || '') || 0;
-      syncAmountValuesFromRatios(currentAmountYen, [firstRatio, secondRatio]);
-    }
   }
 
   function setAmountSplitValue(userId: string, value: string) {
@@ -533,25 +420,6 @@ export function ExpenseForm({
 
     if (sortedMembers.length !== 2) {
       throw new Error('Shared expenses require two ledger members');
-    }
-
-    if (splitMode === 'ratio') {
-      const ratios = sortedMembers.map((member) => parseRatio(ratioValues[member.user_id] || ''));
-      if (ratios.some((ratio) => ratio === null)) {
-        throw new Error('Ratios must be numbers from 0 to 100');
-      }
-
-      const firstRatio = ratios[0] || 0;
-      const secondRatio = ratios[1] || 0;
-      if (Math.abs(firstRatio + secondRatio - 100) >= 0.0001) {
-        throw new Error('Both responsibility ratios must add up to 100%');
-      }
-
-      const [firstAmount, secondAmount] = calculateAmountsFromRatios(totalAmount, [firstRatio, secondRatio]);
-      return [
-        { user_id: sortedMembers[0].user_id, amount_yen: firstAmount },
-        { user_id: sortedMembers[1].user_id, amount_yen: secondAmount }
-      ];
     }
 
     const splitAmounts = sortedMembers.map((member) => parseNonNegativeInteger(amountSplitValues[member.user_id] || ''));
@@ -675,38 +543,6 @@ export function ExpenseForm({
     setSaveBarHeight(event.nativeEvent.layout.height);
   }
 
-  function splitRatioLabel(member: LedgerMemberProfile) {
-    if (!amountYen) {
-      return '--%';
-    }
-
-    if (splitMode === 'ratio') {
-      const ratio = parseRatio(ratioValues[member.user_id] || '');
-      return ratio === null ? '--%' : `${formatSplitNumber(ratio)}%`;
-    }
-
-    const splitAmount = parseNonNegativeInteger(amountSplitValues[member.user_id] || '');
-    if (splitAmount === null) {
-      return '--%';
-    }
-
-    return `${formatSplitNumber((splitAmount / amountYen) * 100)}%`;
-  }
-
-  function splitAmountPreview(member: LedgerMemberProfile) {
-    if (splitMode === 'amount') {
-      const splitAmount = parseNonNegativeInteger(amountSplitValues[member.user_id] || '');
-      return splitAmount === null ? formatYenText(0) : formatYenText(splitAmount);
-    }
-
-    const ratio = parseRatio(ratioValues[member.user_id] || '');
-    if (!amountYen || ratio === null) {
-      return formatYenText(0);
-    }
-
-    return formatYenText(Math.round((amountYen * ratio) / 100));
-  }
-
   return (
     <View style={styles.page}>
       <KeyboardAwareScrollView
@@ -769,16 +605,16 @@ export function ExpenseForm({
               <View style={localStyles.categoryInputBox}>
                 <View style={localStyles.categorySelectedContent}>
                   <Ionicons
-                    color={categoryColor(categoryId)}
-                    name={categoryIconName(categoryId)}
+                    color={categoryId ? categoryColor(categoryId) : colors.muted}
+                    name={categoryId ? categoryIconName(categoryId) : 'help-circle-outline'}
                     size={22}
                   />
                   <Text
                     ellipsizeMode="tail"
                     numberOfLines={1}
-                    style={localStyles.categoryValue}
+                    style={[localStyles.categoryValue, !categoryId && localStyles.categoryPlaceholder]}
                   >
-                    {categoryLabel(categoryId)}
+                    {categoryId ? categoryLabel(categoryId) : 'Choose a category'}
                   </Text>
                 </View>
                 <Ionicons color={colors.ink} name={categoryMenuOpen ? 'chevron-up' : 'chevron-down'} size={22} />
@@ -920,6 +756,54 @@ export function ExpenseForm({
           </View>
         </BentoCard>
 
+        {ownership === 'shared' ? (
+          <BentoCard variant="form" style={localStyles.splitCard}>
+            <Text style={styles.upperLabel}>Split Method</Text>
+
+            <View style={localStyles.splitRows}>
+              {sortedMembers.map((member) => {
+                const name = displayName(member.profile.display_name);
+                const accent = memberColorById.get(member.user_id) || colors.primaryDark;
+                const inputValue = formatNumberInput(amountSplitValues[member.user_id] || '');
+                return (
+                  <View key={member.user_id} style={localStyles.splitRow}>
+                    <View style={localStyles.splitMember}>
+                      <View style={[localStyles.splitAvatar, { borderColor: accent }]}>
+                        <Text style={[localStyles.splitAvatarText, { color: accent }]}>{initialsForName(name)}</Text>
+                      </View>
+                      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.splitName}>
+                        {name}
+                      </Text>
+                    </View>
+
+                    <View style={localStyles.splitInputShell}>
+                      <Text style={localStyles.splitInputPrefix}>¥</Text>
+                      <TextInput
+                        accessibilityLabel={`${name} split amount`}
+                        inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                        inputMode="numeric"
+                        keyboardType="number-pad"
+                        onChangeText={(value) => setAmountSplitValue(member.user_id, value)}
+                        placeholder="0"
+                        placeholderTextColor={colors.subtle}
+                        returnKeyType="done"
+                        style={[localStyles.splitInput, { color: accent }]}
+                        submitBehavior="blurAndSubmit"
+                        value={inputValue}
+                      />
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={localStyles.totalRow}>
+              <Text style={localStyles.totalLabel}>Total</Text>
+              <Text style={localStyles.totalAmount}>{formatYenText(amountYen)}</Text>
+            </View>
+          </BentoCard>
+        ) : null}
+
         <View style={[localStyles.twoColumnRow, compactLayout && localStyles.twoColumnRowCompact]}>
           <BentoCard variant="form" style={[localStyles.fieldCard, compactLayout && localStyles.fullWidthField]}>
             <Text style={styles.upperLabel}>Spent On</Text>
@@ -965,85 +849,6 @@ export function ExpenseForm({
             />
           </BentoCard>
         </View>
-
-        {ownership === 'shared' ? (
-          <BentoCard variant="form" style={localStyles.splitCard}>
-            <View style={localStyles.splitHeader}>
-              <Text style={styles.upperLabel}>Split Method</Text>
-              <PillTabs
-                accessibilityLabel="Split method"
-                onChange={(nextMode) => runAfterKeyboardDismiss(() => selectSplitMode(nextMode))}
-                options={[
-                  { label: 'Amount', value: 'amount' },
-                  { label: 'Ratio', value: 'ratio' }
-                ]}
-                size="sm"
-                style={localStyles.splitTabs}
-                value={splitMode}
-              />
-            </View>
-
-            <View style={localStyles.splitRows}>
-              {sortedMembers.map((member) => {
-                const name = displayName(member.profile.display_name);
-                const accent = memberColorById.get(member.user_id) || colors.primaryDark;
-                const inputValue = splitMode === 'amount'
-                  ? formatNumberInput(amountSplitValues[member.user_id] || '')
-                  : ratioValues[member.user_id] || '';
-                return (
-                  <View key={member.user_id} style={[localStyles.splitRow, compactLayout && localStyles.splitRowCompact]}>
-                    <View style={[localStyles.splitMember, compactLayout && localStyles.splitMemberCompact]}>
-                      <View style={[localStyles.splitAvatar, { borderColor: accent }]}>
-                        <Text style={[localStyles.splitAvatarText, { color: accent }]}>{initialsForName(name)}</Text>
-                      </View>
-                      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.splitName}>
-                        {name}
-                      </Text>
-                    </View>
-
-                    <View style={[localStyles.splitValueArea, compactLayout && localStyles.splitValueAreaCompact]}>
-                      <View style={localStyles.splitInputShell}>
-                        <Text style={localStyles.splitInputPrefix}>{splitMode === 'amount' ? '¥' : '%'}</Text>
-                        <TextInput
-                          accessibilityLabel={`${name} split ${splitMode}`}
-                          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                          inputMode="numeric"
-                          keyboardType={splitMode === 'amount' ? 'number-pad' : 'decimal-pad'}
-                          onChangeText={(value) =>
-                            splitMode === 'amount'
-                              ? setAmountSplitValue(member.user_id, value)
-                              : setRatioValue(member.user_id, value)
-                          }
-                          placeholder={splitMode === 'amount' ? '0' : '50'}
-                          placeholderTextColor={colors.subtle}
-                          returnKeyType="done"
-                          style={[localStyles.splitInput, { color: accent }]}
-                          submitBehavior="blurAndSubmit"
-                          value={inputValue}
-                        />
-                      </View>
-                      <View style={[localStyles.percentBadge, { borderColor: accent }]}>
-                        <Text style={[localStyles.percentBadgeText, { color: accent }]}>
-                          {splitRatioLabel(member)}
-                        </Text>
-                      </View>
-                      <Text style={localStyles.splitPreview}>{splitAmountPreview(member)}</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-
-            <View style={localStyles.totalRow}>
-              <Text style={localStyles.totalLabel}>Total</Text>
-              <Text style={localStyles.totalAmount}>{formatYenText(amountYen)}</Text>
-            </View>
-            <View style={localStyles.infoRow}>
-              <Ionicons color={colors.muted} name="information-circle-outline" size={20} />
-              <Text style={localStyles.infoText}>Amounts will auto-balance to match the total.</Text>
-            </View>
-          </BentoCard>
-        ) : null}
 
         <AndroidKeyboardDoneButton />
       </KeyboardAwareScrollView>
@@ -1201,6 +1006,11 @@ const localStyles = StyleSheet.create({
     fontSize: 19,
     fontWeight: '700'
   },
+  categoryPlaceholder: {
+    color: colors.muted,
+    fontFamily: fontFamilies.semiBold,
+    fontWeight: '600'
+  },
   clearButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(17,24,39,0.05)',
@@ -1290,18 +1100,6 @@ const localStyles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 17
-  },
-  infoRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 4
-  },
-  infoText: {
-    color: colors.muted,
-    flex: 1,
-    fontFamily: fontFamilies.regular,
-    fontSize: 13
   },
   inputTitle: {
     color: colors.ink,
@@ -1397,26 +1195,6 @@ const localStyles = StyleSheet.create({
     minWidth: 0,
     padding: 16
   },
-  percentBadge: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.78)',
-    borderRadius: 16,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 42,
-    minWidth: 72,
-    paddingHorizontal: 10
-  },
-  percentBadgeText: {
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 17,
-    fontWeight: '600'
-  },
-  placeholderText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 17
-  },
   subcategoryBlock: {
     gap: 8
   },
@@ -1510,84 +1288,72 @@ const localStyles = StyleSheet.create({
   splitAvatar: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.72)',
-    borderRadius: 28,
+    borderRadius: 20,
     borderWidth: 1.5,
-    height: 56,
+    height: 40,
     justifyContent: 'center',
-    width: 56
+    width: 40
   },
   splitAvatarText: {
     fontFamily: fontFamilies.bold,
-    fontSize: 26,
+    fontSize: 18,
     fontWeight: '700'
   },
   splitCard: {
-    gap: 14,
+    gap: 12,
     padding: 18
-  },
-  splitHeader: {
-    gap: 10
   },
   splitInput: {
     flex: 1,
     fontFamily: fontFamilies.bold,
-    fontSize: 34,
+    fontSize: 22,
     fontWeight: '700',
     letterSpacing: 0,
-    minHeight: 52,
+    minHeight: 42,
     paddingVertical: 0,
     textAlign: 'right'
   },
   splitInputPrefix: {
     color: colors.ink,
     fontFamily: fontFamilies.semiBold,
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '600'
   },
   splitInputShell: {
     alignItems: 'center',
-    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    flex: 0.72,
     flexDirection: 'row',
-    gap: 8,
-    minWidth: 148
+    gap: 6,
+    maxWidth: 190,
+    minWidth: 126,
+    paddingHorizontal: 12
   },
   splitMember: {
     alignItems: 'center',
-    flex: 0.82,
+    flex: 1,
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     minWidth: 0
-  },
-  splitMemberCompact: {
-    flex: 0,
-    width: '100%'
   },
   splitName: {
     color: colors.ink,
     flex: 1,
     fontFamily: fontFamilies.semiBold,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600'
-  },
-  splitPreview: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    minWidth: 74,
-    textAlign: 'right'
   },
   splitRow: {
     alignItems: 'center',
     borderBottomColor: colors.line,
     borderBottomWidth: 1,
     flexDirection: 'row',
-    gap: 12,
-    minHeight: 104,
-    paddingVertical: 12
-  },
-  splitRowCompact: {
-    alignItems: 'stretch',
-    flexDirection: 'column'
+    gap: 10,
+    minHeight: 64,
+    paddingVertical: 8
   },
   splitRows: {
     borderColor: colors.line,
@@ -1595,20 +1361,6 @@ const localStyles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
     paddingHorizontal: 12
-  },
-  splitTabs: {
-    alignSelf: 'stretch'
-  },
-  splitValueArea: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'flex-end',
-    minWidth: 0
-  },
-  splitValueAreaCompact: {
-    width: '100%'
   },
   totalAmount: {
     color: colors.ink,
