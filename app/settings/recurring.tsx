@@ -1,13 +1,25 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from 'react-native';
 
 import {
   AndroidKeyboardDoneButton,
   KEYBOARD_DONE_ACCESSORY_ID
 } from '@/src/components/KeyboardDoneAccessory';
 import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
-import { colors, fontFamilies, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { PRIMARY_CATEGORIES, categoryColor, categoryIconName, categoryLabel, subcategoryPresets } from '@/src/lib/categorySystem';
@@ -22,7 +34,7 @@ import {
 } from '@/src/lib/ledger';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import { currentMonthStartDate, dateStringToMonthKey, isValidMonthKey, monthKeyToStartDate } from '@/src/lib/recurring';
-import type { LedgerMemberProfile, RecurringExpenseRule } from '@/src/types/database';
+import type { ExpenseOwnership, LedgerMemberProfile, RecurringExpenseRule } from '@/src/types/database';
 
 type Draft = {
   id: string | null;
@@ -31,6 +43,7 @@ type Draft = {
   subcategory: string;
   amount: string;
   paidBy: string;
+  ownership: ExpenseOwnership;
   ratioA: string;
   ratioB: string;
   generateDay: string;
@@ -48,9 +61,70 @@ function parsePositiveInteger(value: string) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function formatNumberInput(value: string) {
+  if (!value) {
+    return '';
+  }
+
+  return new Intl.NumberFormat('en-US').format(Number(value));
+}
+
+function formatYenInput(value: string) {
+  return value ? `¥ ${formatNumberInput(value)}` : '¥ ';
+}
+
 function parseRatio(value: string) {
   const parsed = Number(value.trim());
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, '0');
+}
+
+function dateForGenerateDay(day: string) {
+  const parsedDay = Math.min(31, Math.max(1, Number(sanitizeWholeNumber(day) || 1)));
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), parsedDay);
+}
+
+function dateInputValue(day: string) {
+  const date = dateForGenerateDay(day);
+  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function formatGenerateDayLabel(day: string) {
+  const date = dateForGenerateDay(day);
+  return `Day ${date.getDate()} of each month`;
+}
+
+const GENERATE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
+
+type WebDateInputChangeEvent = {
+  currentTarget?: { value?: string };
+  target?: { value?: string };
+};
+
+function GenerateDayInput({ onChange, value }: { onChange: (day: string) => void; value: string }) {
+  if (Platform.OS !== 'web') {
+    return null;
+  }
+
+  return (
+    <input
+      aria-label="Monthly generation date"
+      onChange={(event: WebDateInputChangeEvent) => {
+        const nextValue = event.currentTarget?.value || event.target?.value || '';
+        const [, , day] = nextValue.split('-');
+        if (day) {
+          onChange(String(Number(day)));
+        }
+      }}
+      style={webDateInputStyle}
+      type="date"
+      value={dateInputValue(value)}
+    />
+  );
 }
 
 function emptyDraft(members: LedgerMemberProfile[]): Draft {
@@ -62,6 +136,7 @@ function emptyDraft(members: LedgerMemberProfile[]): Draft {
     subcategory: 'Rent',
     amount: '',
     paidBy: members[0]?.user_id || '',
+    ownership: 'shared',
     ratioA: '50',
     ratioB: '50',
     generateDay: '1',
@@ -79,6 +154,7 @@ function draftFromRule(rule: RecurringExpenseRule): Draft {
     subcategory: rule.subcategory || '',
     amount: String(rule.amount_yen),
     paidBy: rule.paid_by,
+    ownership: rule.ownership || 'shared',
     ratioA: String(rule.split_ratio_a),
     ratioB: String(rule.split_ratio_b),
     generateDay: String(rule.generate_day),
@@ -94,6 +170,7 @@ export default function RecurringExpenseRulesScreen() {
   const [rules, setRules] = useState<RecurringExpenseRule[]>([]);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft([]));
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [nativeGenerateDatePickerOpen, setNativeGenerateDatePickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,6 +224,7 @@ export default function RecurringExpenseRulesScreen() {
     () => new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)])),
     [members]
   );
+  const amountDisplayValue = formatYenInput(draft.amount);
 
   const currentSubcategoryPresets = useMemo(() => subcategoryPresets(draft.categoryId), [draft.categoryId]);
 
@@ -162,11 +240,13 @@ export default function RecurringExpenseRulesScreen() {
   function startCreate() {
     setDraft(emptyDraft(members));
     setCategoryMenuOpen(false);
+    setNativeGenerateDatePickerOpen(false);
   }
 
   function startEdit(rule: RecurringExpenseRule) {
     setDraft(draftFromRule(rule));
     setCategoryMenuOpen(false);
+    setNativeGenerateDatePickerOpen(false);
   }
 
   async function toggleRule(rule: RecurringExpenseRule) {
@@ -177,7 +257,7 @@ export default function RecurringExpenseRulesScreen() {
     if (!ledger) {
       return 'No active ledger';
     }
-    if (members.length !== 2) {
+    if (draft.ownership === 'shared' && members.length !== 2) {
       return 'Fixed monthly expenses require two ledger members';
     }
     if (!draft.name.trim()) {
@@ -239,6 +319,7 @@ export default function RecurringExpenseRulesScreen() {
         subcategory: nextDraft.subcategory.trim() || null,
         amountYen,
         paidBy: nextDraft.paidBy,
+        ownership: nextDraft.ownership,
         splitRatioA: ratioA,
         splitRatioB: ratioB,
         generateDay,
@@ -267,18 +348,63 @@ export default function RecurringExpenseRulesScreen() {
     );
   }
 
+  function clearAmount() {
+    updateDraft({ amount: '' });
+  }
+
+  function selectOwnership(nextOwnership: ExpenseOwnership) {
+    if (nextOwnership === 'personal') {
+      updateDraft({
+        ownership: nextOwnership,
+        ratioA: '100',
+        ratioB: '0'
+      });
+      return;
+    }
+
+    updateDraft({
+      ownership: nextOwnership,
+      ratioA: draft.ratioA === '100' && draft.ratioB === '0' ? '50' : draft.ratioA,
+      ratioB: draft.ratioA === '100' && draft.ratioB === '0' ? '50' : draft.ratioB
+    });
+  }
+
+  function selectGenerateDay(day: number) {
+    updateDraft({ generateDay: String(day) });
+    setNativeGenerateDatePickerOpen(false);
+  }
+
   return (
     <KeyboardAwareScrollView
       refreshControl={<RefreshControl refreshing={ledgerLoading || loading} onRefresh={refresh} />}
       style={styles.page}
       contentContainerStyle={styles.content}
     >
-      <View>
-        <Text style={styles.title}>Fixed Monthly Expenses</Text>
-        <Text style={styles.muted}>Shared recurring rules generate regular expenses each month.</Text>
-      </View>
-
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
+
+      <BentoCard variant="form" style={localStyles.amountCard}>
+        <View style={localStyles.cardHeaderRow}>
+          <Text style={localStyles.inputTitle}>Amount</Text>
+          {draft.amount ? (
+            <Pressable accessibilityLabel="Clear amount" onPress={clearAmount} style={localStyles.clearButton}>
+              <Ionicons color={colors.muted} name="close" size={24} />
+            </Pressable>
+          ) : (
+            <View style={localStyles.clearButtonPlaceholder} />
+          )}
+        </View>
+        <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+          inputMode="numeric"
+          keyboardType="number-pad"
+          onChangeText={(value) => updateDraft({ amount: sanitizeWholeNumber(value) })}
+          placeholder="¥ 0"
+          placeholderTextColor={colors.subtle}
+          selection={{ start: amountDisplayValue.length, end: amountDisplayValue.length }}
+          style={localStyles.amountInput}
+          value={amountDisplayValue}
+        />
+      </BentoCard>
 
       <BentoCard variant="form" style={localStyles.formCard}>
         <View style={localStyles.headerRow}>
@@ -299,28 +425,78 @@ export default function RecurringExpenseRulesScreen() {
           value={draft.name}
         />
 
-        <View style={localStyles.row}>
-          <TextInput
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            inputMode="numeric"
-            keyboardType="number-pad"
-            onChangeText={(value) => updateDraft({ amount: sanitizeWholeNumber(value) })}
-            placeholder="Amount"
-            placeholderTextColor={colors.subtle}
-            style={[styles.input, localStyles.flexInput]}
-            value={draft.amount}
-          />
-          <TextInput
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            inputMode="numeric"
-            keyboardType="number-pad"
-            onChangeText={(value) => updateDraft({ generateDay: sanitizeWholeNumber(value) })}
-            placeholder="Day"
-            placeholderTextColor={colors.subtle}
-            style={[styles.input, localStyles.dayInput]}
-            value={draft.generateDay}
-          />
-        </View>
+        <BentoCard variant="form" style={localStyles.inlineFieldCard}>
+          <Text style={styles.upperLabel}>Bill Date</Text>
+          {Platform.OS === 'web' ? (
+            <GenerateDayInput
+              onChange={(day) => updateDraft({ generateDay: day })}
+              value={draft.generateDay}
+            />
+          ) : (
+            <Pressable
+              onPress={() => runAfterKeyboardDismiss(() => setNativeGenerateDatePickerOpen((current) => !current))}
+              style={({ pressed }) => [localStyles.dateTrigger, pressed && localStyles.pressed]}
+            >
+              <Ionicons color={colors.ink} name="calendar-outline" size={22} />
+              <Text style={localStyles.dateText}>{formatGenerateDayLabel(draft.generateDay)}</Text>
+              <Ionicons color={colors.ink} name="chevron-forward" size={20} />
+            </Pressable>
+          )}
+        </BentoCard>
+
+        <BentoCard variant="form" style={localStyles.inlineFieldCard}>
+          <View accessibilityLabel="Fixed expense ownership" style={localStyles.ownershipSelector}>
+            {[
+              { label: 'Personal', value: 'personal' as const },
+              { label: 'Shared', value: 'shared' as const }
+            ].map((option) => {
+              const selected = option.value === draft.ownership;
+              return (
+                <Pressable
+                  key={option.value}
+                  onPress={() => selectOwnership(option.value)}
+                  style={({ pressed }) => [
+                    localStyles.ownershipOption,
+                    selected && localStyles.ownershipOptionActive,
+                    pressed && localStyles.pressed
+                  ]}
+                >
+                  <Text style={[localStyles.ownershipText, selected && localStyles.ownershipTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </BentoCard>
+
+        {draft.ownership === 'shared' ? (
+          <View style={localStyles.categoryBlock}>
+            <Text style={styles.upperLabel}>Split</Text>
+            <View style={localStyles.row}>
+              <TextInput
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                inputMode="numeric"
+                keyboardType="number-pad"
+                onChangeText={(ratioA) => updateDraft({ ratioA: sanitizeWholeNumber(ratioA), ratioB: String(100 - Math.min(100, Number(sanitizeWholeNumber(ratioA) || 0))) })}
+                placeholder={memberNames[0]}
+                placeholderTextColor={colors.subtle}
+                style={[styles.input, localStyles.flexInput]}
+                value={draft.ratioA}
+              />
+              <TextInput
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                inputMode="numeric"
+                keyboardType="number-pad"
+                onChangeText={(ratioB) => updateDraft({ ratioB: sanitizeWholeNumber(ratioB), ratioA: String(100 - Math.min(100, Number(sanitizeWholeNumber(ratioB) || 0))) })}
+                placeholder={memberNames[1]}
+                placeholderTextColor={colors.subtle}
+                style={[styles.input, localStyles.flexInput]}
+                value={draft.ratioB}
+              />
+            </View>
+          </View>
+        ) : null}
 
         <View style={localStyles.categoryBlock}>
           <Text style={styles.upperLabel}>Category</Text>
@@ -399,30 +575,7 @@ export default function RecurringExpenseRulesScreen() {
               );
             })}
           </View>
-          <Text style={localStyles.helpText}>Each month is paid by this member. Edit the generated expense to change one month.</Text>
-        </View>
-
-        <View style={localStyles.row}>
-          <TextInput
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            inputMode="numeric"
-            keyboardType="number-pad"
-            onChangeText={(ratioA) => updateDraft({ ratioA: sanitizeWholeNumber(ratioA), ratioB: String(100 - Math.min(100, Number(sanitizeWholeNumber(ratioA) || 0))) })}
-            placeholder={memberNames[0]}
-            placeholderTextColor={colors.subtle}
-            style={[styles.input, localStyles.flexInput]}
-            value={draft.ratioA}
-          />
-          <TextInput
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            inputMode="numeric"
-            keyboardType="number-pad"
-            onChangeText={(ratioB) => updateDraft({ ratioB: sanitizeWholeNumber(ratioB), ratioA: String(100 - Math.min(100, Number(sanitizeWholeNumber(ratioB) || 0))) })}
-            placeholder={memberNames[1]}
-            placeholderTextColor={colors.subtle}
-            style={[styles.input, localStyles.flexInput]}
-            value={draft.ratioB}
-          />
+          <Text style={localStyles.helpText}>Each month is paid by this member. Edit the generated expense if one month differs.</Text>
         </View>
 
         <View style={localStyles.row}>
@@ -475,7 +628,7 @@ export default function RecurringExpenseRulesScreen() {
                   {categoryLabel(rule.category_id)}{rule.subcategory ? ` · ${rule.subcategory}` : ''} · {formatYen(rule.amount_yen)}
                 </Text>
                 <Text style={localStyles.ruleMeta}>
-                  Day {rule.generate_day} · {memberNameById.get(rule.paid_by) || 'Unknown payer'} pays · {rule.split_ratio_a}/{rule.split_ratio_b}
+                  {rule.ownership === 'personal' ? 'Personal' : 'Shared'} · Day {rule.generate_day} · {memberNameById.get(rule.paid_by) || 'Unknown payer'} pays{rule.ownership === 'shared' ? ` · ${rule.split_ratio_a}/${rule.split_ratio_b}` : ''}
                 </Text>
               </View>
               <View style={localStyles.ruleActions}>
@@ -493,10 +646,69 @@ export default function RecurringExpenseRulesScreen() {
         </View>
       </BentoCard>
 
+      {Platform.OS !== 'web' ? (
+        <Modal
+          animationType="fade"
+          onRequestClose={() => setNativeGenerateDatePickerOpen(false)}
+          presentationStyle="overFullScreen"
+          transparent
+          visible={nativeGenerateDatePickerOpen}
+        >
+          <View style={localStyles.modalOverlay}>
+            <Pressable onPress={() => setNativeGenerateDatePickerOpen(false)} style={localStyles.modalBackdrop} />
+            <View style={localStyles.modalSheet}>
+              <View style={localStyles.modalHeader}>
+                <Text style={styles.h2}>Bill Date</Text>
+                <Pressable
+                  onPress={() => setNativeGenerateDatePickerOpen(false)}
+                  style={[styles.button, styles.secondaryButton, localStyles.compactButton]}
+                >
+                  <Text style={[styles.buttonText, styles.secondaryButtonText]}>Done</Text>
+                </Pressable>
+              </View>
+              <Text style={localStyles.helpText}>Select the day of month to generate this expense.</Text>
+              <View style={localStyles.dayGrid}>
+                {GENERATE_DAY_OPTIONS.map((day) => {
+                  const selected = Number(draft.generateDay) === day;
+                  return (
+                    <Pressable
+                      key={day}
+                      onPress={() => selectGenerateDay(day)}
+                      style={({ pressed }) => [
+                        localStyles.dayOption,
+                        selected && localStyles.dayOptionActive,
+                        pressed && localStyles.pressed
+                      ]}
+                    >
+                      <Text style={[localStyles.dayOptionText, selected && localStyles.dayOptionTextActive]}>
+                        {day}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : null}
+
       <AndroidKeyboardDoneButton />
     </KeyboardAwareScrollView>
   );
 }
+
+const webDateInputStyle = {
+  backgroundColor: 'rgba(255,255,255,0.86)',
+  border: `1px solid ${colors.line}`,
+  borderRadius: theme.radii.control,
+  color: colors.ink,
+  fontFamily: `${fontFamilies.regular}, ${fontFamilies.fallback}`,
+  fontSize: 16,
+  minHeight: 48,
+  outline: 'none',
+  padding: '10px 12px',
+  width: '100%'
+};
 
 const localStyles = StyleSheet.create({
   activeToggle: {
@@ -522,6 +734,28 @@ const localStyles = StyleSheet.create({
   },
   activeToggleTextOn: {
     color: '#FFFFFF'
+  },
+  amountCard: {
+    gap: 0,
+    minHeight: 92,
+    paddingBottom: 12,
+    paddingHorizontal: 18,
+    paddingTop: 10
+  },
+  amountInput: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.bold,
+    fontSize: 40,
+    fontWeight: '700',
+    letterSpacing: 0,
+    minHeight: 46,
+    paddingVertical: 0
+  },
+  cardHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 36
   },
   categoryBlock: {
     gap: 8
@@ -588,13 +822,63 @@ const localStyles = StyleSheet.create({
   chipTextActive: {
     color: '#FFFFFF'
   },
+  clearButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(17,24,39,0.05)',
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36
+  },
+  clearButtonPlaceholder: {
+    height: 36,
+    width: 36
+  },
   compactButton: {
     minHeight: 38,
     paddingHorizontal: 14,
     paddingVertical: 8
   },
-  dayInput: {
-    width: 96
+  dateText: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 16,
+    fontWeight: '600'
+  },
+  dateTrigger: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 48
+  },
+  dayGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  dayOption: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderColor: colors.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
+  },
+  dayOptionActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
+  },
+  dayOptionText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  dayOptionTextActive: {
+    color: '#FFFFFF'
   },
   disabled: {
     opacity: 0.6
@@ -619,6 +903,17 @@ const localStyles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17
   },
+  inlineFieldCard: {
+    gap: 10,
+    padding: 16
+  },
+  inputTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20
+  },
   memberChip: {
     borderColor: colors.line,
     borderRadius: 12,
@@ -642,6 +937,63 @@ const localStyles = StyleSheet.create({
   },
   memberChipTextActive: {
     color: '#FFFFFF'
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFill
+  },
+  modalHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  modalOverlay: {
+    backgroundColor: 'rgba(15,23,42,0.24)',
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 16
+  },
+  modalSheet: {
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: 22,
+    borderWidth: 1,
+    gap: 12,
+    padding: 18
+  },
+  ownershipOption: {
+    alignItems: 'center',
+    borderRadius: 15,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 14
+  },
+  ownershipOptionActive: {
+    backgroundColor: colors.surface,
+    ...theme.shadow
+  },
+  ownershipSelector: {
+    backgroundColor: 'rgba(15,118,110,0.08)',
+    borderColor: colors.line,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 48,
+    padding: 4
+  },
+  ownershipText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17,
+    textAlign: 'center'
+  },
+  ownershipTextActive: {
+    color: colors.ink
+  },
+  pressed: {
+    opacity: 0.76
   },
   row: {
     flexDirection: 'row',

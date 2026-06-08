@@ -298,6 +298,7 @@ export type SaveRecurringExpenseRuleInput = {
   subcategory: string | null;
   amountYen: number;
   paidBy: string;
+  ownership: ExpenseOwnership;
   splitRatioA: number;
   splitRatioB: number;
   generateDay: number;

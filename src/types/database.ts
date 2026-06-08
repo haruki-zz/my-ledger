@@ -112,6 +112,7 @@ export type Database = {
           subcategory: string | null;
           amount_yen: number;
           paid_by: string;
+          ownership: ExpenseOwnership;
           split_ratio_a: number;
           split_ratio_b: number;
           generate_day: number;
@@ -131,6 +132,7 @@ export type Database = {
           subcategory?: string | null;
           amount_yen: number;
           paid_by: string;
+          ownership?: ExpenseOwnership;
           split_ratio_a?: number;
           split_ratio_b?: number;
           generate_day?: number;
@@ -150,6 +152,7 @@ export type Database = {
           subcategory?: string | null;
           amount_yen?: number;
           paid_by?: string;
+          ownership?: ExpenseOwnership;
           split_ratio_a?: number;
           split_ratio_b?: number;
           generate_day?: number;
@@ -351,6 +354,7 @@ export type Database = {
           p_subcategory: string | null;
           p_amount_yen: number;
           p_paid_by: string;
+          p_ownership: ExpenseOwnership;
           p_split_ratio_a: number;
           p_split_ratio_b: number;
           p_generate_day: number;

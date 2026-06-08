@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'my-ledger-offline.db';
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const WEB_DATABASE_OPEN_TIMEOUT_MS = 2500;
 const LOCAL_DB_OPEN_TIMEOUT = Symbol('local-db-open-timeout');
 
@@ -214,6 +214,7 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
           subcategory TEXT,
           amount_yen INTEGER NOT NULL,
           paid_by TEXT NOT NULL,
+          ownership TEXT NOT NULL DEFAULT 'shared',
           split_ratio_a INTEGER NOT NULL,
           split_ratio_b INTEGER NOT NULL,
           generate_day INTEGER NOT NULL,
@@ -382,6 +383,7 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
           subcategory TEXT,
           amount_yen INTEGER NOT NULL,
           paid_by TEXT NOT NULL,
+          ownership TEXT NOT NULL DEFAULT 'shared',
           split_ratio_a INTEGER NOT NULL,
           split_ratio_b INTEGER NOT NULL,
           generate_day INTEGER NOT NULL,
@@ -401,6 +403,15 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
         CREATE INDEX IF NOT EXISTS recurring_expense_rules_ledger_idx
         ON recurring_expense_rules(ledger_id, is_active, category_id, subcategory);
       `);
+    }
+
+    if (currentVersion > 0 && currentVersion < 4) {
+      await addColumnIfMissing(
+        db,
+        'recurring_expense_rules',
+        'ownership',
+        "TEXT NOT NULL DEFAULT 'shared'"
+      );
     }
 
     await db.runAsync(

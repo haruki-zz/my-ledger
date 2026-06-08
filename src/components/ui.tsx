@@ -47,6 +47,14 @@ type BentoCardProps = GlassSurfaceProps & {
   variant?: BentoVariant;
 };
 
+type CardTopCapProps = {
+  accent?: string;
+  height?: number;
+  insetHorizontal?: number;
+  insetTop?: number;
+  spacing?: number;
+};
+
 export type PillTabOption<T extends string> = {
   label: string;
   value: T;
@@ -161,6 +169,32 @@ export function BentoCard({ children, style, variant = 'default', ...viewProps }
     <GlassSurface {...viewProps} style={[uiStyles.bentoCard, bentoVariantStyles[variant], style]}>
       {children}
     </GlassSurface>
+  );
+}
+
+export function CardTopCap({
+  accent = colors.primary,
+  height = 18,
+  insetHorizontal = 16,
+  insetTop = 16,
+  spacing = 14
+}: CardTopCapProps) {
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        uiStyles.cardTopCap,
+        {
+          backgroundColor: tintFromAccent(accent),
+          height,
+          marginBottom: spacing,
+          marginHorizontal: -insetHorizontal,
+          marginTop: -insetTop
+        }
+      ]}
+    >
+      <View style={[uiStyles.cardTopCapLine, { backgroundColor: accent }]} />
+    </View>
   );
 }
 

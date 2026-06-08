@@ -80,6 +80,7 @@ type SaveRecurringRulePayload = {
   subcategory: string | null;
   amountYen: number;
   paidBy: string;
+  ownership: ExpenseRow['ownership'];
   splitRatioA: number;
   splitRatioB: number;
   generateDay: number;
@@ -647,7 +648,7 @@ export async function refreshLedgerCategories(ledgerId: string) {
 export async function getCachedRecurringRules(ledgerId: string): Promise<RecurringExpenseRule[]> {
   const db = await getLocalDb();
   const rows = await db.getAllAsync<LocalRecurringRuleRow>(
-    `SELECT id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, split_ratio_a, split_ratio_b,
+    `SELECT id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
        generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at
      FROM recurring_expense_rules
      WHERE ledger_id = ? AND deleted_locally = 0
@@ -716,6 +717,7 @@ export async function saveLocalRecurringRule(input: {
   subcategory: string | null;
   amountYen: number;
   paidBy: string;
+  ownership: ExpenseRow['ownership'];
   splitRatioA: number;
   splitRatioB: number;
   generateDay: number;
@@ -746,6 +748,7 @@ export async function saveLocalRecurringRule(input: {
     subcategory: input.subcategory?.trim() || null,
     amountYen: input.amountYen,
     paidBy: input.paidBy,
+    ownership: input.ownership,
     splitRatioA: input.splitRatioA,
     splitRatioB: input.splitRatioB,
     generateDay: input.generateDay,
@@ -758,7 +761,7 @@ export async function saveLocalRecurringRule(input: {
   await withLocalTransaction(async () => {
     await db.runAsync(
       `INSERT OR REPLACE INTO recurring_expense_rules (
-         id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, split_ratio_a, split_ratio_b,
+         id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
          generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
          local_status, deleted_locally, base_updated_at, last_synced_updated_at
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
@@ -769,6 +772,7 @@ export async function saveLocalRecurringRule(input: {
       payload.subcategory,
       input.amountYen,
       input.paidBy,
+      input.ownership,
       input.splitRatioA,
       input.splitRatioB,
       input.generateDay,
@@ -1034,6 +1038,7 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
       p_subcategory: payload.subcategory,
       p_amount_yen: payload.amountYen,
       p_paid_by: payload.paidBy,
+      p_ownership: payload.ownership,
       p_split_ratio_a: payload.splitRatioA,
       p_split_ratio_b: payload.splitRatioB,
       p_generate_day: payload.generateDay,
@@ -1340,7 +1345,7 @@ async function upsertRemoteRecurringRule(tx: LocalTransaction, rule: RecurringEx
 
   await tx.runAsync(
     `INSERT OR REPLACE INTO recurring_expense_rules (
-       id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, split_ratio_a, split_ratio_b,
+       id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
        generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
        local_status, deleted_locally, base_updated_at, last_synced_updated_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
@@ -1351,6 +1356,7 @@ async function upsertRemoteRecurringRule(tx: LocalTransaction, rule: RecurringEx
     rule.subcategory,
     rule.amount_yen,
     rule.paid_by,
+    rule.ownership,
     rule.split_ratio_a,
     rule.split_ratio_b,
     rule.generate_day,
@@ -1387,6 +1393,7 @@ function mapLocalRecurringRule(row: LocalRecurringRuleRow): RecurringExpenseRule
     subcategory: row.subcategory,
     amount_yen: row.amount_yen,
     paid_by: row.paid_by,
+    ownership: row.ownership,
     split_ratio_a: row.split_ratio_a,
     split_ratio_b: row.split_ratio_b,
     generate_day: row.generate_day,

@@ -41,12 +41,26 @@ export default function RootLayout() {
     router.replace('/(tabs)/history');
   }
 
+  function dismissSettingsDetail() {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/(tabs)/settings');
+  }
+
   if (!fontsLoaded && !fontError) {
     return null;
   }
 
   const resolvedRegularFont = fontError ? fontFamilies.fallback : fontFamilies.regular;
   const resolvedHeaderFont = fontError ? fontFamilies.fallback : fontFamilies.bold;
+  const settingsHeaderLeft = () => (
+    <Pressable accessibilityLabel="Go back" onPress={dismissSettingsDetail}>
+      <Ionicons color={colors.ink} name="arrow-back" size={30} />
+    </Pressable>
+  );
   const expenseHeaderLeft = () => (
     <Pressable accessibilityLabel="Go back" onPress={dismissExpense}>
       <Ionicons color={colors.ink} name="arrow-back" size={30} />
@@ -79,6 +93,14 @@ export default function RootLayout() {
             {/* Settings detail screens */}
             <Stack.Screen name="settings/account" options={{ headerBackTitle: 'Settings', title: 'Account' }} />
             <Stack.Screen name="settings/ledgers" options={{ headerBackTitle: 'Settings', title: 'Ledgers' }} />
+            <Stack.Screen
+              name="settings/recurring"
+              options={{
+                headerLeft: settingsHeaderLeft,
+                headerTitleAlign: 'center',
+                title: 'Fixed Expense'
+              }}
+            />
             <Stack.Screen name="settings/sync" options={{ headerBackTitle: 'Settings', title: 'Sync Status' }} />
             <Stack.Screen name="settings/ledger/[id]" options={{ headerBackTitle: 'Ledgers', title: 'Ledger Details' }} />
             {/* Expense detail screens */}
