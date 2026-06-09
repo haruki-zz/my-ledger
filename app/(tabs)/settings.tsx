@@ -51,12 +51,13 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { session, signOut: signOutSession } = useAuth();
   const sync = useSyncContext();
-  const { activeLedger, ledgers, loading: ledgersLoading, reloadLedgers, selectLedger } = useLedgerContext();
+  const { activeLedger, ledgers, reloadLedgers, selectLedger } = useLedgerContext();
   const { error, ledger, loading, reloadLedger } = useRequiredLedger();
   const ledgerId = ledger?.id;
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [rules, setRules] = useState<RecurringExpenseRule[]>([]);
-  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [, setDetailsLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
 
   const loadDetails = useCallback(async () => {
@@ -102,11 +103,15 @@ export default function SettingsScreen() {
   const activeRules = rules.filter((rule) => rule.is_active);
   const recurringTotal = activeRules.reduce((sum, rule) => sum + rule.amount_yen, 0);
   const otherLedgers = ledgers.filter((membership) => membership.ledger.id !== activeLedger?.ledger.id).slice(0, 2);
-  const isRefreshing = loading || ledgersLoading || detailsLoading;
 
   async function refresh() {
-    await Promise.all([reloadLedger(), reloadLedgers()]);
-    await loadDetails();
+    setRefreshing(true);
+    try {
+      await Promise.all([reloadLedger(), reloadLedgers()]);
+      await loadDetails();
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function shareInviteCode() {
@@ -176,7 +181,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView
-      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       style={localStyles.page}
       contentContainerStyle={[localStyles.content, { paddingTop: insets.top + 28 }]}
     >

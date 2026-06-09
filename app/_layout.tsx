@@ -9,7 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SplashScreen, Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Pressable } from 'react-native';
+import { Pressable, StyleSheet } from 'react-native';
 
 import { colors, fontFamilies } from '@/src/components/styles';
 import { AuthProvider } from '@/src/context/AuthContext';
@@ -50,21 +50,37 @@ export default function RootLayout() {
     router.replace('/(tabs)/settings');
   }
 
+  function dismissLedgerDetail() {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/settings/ledgers');
+  }
+
   if (!fontsLoaded && !fontError) {
     return null;
   }
 
   const resolvedRegularFont = fontError ? fontFamilies.fallback : fontFamilies.regular;
   const resolvedHeaderFont = fontError ? fontFamilies.fallback : fontFamilies.bold;
+  function BackButton({ onPress }: { onPress: () => void }) {
+    return (
+      <Pressable accessibilityLabel="Go back" onPress={onPress} style={({ pressed }) => [localStyles.backButton, pressed && localStyles.pressed]}>
+        <Ionicons color={colors.ink} name="arrow-back" size={28} />
+      </Pressable>
+    );
+  }
+
   const settingsHeaderLeft = () => (
-    <Pressable accessibilityLabel="Go back" onPress={dismissSettingsDetail}>
-      <Ionicons color={colors.ink} name="arrow-back" size={30} />
-    </Pressable>
+    <BackButton onPress={dismissSettingsDetail} />
+  );
+  const ledgerHeaderLeft = () => (
+    <BackButton onPress={dismissLedgerDetail} />
   );
   const expenseHeaderLeft = () => (
-    <Pressable accessibilityLabel="Go back" onPress={dismissExpense}>
-      <Ionicons color={colors.ink} name="arrow-back" size={30} />
-    </Pressable>
+    <BackButton onPress={dismissExpense} />
   );
 
   return (
@@ -76,6 +92,7 @@ export default function RootLayout() {
             screenOptions={{
               headerStyle: { backgroundColor: colors.bg },
               headerShadowVisible: false,
+              headerBackButtonDisplayMode: 'minimal',
               headerTitleStyle: {
                 color: colors.ink,
                 fontFamily: resolvedHeaderFont,
@@ -91,8 +108,8 @@ export default function RootLayout() {
             <Stack.Screen name="ledger" options={{ title: 'Shared Ledger' }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             {/* Settings detail screens */}
-            <Stack.Screen name="settings/account" options={{ headerBackTitle: 'Settings', title: 'Account' }} />
-            <Stack.Screen name="settings/ledgers" options={{ headerBackTitle: 'Settings', title: 'Ledgers' }} />
+            <Stack.Screen name="settings/account" options={{ headerLeft: settingsHeaderLeft, title: 'Account' }} />
+            <Stack.Screen name="settings/ledgers" options={{ headerLeft: settingsHeaderLeft, title: 'Ledgers' }} />
             <Stack.Screen
               name="settings/recurring"
               options={{
@@ -101,8 +118,14 @@ export default function RootLayout() {
                 title: 'Fixed Expense'
               }}
             />
-            <Stack.Screen name="settings/sync" options={{ headerBackTitle: 'Settings', title: 'Sync Status' }} />
-            <Stack.Screen name="settings/ledger/[id]" options={{ headerBackTitle: 'Ledgers', title: 'Ledger Details' }} />
+            <Stack.Screen name="settings/sync" options={{ headerLeft: settingsHeaderLeft, title: 'Sync Status' }} />
+            <Stack.Screen
+              name="settings/ledger/[id]"
+              options={{
+                headerLeft: ledgerHeaderLeft,
+                title: 'Ledger Details'
+              }}
+            />
             {/* Expense detail screens */}
             <Stack.Screen
               name="expenses/new"
@@ -117,7 +140,6 @@ export default function RootLayout() {
             <Stack.Screen
               name="expenses/[id]"
               options={{
-                headerBackTitle: 'History',
                 headerLeft: expenseHeaderLeft,
                 headerRight: () => null,
                 headerTitleAlign: 'center',
@@ -130,3 +152,16 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
+
+const localStyles = StyleSheet.create({
+  backButton: {
+    alignItems: 'center',
+    height: 40,
+    justifyContent: 'center',
+    marginLeft: -4,
+    width: 40
+  },
+  pressed: {
+    opacity: 0.76
+  }
+});

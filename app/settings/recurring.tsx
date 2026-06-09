@@ -52,6 +52,8 @@ type Draft = {
   isActive: boolean;
 };
 
+type LoadMode = 'background' | 'initial' | 'refresh';
+
 function sanitizeWholeNumber(value: string) {
   return value.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '');
 }
@@ -172,19 +174,26 @@ export default function RecurringExpenseRulesScreen() {
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [nativeGenerateDatePickerOpen, setNativeGenerateDatePickerOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const ledgerId = ledger?.id;
 
-  const load = useCallback(async (currentLedger = ledger) => {
+  const load = useCallback(async (currentLedger = ledger, mode: LoadMode = 'background') => {
     if (!currentLedger) {
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
     setError(null);
-    setLoading(true);
+    if (mode === 'initial') {
+      setLoading(true);
+    }
+    if (mode === 'refresh') {
+      setRefreshing(true);
+    }
     try {
       const [nextMembers, nextRules] = await Promise.all([
         getLedgerMembers(currentLedger.id),
@@ -196,12 +205,17 @@ export default function RecurringExpenseRulesScreen() {
     } catch (loadError) {
       setError(getErrorMessage(loadError));
     } finally {
-      setLoading(false);
+      if (mode === 'initial') {
+        setLoading(false);
+      }
+      if (mode === 'refresh') {
+        setRefreshing(false);
+      }
     }
   }, [ledger]);
 
   useEffect(() => {
-    void load();
+    void load(undefined, 'initial');
   }, [load]);
 
   useEffect(() => {
@@ -210,7 +224,7 @@ export default function RecurringExpenseRulesScreen() {
     }
 
     return subscribeToLedgerData(ledgerId, () => {
-      void load();
+      void load(undefined, 'background');
     });
   }, [ledgerId, load]);
 
@@ -230,7 +244,7 @@ export default function RecurringExpenseRulesScreen() {
 
   async function refresh() {
     const nextLedger = await reloadLedger();
-    await load(nextLedger || ledger);
+    await load(nextLedger || ledger, 'refresh');
   }
 
   function updateDraft(patch: Partial<Draft>) {
@@ -329,7 +343,7 @@ export default function RecurringExpenseRulesScreen() {
         isActive: nextDraft.isActive
       });
       await generateRecurringExpenses(ledger.id, currentMonthStartDate()).catch(() => []);
-      await refresh();
+      await load(ledger, 'background');
       if (nextDraft === draft) {
         startCreate();
       }
@@ -376,7 +390,7 @@ export default function RecurringExpenseRulesScreen() {
 
   return (
     <KeyboardAwareScrollView
-      refreshControl={<RefreshControl refreshing={ledgerLoading || loading} onRefresh={refresh} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       style={styles.page}
       contentContainerStyle={styles.content}
     >

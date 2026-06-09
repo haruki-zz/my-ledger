@@ -787,6 +787,17 @@ const uiStyles = StyleSheet.create({
     minHeight: 320,
     padding: 18
   },
+  cardTopCap: {
+    borderBottomColor: 'rgba(17,24,39,0.05)',
+    borderBottomWidth: 1,
+    justifyContent: 'flex-end',
+    overflow: 'hidden'
+  },
+  cardTopCapLine: {
+    borderBottomRightRadius: 999,
+    height: 3,
+    width: 78
+  },
   filterChip: {
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.82)',

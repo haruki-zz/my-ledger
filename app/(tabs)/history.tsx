@@ -59,6 +59,8 @@ type HistorySection = {
   totalYen: number;
 };
 
+type LoadMode = 'background' | 'initial' | 'refresh';
+
 const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
   day: '2-digit',
   month: 'short',
@@ -91,6 +93,7 @@ export default function HistoryScreen() {
   const [activeMemberIds, setActiveMemberIds] = useState<Set<string>>(new Set());
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const {
     activeDropdown,
@@ -113,13 +116,21 @@ export default function HistoryScreen() {
     currentLedgerRef.current = currentLedger;
   }, [currentLedger]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (mode: LoadMode = 'background') => {
     if (ledgerLoading) {
+      if (mode === 'refresh') {
+        setRefreshing(false);
+      }
       return;
     }
 
     setError(null);
-    setLoading(true);
+    if (mode === 'initial') {
+      setLoading(true);
+    }
+    if (mode === 'refresh') {
+      setRefreshing(true);
+    }
 
     try {
       const activeLedger = currentLedgerRef.current;
@@ -146,7 +157,12 @@ export default function HistoryScreen() {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Could not load expenses');
     } finally {
-      setLoading(false);
+      if (mode === 'initial') {
+        setLoading(false);
+      }
+      if (mode === 'refresh') {
+        setRefreshing(false);
+      }
     }
   }, [ledgerLoading]);
 
@@ -162,7 +178,7 @@ export default function HistoryScreen() {
   }, [activeLedgerId, resetFilters]);
 
   useEffect(() => {
-    load();
+    void load('initial');
   }, [activeLedgerId, load]);
 
   const ledgerId = activeLedgerId;
@@ -173,7 +189,7 @@ export default function HistoryScreen() {
     }
 
     return subscribeToLedgerData(ledgerId, () => {
-      void load();
+      void load('background');
     });
   }, [ledgerId, load]);
 
@@ -390,7 +406,7 @@ export default function HistoryScreen() {
             setDetailSelection(null);
             setSplitSelection(null);
             await deleteExpense(expenseId);
-            await load();
+            await load('background');
           } catch (deleteError) {
             Alert.alert('Delete Failed', deleteError instanceof Error ? deleteError.message : 'Please try again later');
           }
@@ -517,7 +533,7 @@ export default function HistoryScreen() {
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         keyExtractor={({ expense }) => expense.id}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} />}
         renderItem={({ item, index, section }) => (
           <SectionDetailRow
             expenseBadges={expenseBadges}
