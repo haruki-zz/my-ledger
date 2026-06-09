@@ -813,7 +813,7 @@ const localStyles = StyleSheet.create({
   },
   chip: {
     borderColor: colors.line,
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 8
@@ -930,7 +930,7 @@ const localStyles = StyleSheet.create({
   },
   memberChip: {
     borderColor: colors.line,
-    borderRadius: 12,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     flex: 1,
     minHeight: 42,
@@ -976,7 +976,7 @@ const localStyles = StyleSheet.create({
   },
   ownershipOption: {
     alignItems: 'center',
-    borderRadius: 15,
+    borderRadius: theme.radii.pill,
     flex: 1,
     justifyContent: 'center',
     minHeight: 42,
@@ -989,7 +989,7 @@ const localStyles = StyleSheet.create({
   ownershipSelector: {
     backgroundColor: 'rgba(15,118,110,0.08)',
     borderColor: colors.line,
-    borderRadius: 18,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     flexDirection: 'row',
     minHeight: 48,
@@ -1063,7 +1063,7 @@ const localStyles = StyleSheet.create({
   },
   statusPill: {
     borderColor: colors.line,
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     paddingHorizontal: 10,
     paddingVertical: 6

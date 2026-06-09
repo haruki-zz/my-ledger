@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, fontFamilies, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { useSyncContext } from '@/src/context/SyncContext';
@@ -800,7 +800,7 @@ const localStyles = StyleSheet.create({
   },
   memberChip: {
     alignItems: 'center',
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     flexDirection: 'row',
     gap: 6,
     maxWidth: '100%',
@@ -835,7 +835,7 @@ const localStyles = StyleSheet.create({
   pillButton: {
     alignItems: 'center',
     backgroundColor: colors.primary,
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     flexDirection: 'row',
     gap: 6,
     height: 36,
@@ -880,7 +880,7 @@ const localStyles = StyleSheet.create({
   signOutButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(220,38,38,0.10)',
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     flexDirection: 'row',
     gap: 7,
     height: 36,

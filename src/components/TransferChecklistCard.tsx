@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { colors, fontFamilies, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import {
   completedAtForUser,
   isParticipant
@@ -382,7 +382,7 @@ const localStyles = StyleSheet.create({
     flexShrink: 0
   },
   userPill: {
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     flexShrink: 1,
     maxWidth: '45%',
     minHeight: 22,

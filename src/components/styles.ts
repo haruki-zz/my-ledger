@@ -33,6 +33,7 @@ export const theme = {
     warm: '#C2410C'
   },
   radii: {
+    pill: 999,
     control: 16,
     compact: 12,
     surface: 20
@@ -249,7 +250,7 @@ export const styles = StyleSheet.create({
   chip: {
     borderColor: colors.line,
     backgroundColor: 'rgba(255,255,255,0.62)',
-    borderRadius: theme.radii.control,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     flex: 1,
     minHeight: 44,

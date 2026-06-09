@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { colors, fontFamilies } from '@/src/components/styles';
+import { colors, fontFamilies, theme } from '@/src/components/styles';
 import { tintFromAccent } from '@/src/lib/color';
 
 export type ExpenseBadge = {
@@ -241,7 +241,7 @@ const rowCardStyles = StyleSheet.create({
   },
   badge: {
     backgroundColor: 'rgba(15,118,110,0.10)',
-    borderRadius: 8,
+    borderRadius: theme.radii.pill,
     flexShrink: 1,
     maxWidth: 116,
     paddingHorizontal: 8,
@@ -259,7 +259,7 @@ const rowCardStyles = StyleSheet.create({
     maxWidth: 118
   },
   badgeCompact: {
-    borderRadius: 7,
+    borderRadius: theme.radii.pill,
     maxWidth: 72,
     paddingHorizontal: 6,
     paddingVertical: 2

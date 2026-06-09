@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, fontFamilies } from '@/src/components/styles';
+import { colors, fontFamilies, theme } from '@/src/components/styles';
 import { getLocalDb, isLocalDbUnavailableError } from '@/src/lib/localDb';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
@@ -170,7 +170,7 @@ const syncStyles = StyleSheet.create({
   },
   banner: {
     backgroundColor: colors.primaryDark,
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     paddingHorizontal: 14,
     paddingVertical: 8,
     shadowColor: '#000',

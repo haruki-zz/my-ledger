@@ -380,7 +380,7 @@ function ResponsiveTabBar({
 const localStyles = StyleSheet.create({
   bottomTabItem: {
     alignItems: 'center',
-    borderRadius: 20,
+    borderRadius: theme.radii.pill,
     flex: 1,
     gap: 2,
     height: 54,

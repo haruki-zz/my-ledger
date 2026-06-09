@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { colors, styles } from '@/src/components/styles';
+import { colors, styles, theme } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useSyncContext } from '@/src/context/SyncContext';
 import {
@@ -193,7 +193,7 @@ const syncStyles = StyleSheet.create({
     gap: 4
   },
   statusPill: {
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     paddingHorizontal: 10,
     paddingVertical: 5
   },

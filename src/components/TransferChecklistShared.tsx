@@ -219,7 +219,7 @@ export const sharedStyles = StyleSheet.create({
     lineHeight: 18
   },
   transferUserPill: {
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     maxWidth: 112,
     minHeight: 22,
     justifyContent: 'center',

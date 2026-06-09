@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { colors, fontFamilies } from '@/src/components/styles';
+import { colors, fontFamilies, theme } from '@/src/components/styles';
 
 export type HistoryFilterOption = {
   label: string;
@@ -190,7 +190,7 @@ const filterStyles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.82)',
     borderColor: colors.line,
-    borderRadius: 18,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     flex: 1,
     flexDirection: 'row',

@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DailyChart } from '@/src/components/DailyChart';
 import { PieChart } from '@/src/components/PieChart';
-import { colors, fontFamilies, styles } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { TransferChecklistCard } from '@/src/components/TransferChecklistCard';
 import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
@@ -541,7 +541,7 @@ const localStyles = StyleSheet.create({
   },
   memberNamePill: {
     alignSelf: 'flex-start',
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     maxWidth: '100%',
     minHeight: 22,
     justifyContent: 'center',
@@ -649,7 +649,7 @@ const localStyles = StyleSheet.create({
   },
   userLegendPill: {
     alignItems: 'center',
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     flexDirection: 'row',
     gap: 6,
     maxWidth: 112,

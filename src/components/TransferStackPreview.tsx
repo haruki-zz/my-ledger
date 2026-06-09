@@ -88,7 +88,7 @@ const stackStyles = StyleSheet.create({
   countBadge: {
     backgroundColor: colors.tint,
     borderColor: colors.line,
-    borderRadius: 999,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     paddingHorizontal: 9,
     paddingVertical: 4,

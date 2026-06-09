@@ -802,7 +802,7 @@ const uiStyles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.82)',
     borderColor: colors.line,
-    borderRadius: 18,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 7,
@@ -920,7 +920,7 @@ const uiStyles = StyleSheet.create({
   pillIndicator: {
     backgroundColor: 'rgba(255,255,255,0.96)',
     borderColor: colors.line,
-    borderRadius: 14,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     bottom: 3,
     left: 3,
@@ -958,7 +958,7 @@ const uiStyles = StyleSheet.create({
   pillTrack: {
     backgroundColor: 'rgba(15,118,110,0.08)',
     borderColor: colors.line,
-    borderRadius: 18,
+    borderRadius: theme.radii.pill,
     borderWidth: 1,
     flexDirection: 'row',
     height: 38,
@@ -966,7 +966,7 @@ const uiStyles = StyleSheet.create({
     position: 'relative'
   },
   pillTrackSmall: {
-    borderRadius: 15,
+    borderRadius: theme.radii.pill,
     height: 30
   },
   pressed: {
