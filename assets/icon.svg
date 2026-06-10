@@ -1,0 +1,18 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  
+  
+  <rect width="1024" height="1024" fill="#FFFFFF"></rect>
+
+  
+  <circle cx="408" cy="424" r="244" fill="#0F766E"></circle>
+  <circle cx="408" cy="424" r="204" fill="none" stroke="#FFFFFF" stroke-opacity="0.24" stroke-width="10"></circle>
+  <text x="408" y="424" text-anchor="middle" dominant-baseline="central" font-family="&#39;JetBrains Mono&#39;, ui-monospace, monospace" font-weight="800" font-size="232" fill="#FFFFFF">¥</text>
+
+  
+  <circle cx="616" cy="604" r="266" fill="#FFFFFF"></circle>
+
+  
+  <circle cx="616" cy="604" r="244" fill="#C2410C"></circle>
+  <circle cx="616" cy="604" r="204" fill="none" stroke="#FFFFFF" stroke-opacity="0.24" stroke-width="10"></circle>
+  <text x="616" y="604" text-anchor="middle" dominant-baseline="central" font-family="&#39;JetBrains Mono&#39;, ui-monospace, monospace" font-weight="800" font-size="232" fill="#FFFFFF">¥</text>
+</svg>
