@@ -764,7 +764,7 @@ export async function saveLocalRecurringRule(input: {
          id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
          generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
          local_status, deleted_locally, base_updated_at, last_synced_updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
       ruleId,
       input.ledgerId,
       payload.name,
@@ -1348,7 +1348,7 @@ async function upsertRemoteRecurringRule(tx: LocalTransaction, rule: RecurringEx
        id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
        generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
        local_status, deleted_locally, base_updated_at, last_synced_updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
     rule.id,
     rule.ledger_id,
     rule.name,

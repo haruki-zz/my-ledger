@@ -18,15 +18,19 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { ToggleSwitch } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { useSyncContext } from '@/src/context/SyncContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
+import { categoryColor, categoryIconName, categoryLabel } from '@/src/lib/categorySystem';
+import { tintFromAccent } from '@/src/lib/color';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   getErrorMessage,
   getLedgerMembers,
   getRecurringExpenseRules,
+  saveRecurringExpenseRule,
   type LedgerMembership
 } from '@/src/lib/ledger';
 import type { LedgerMemberProfile, RecurringExpenseRule } from '@/src/types/database';
@@ -56,6 +60,8 @@ export default function SettingsScreen() {
   const ledgerId = ledger?.id;
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [rules, setRules] = useState<RecurringExpenseRule[]>([]);
+  const [fixedExpensesExpanded, setFixedExpensesExpanded] = useState(false);
+  const [togglingRuleIds, setTogglingRuleIds] = useState<Set<string>>(() => new Set());
   const [, setDetailsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
@@ -138,6 +144,51 @@ export default function SettingsScreen() {
     }
   }
 
+  async function toggleRecurringRule(rule: RecurringExpenseRule) {
+    if (!ledgerId || togglingRuleIds.has(rule.id)) {
+      return;
+    }
+
+    const nextIsActive = !rule.is_active;
+    const previousRules = rules;
+    setTogglingRuleIds((current) => new Set(current).add(rule.id));
+    setRules((current) => current.map((item) => (
+      item.id === rule.id ? { ...item, is_active: nextIsActive } : item
+    )));
+
+    try {
+      // Recurring rules are saved through the same full-replace path as the editor so offline sync
+      // queues one consistent mutation shape. Keep this payload in step with SaveRecurringExpenseRuleInput.
+      await saveRecurringExpenseRule({
+        id: rule.id,
+        ledgerId,
+        name: rule.name,
+        categoryId: rule.category_id,
+        subcategory: rule.subcategory,
+        amountYen: rule.amount_yen,
+        paidBy: rule.paid_by,
+        ownership: rule.ownership || 'shared',
+        splitRatioA: rule.split_ratio_a,
+        splitRatioB: rule.split_ratio_b,
+        generateDay: rule.generate_day,
+        startMonth: rule.start_month,
+        endMonth: rule.end_month,
+        timezone: rule.timezone,
+        isActive: nextIsActive
+      });
+      await loadDetails();
+    } catch (toggleError) {
+      setRules(previousRules);
+      Alert.alert('Update Failed', getErrorMessage(toggleError));
+    } finally {
+      setTogglingRuleIds((current) => {
+        const next = new Set(current);
+        next.delete(rule.id);
+        return next;
+      });
+    }
+  }
+
   async function signOut() {
     if (sync.hasUnsyncedChanges) {
       Alert.alert(
@@ -211,7 +262,14 @@ export default function SettingsScreen() {
 
       <FixedExpensesPanel
         activeCount={activeRules.length}
+        expanded={fixedExpensesExpanded}
+        members={members}
         onOpen={() => router.push('/settings/recurring')}
+        onOpenRule={(rule) => router.push({ pathname: '/settings/recurring', params: { ruleId: rule.id } })}
+        onToggleExpanded={() => setFixedExpensesExpanded((current) => !current)}
+        onToggleRule={toggleRecurringRule}
+        rules={rules}
+        togglingRuleIds={togglingRuleIds}
         total={recurringTotal}
       />
 
@@ -374,7 +432,7 @@ function SwitchLedgerRow({
     <View>
       <Pressable onPress={onPress} style={({ pressed }) => [localStyles.switchRow, pressed && localStyles.pressed]}>
         <CircleIcon
-          backgroundColor={tintForColor(ledgerColor)}
+          backgroundColor={tintFromAccent(ledgerColor)}
           color={ledgerColor}
           icon="journal-outline"
           size={38}
@@ -392,36 +450,165 @@ function SwitchLedgerRow({
 
 function FixedExpensesPanel({
   activeCount,
+  expanded,
+  members,
   onOpen,
+  onOpenRule,
+  onToggleExpanded,
+  onToggleRule,
+  rules,
+  togglingRuleIds,
   total
 }: {
   activeCount: number;
+  expanded: boolean;
+  members: LedgerMemberProfile[];
   onOpen: () => void;
+  onOpenRule: (rule: RecurringExpenseRule) => void;
+  onToggleExpanded: () => void;
+  onToggleRule: (rule: RecurringExpenseRule) => void;
+  rules: RecurringExpenseRule[];
+  togglingRuleIds: Set<string>;
   total: number;
 }) {
+  const inactiveCount = rules.length - activeCount;
+  const memberNameById = new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]));
+  const hasRules = rules.length > 0;
+
   return (
     <View style={localStyles.panelGroup}>
       <SectionHead
         action={<PillButton icon="add" label="Add" onPress={onOpen} tone="secondary" />}
-        title="Fixed Expenses"
+        title="Fixed Expense"
       />
       <Card>
-        <Pressable onPress={onOpen} style={({ pressed }) => [localStyles.fixedSummary, pressed && localStyles.pressed]}>
-          <View>
+        <Pressable
+          onPress={hasRules ? onToggleExpanded : onOpen}
+          style={({ pressed }) => [
+            localStyles.fixedSummary,
+            expanded && hasRules ? localStyles.fixedSummaryExpanded : localStyles.fixedSummaryCollapsed,
+            pressed && localStyles.pressed
+          ]}
+        >
+          <View style={localStyles.fixedSummaryText}>
             <Text style={localStyles.totalLabel}>TOTAL / MONTH</Text>
             <Text style={localStyles.totalValue}>{formatYen(total)}</Text>
+            <View style={localStyles.fixedPillRow}>
+              <InfoPill color={colors.primaryDark} label={`${activeCount} active`} />
+              <InfoPill color={inactiveCount > 0 ? colors.muted : colors.primaryDark} label={`${inactiveCount} paused`} />
+            </View>
           </View>
-          <CircleIcon backgroundColor={colors.tint} color={colors.primaryDark} icon="repeat-outline" size={46} />
+          <View style={localStyles.fixedSummaryActions}>
+            <CircleIcon backgroundColor={colors.tint} color={colors.primaryDark} icon="repeat-outline" size={46} />
+            {hasRules ? (
+              <CircleIcon
+                backgroundColor="rgba(255,255,255,0.72)"
+                color={colors.ink}
+                icon={expanded ? 'chevron-up' : 'chevron-down'}
+                size={34}
+              />
+            ) : null}
+          </View>
         </Pressable>
-        <View style={localStyles.fullDivider} />
-        <DashboardRow
-          description={`${activeCount} active ${activeCount === 1 ? 'rule' : 'rules'} · monthly shared expenses`}
-          icon="calendar-outline"
-          onPress={onOpen}
-          title="Manage fixed monthly expenses"
-          tone="warm"
-        />
+        {expanded && hasRules ? (
+          <View>
+            <View style={localStyles.fullDivider} />
+            {rules.map((rule, index) => (
+              <FixedExpenseRuleRow
+                key={rule.id}
+                memberName={memberNameById.get(rule.paid_by) || 'Unknown payer'}
+                onPress={() => onOpenRule(rule)}
+                onToggle={() => onToggleRule(rule)}
+                rule={rule}
+                showDivider={index > 0}
+                toggling={togglingRuleIds.has(rule.id)}
+              />
+            ))}
+          </View>
+        ) : null}
+        {!hasRules ? (
+          <>
+            <View style={localStyles.fullDivider} />
+            <DashboardRow
+              description="No monthly fixed expenses yet"
+              icon="calendar-outline"
+              onPress={onOpen}
+              title="Create the first fixed expense"
+              tone="warm"
+            />
+          </>
+        ) : null}
       </Card>
+    </View>
+  );
+}
+
+function FixedExpenseRuleRow({
+  memberName,
+  onPress,
+  onToggle,
+  rule,
+  showDivider,
+  toggling
+}: {
+  memberName: string;
+  onPress: () => void;
+  onToggle: () => void;
+  rule: RecurringExpenseRule;
+  showDivider: boolean;
+  toggling: boolean;
+}) {
+  const accent = categoryColor(rule.category_id);
+
+  return (
+    <View style={[localStyles.fixedRuleSegment, !rule.is_active && localStyles.fixedRuleSegmentPaused]}>
+      {showDivider ? <View style={localStyles.fixedRuleDivider} /> : null}
+      <View style={localStyles.fixedRuleRow}>
+        <Pressable onPress={onPress} style={({ pressed }) => [localStyles.fixedRuleMain, pressed && localStyles.pressed]}>
+          <CircleIcon
+            backgroundColor={tintFromAccent(accent)}
+            color={accent}
+            icon={categoryIconName(rule.category_id)}
+            size={42}
+          />
+          <View style={localStyles.fixedRuleBody}>
+            <View style={localStyles.fixedRuleTitleRow}>
+              <Text numberOfLines={1} style={localStyles.fixedRuleTitle}>{rule.name}</Text>
+              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.fixedRuleAmount}>{formatYen(rule.amount_yen)}</Text>
+            </View>
+            <View style={localStyles.fixedPillRow}>
+              <InfoPill color={accent} label={categoryLabel(rule.category_id)} />
+              <InfoPill color={colors.primaryDark} icon="calendar-outline" label={`Day ${rule.generate_day}`} />
+            </View>
+            <Text numberOfLines={1} style={localStyles.fixedRuleMeta}>
+              {rule.ownership === 'personal' ? 'Personal' : 'Shared'} · {memberName} pays{rule.ownership === 'shared' ? ` · ${rule.split_ratio_a}/${rule.split_ratio_b}` : ''}
+            </Text>
+          </View>
+        </Pressable>
+        <ToggleSwitch
+          accessibilityLabel={rule.is_active ? 'Turn fixed expense inactive' : 'Turn fixed expense active'}
+          active={rule.is_active}
+          disabled={toggling}
+          onPress={onToggle}
+        />
+      </View>
+    </View>
+  );
+}
+
+function InfoPill({
+  color,
+  icon,
+  label
+}: {
+  color: string;
+  icon?: IoniconName;
+  label: string;
+}) {
+  return (
+    <View style={[localStyles.infoPill, { backgroundColor: tintFromAccent(color) }]}>
+      {icon ? <Ionicons color={color} name={icon} size={12} /> : <View style={[localStyles.infoPillDot, { backgroundColor: color }]} />}
+      <Text numberOfLines={1} style={[localStyles.infoPillText, { color }]}>{label}</Text>
     </View>
   );
 }
@@ -439,7 +626,7 @@ function DashboardRow({
   return (
     <View>
       <Pressable onPress={onPress} style={({ pressed }) => [localStyles.dashboardRow, pressed && localStyles.pressed]}>
-        <CircleIcon backgroundColor={tintForColor(toneColor)} color={toneColor} icon={icon} size={40} />
+        <CircleIcon backgroundColor={tintFromAccent(toneColor)} color={toneColor} icon={icon} size={40} />
         <View style={localStyles.dashboardText}>
           <Text style={[localStyles.dashboardTitle, tone === 'danger' && localStyles.dangerText]}>{title}</Text>
           <Text numberOfLines={1} style={localStyles.dashboardDescription}>{description}</Text>
@@ -536,7 +723,7 @@ function CircleIcon({
 
 function MemberChip({ color, label }: { color: string; label: string }) {
   return (
-    <View style={[localStyles.memberChip, { backgroundColor: tintForColor(color) }]}>
+    <View style={[localStyles.memberChip, { backgroundColor: tintFromAccent(color) }]}>
       <View style={[localStyles.memberDot, { backgroundColor: color }]} />
       <Text numberOfLines={1} style={[localStyles.memberChipText, { color }]}>{label}</Text>
     </View>
@@ -580,28 +767,6 @@ function colorForTone(tone: ActionTone) {
     return colors.ink;
   }
   return colors.primaryDark;
-}
-
-function tintForColor(color: string | ColorValue) {
-  if (color === colors.accent || color === '#6366F1') {
-    return 'rgba(99,102,241,0.12)';
-  }
-  if (color === colors.warm || color === '#C2410C') {
-    return 'rgba(194,65,12,0.12)';
-  }
-  if (color === colors.danger || color === '#DC2626') {
-    return 'rgba(220,38,38,0.10)';
-  }
-  if (color === '#2563EB') {
-    return 'rgba(37,99,235,0.12)';
-  }
-  if (color === '#8B5CF6') {
-    return 'rgba(139,92,246,0.12)';
-  }
-  if (color === '#14B8A6') {
-    return 'rgba(20,184,166,0.12)';
-  }
-  return 'rgba(15,118,110,0.10)';
 }
 
 const localStyles = StyleSheet.create({
@@ -747,10 +912,104 @@ const localStyles = StyleSheet.create({
   },
   fixedSummary: {
     alignItems: 'center',
-    backgroundColor: colors.tint,
+    backgroundColor: 'rgba(255,255,255,0.92)',
     flexDirection: 'row',
+    gap: 14,
     justifyContent: 'space-between',
+    minHeight: 96,
     padding: 16
+  },
+  fixedSummaryActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 8
+  },
+  fixedSummaryCollapsed: {
+    borderRadius: 0
+  },
+  fixedSummaryExpanded: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0
+  },
+  fixedSummaryText: {
+    flex: 1,
+    gap: 8,
+    minWidth: 0
+  },
+  fixedPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7
+  },
+  fixedRuleAmount: {
+    color: colors.ink,
+    flexShrink: 0,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20,
+    maxWidth: 132,
+    textAlign: 'right'
+  },
+  fixedRuleBody: {
+    flex: 1,
+    gap: 7,
+    minWidth: 0
+  },
+  fixedRuleDivider: {
+    backgroundColor: 'rgba(100,116,139,0.15)',
+    height: 1,
+    marginLeft: 74
+  },
+  fixedRuleMeta: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 17
+  },
+  fixedRuleMain: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 14,
+    minHeight: 66,
+    minWidth: 0
+  },
+  fixedRuleRow: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    minHeight: 92,
+    paddingHorizontal: 16,
+    paddingVertical: 13
+  },
+  fixedRuleSegment: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderColor: 'rgba(100,116,139,0.08)',
+    borderLeftWidth: 0,
+    borderRightWidth: 0,
+    overflow: 'hidden'
+  },
+  fixedRuleSegmentPaused: {
+    opacity: 0.62
+  },
+  fixedRuleTitle: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20,
+    minWidth: 0
+  },
+  fixedRuleTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minWidth: 0
   },
   footer: {
     alignItems: 'center'
@@ -769,6 +1028,29 @@ const localStyles = StyleSheet.create({
     backgroundColor: colors.line,
     height: 1,
     marginLeft: 68
+  },
+  infoPill: {
+    alignItems: 'center',
+    borderRadius: theme.radii.pill,
+    flexDirection: 'row',
+    gap: 5,
+    maxWidth: '100%',
+    minHeight: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  infoPillDot: {
+    borderRadius: 3,
+    height: 6,
+    width: 6
+  },
+  infoPillText: {
+    fontFamily: fontFamilies.bold,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0,
+    lineHeight: 13,
+    maxWidth: 150
   },
   inviteCode: {
     color: colors.ink,

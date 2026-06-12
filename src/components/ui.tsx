@@ -115,6 +115,14 @@ type FilterChipProps = {
   onPress: () => void;
 };
 
+type ToggleSwitchProps = {
+  accessibilityLabel?: string;
+  active: boolean;
+  disabled?: boolean;
+  onPress?: () => void;
+  style?: StyleProp<ViewStyle>;
+};
+
 type SwipeExpenseRowProps = {
   compact?: boolean;
   content: ExpenseRowCardContentData;
@@ -409,6 +417,42 @@ export function FilterChip({ active, label, onPress }: FilterChipProps) {
       >
         {label}
       </Text>
+    </Pressable>
+  );
+}
+
+export function ToggleSwitch({
+  accessibilityLabel,
+  active,
+  disabled = false,
+  onPress,
+  style
+}: ToggleSwitchProps) {
+  const switchVisual = (
+    <View style={[uiStyles.toggleSwitchTrack, active && uiStyles.toggleSwitchTrackActive]}>
+      <View style={[uiStyles.toggleSwitchThumb, active && uiStyles.toggleSwitchThumbActive]} />
+    </View>
+  );
+
+  if (!onPress) {
+    return <View style={[uiStyles.toggleSwitchButton, style]}>{switchVisual}</View>;
+  }
+
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: active, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        uiStyles.toggleSwitchButton,
+        disabled && uiStyles.disabled,
+        pressed && !disabled && uiStyles.pressed,
+        style
+      ]}
+    >
+      {switchVisual}
     </Pressable>
   );
 }
@@ -1020,6 +1064,37 @@ const uiStyles = StyleSheet.create({
   },
   swipeShell: {
     borderRadius: theme.radii.surface
+  },
+  toggleSwitchButton: {
+    alignItems: 'center',
+    flexShrink: 0,
+    justifyContent: 'center',
+    minHeight: 44,
+    width: 54
+  },
+  toggleSwitchThumb: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 11,
+    height: 22,
+    shadowColor: '#0F172A',
+    shadowOffset: { height: 2, width: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 5,
+    width: 22
+  },
+  toggleSwitchThumbActive: {
+    transform: [{ translateX: 20 }]
+  },
+  toggleSwitchTrack: {
+    backgroundColor: 'rgba(17,24,39,0.16)',
+    borderRadius: 15,
+    height: 30,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    width: 50
+  },
+  toggleSwitchTrackActive: {
+    backgroundColor: colors.primary
   }
 });
 

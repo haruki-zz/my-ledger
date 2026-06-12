@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -20,9 +21,10 @@ import {
 } from '@/src/components/KeyboardDoneAccessory';
 import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { BentoCard } from '@/src/components/ui';
+import { BentoCard, ToggleSwitch } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { PRIMARY_CATEGORIES, categoryColor, categoryIconName, categoryLabel, subcategoryPresets } from '@/src/lib/categorySystem';
+import { tintFromAccent } from '@/src/lib/color';
 import { displayName, formatYen } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import {
@@ -54,6 +56,9 @@ type Draft = {
 
 type LoadMode = 'background' | 'initial' | 'refresh';
 
+const MEMBER_COLORS = [colors.primaryDark, colors.warm] as const;
+const RULE_NOT_FOUND_MESSAGE = 'Fixed expense rule was not found';
+
 function sanitizeWholeNumber(value: string) {
   return value.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '');
 }
@@ -80,19 +85,10 @@ function parseRatio(value: string) {
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
 }
 
-function padDatePart(value: number) {
-  return String(value).padStart(2, '0');
-}
-
 function dateForGenerateDay(day: string) {
   const parsedDay = Math.min(31, Math.max(1, Number(sanitizeWholeNumber(day) || 1)));
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), parsedDay);
-}
-
-function dateInputValue(day: string) {
-  const date = dateForGenerateDay(day);
-  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
 }
 
 function formatGenerateDayLabel(day: string) {
@@ -101,33 +97,6 @@ function formatGenerateDayLabel(day: string) {
 }
 
 const GENERATE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
-
-type WebDateInputChangeEvent = {
-  currentTarget?: { value?: string };
-  target?: { value?: string };
-};
-
-function GenerateDayInput({ onChange, value }: { onChange: (day: string) => void; value: string }) {
-  if (Platform.OS !== 'web') {
-    return null;
-  }
-
-  return (
-    <input
-      aria-label="Monthly generation date"
-      onChange={(event: WebDateInputChangeEvent) => {
-        const nextValue = event.currentTarget?.value || event.target?.value || '';
-        const [, , day] = nextValue.split('-');
-        if (day) {
-          onChange(String(Number(day)));
-        }
-      }}
-      style={webDateInputStyle}
-      type="date"
-      value={dateInputValue(value)}
-    />
-  );
-}
 
 function emptyDraft(members: LedgerMemberProfile[]): Draft {
   const currentMonth = dateStringToMonthKey(currentMonthStartDate());
@@ -167,9 +136,9 @@ function draftFromRule(rule: RecurringExpenseRule): Draft {
 }
 
 export default function RecurringExpenseRulesScreen() {
+  const params = useLocalSearchParams<{ ruleId?: string | string[] }>();
   const { error: ledgerError, ledger, loading: ledgerLoading, reloadLedger } = useRequiredLedger();
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
-  const [rules, setRules] = useState<RecurringExpenseRule[]>([]);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft([]));
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [nativeGenerateDatePickerOpen, setNativeGenerateDatePickerOpen] = useState(false);
@@ -177,8 +146,11 @@ export default function RecurringExpenseRulesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initializedRuleIdRef = useRef<string | null>(null);
 
   const ledgerId = ledger?.id;
+  const ruleIdParam = Array.isArray(params.ruleId) ? params.ruleId[0] : params.ruleId;
+  const editingRuleId = ruleIdParam || null;
 
   const load = useCallback(async (currentLedger = ledger, mode: LoadMode = 'background') => {
     if (!currentLedger) {
@@ -197,10 +169,24 @@ export default function RecurringExpenseRulesScreen() {
     try {
       const [nextMembers, nextRules] = await Promise.all([
         getLedgerMembers(currentLedger.id),
-        getRecurringExpenseRules(currentLedger.id)
+        editingRuleId ? getRecurringExpenseRules(currentLedger.id) : Promise.resolve([])
       ]);
       setMembers(nextMembers);
-      setRules(nextRules);
+      if (editingRuleId) {
+        const selectedRule = nextRules.find((rule) => rule.id === editingRuleId);
+        if (!selectedRule) {
+          setError(RULE_NOT_FOUND_MESSAGE);
+          setDraft((current) => (current.paidBy ? current : emptyDraft(nextMembers)));
+          return;
+        }
+        if (initializedRuleIdRef.current !== editingRuleId) {
+          setDraft(draftFromRule(selectedRule));
+          initializedRuleIdRef.current = editingRuleId;
+        }
+        return;
+      }
+
+      initializedRuleIdRef.current = null;
       setDraft((current) => (current.paidBy ? current : emptyDraft(nextMembers)));
     } catch (loadError) {
       setError(getErrorMessage(loadError));
@@ -212,7 +198,21 @@ export default function RecurringExpenseRulesScreen() {
         setRefreshing(false);
       }
     }
-  }, [ledger]);
+  }, [editingRuleId, ledger]);
+
+  useEffect(() => {
+    setCategoryMenuOpen(false);
+    setNativeGenerateDatePickerOpen(false);
+    if (editingRuleId) {
+      if (initializedRuleIdRef.current && initializedRuleIdRef.current !== editingRuleId) {
+        initializedRuleIdRef.current = null;
+      }
+      return;
+    }
+
+    initializedRuleIdRef.current = null;
+    setDraft((current) => (current.id || !current.paidBy ? emptyDraft(members) : current));
+  }, [editingRuleId, members]);
 
   useEffect(() => {
     void load(undefined, 'initial');
@@ -255,16 +255,6 @@ export default function RecurringExpenseRulesScreen() {
     setDraft(emptyDraft(members));
     setCategoryMenuOpen(false);
     setNativeGenerateDatePickerOpen(false);
-  }
-
-  function startEdit(rule: RecurringExpenseRule) {
-    setDraft(draftFromRule(rule));
-    setCategoryMenuOpen(false);
-    setNativeGenerateDatePickerOpen(false);
-  }
-
-  async function toggleRule(rule: RecurringExpenseRule) {
-    await saveRule(draftFromRule({ ...rule, is_active: !rule.is_active }));
   }
 
   function validateDraft() {
@@ -344,7 +334,7 @@ export default function RecurringExpenseRulesScreen() {
       });
       await generateRecurringExpenses(ledger.id, currentMonthStartDate()).catch(() => []);
       await load(ledger, 'background');
-      if (nextDraft === draft) {
+      if (nextDraft === draft && !nextDraft.id) {
         startCreate();
       }
     } catch (saveError) {
@@ -354,10 +344,22 @@ export default function RecurringExpenseRulesScreen() {
     }
   }
 
-  if ((ledgerLoading || loading) && !ledger) {
+  if ((ledgerLoading || loading) && (!ledger || (editingRuleId && draft.id !== editingRuleId))) {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
+      </View>
+    );
+  }
+
+  if (editingRuleId && error === RULE_NOT_FOUND_MESSAGE && draft.id !== editingRuleId) {
+    return (
+      <View style={[styles.center, localStyles.notFoundState]}>
+        <Ionicons color={colors.muted} name="alert-circle-outline" size={30} />
+        <Text style={styles.error}>{RULE_NOT_FOUND_MESSAGE}</Text>
+        <Pressable onPress={() => router.back()} style={[styles.button, styles.secondaryButton, localStyles.compactButton]}>
+          <Text style={[styles.buttonText, styles.secondaryButtonText]}>Go back</Text>
+        </Pressable>
       </View>
     );
   }
@@ -388,6 +390,45 @@ export default function RecurringExpenseRulesScreen() {
     setNativeGenerateDatePickerOpen(false);
   }
 
+  const draftAmountYen = parsePositiveInteger(draft.amount) || 0;
+  const selectedCategoryColor = categoryColor(draft.categoryId);
+  const selectedCategoryIcon = categoryIconName(draft.categoryId);
+  const selectedCategoryLabel = categoryLabel(draft.categoryId);
+  const payerName = memberNameById.get(draft.paidBy) || memberNames[0];
+  const previewTitle = draft.name.trim() || selectedCategoryLabel;
+  const ratioA = parseRatio(draft.ratioA) ?? 0;
+  const ratioB = parseRatio(draft.ratioB) ?? 0;
+  const shareA = draftAmountYen > 0 ? Math.round((draftAmountYen * ratioA) / 100) : 0;
+  const shareB = draftAmountYen > 0 ? draftAmountYen - shareA : 0;
+  const splitBalanceValid = draft.ownership === 'personal' || (ratioA + ratioB === 100 && draftAmountYen > 0);
+  const splitEvenlySelected = ratioA === 50 && ratioB === 50;
+
+  function updateSharedAmount(memberIndex: 0 | 1, value: string) {
+    const amountYen = parsePositiveInteger(draft.amount);
+    const shareYen = Number(sanitizeWholeNumber(value));
+    if (!amountYen || !Number.isFinite(shareYen)) {
+      updateDraft({ ratioA: '0', ratioB: '0' });
+      return;
+    }
+
+    const clampedShare = Math.min(amountYen, Math.max(0, shareYen));
+    const nextRatio = Math.round((clampedShare / amountYen) * 100);
+    if (memberIndex === 0) {
+      updateDraft({ ratioA: String(nextRatio), ratioB: String(100 - nextRatio) });
+      return;
+    }
+
+    updateDraft({ ratioA: String(100 - nextRatio), ratioB: String(nextRatio) });
+  }
+
+  function splitEvenly() {
+    updateDraft({ ratioA: '50', ratioB: '50' });
+  }
+
+  function clearSplit() {
+    updateDraft({ ratioA: '0', ratioB: '0' });
+  }
+
   return (
     <KeyboardAwareScrollView
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
@@ -396,134 +437,80 @@ export default function RecurringExpenseRulesScreen() {
     >
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
 
-      <BentoCard variant="form" style={localStyles.amountCard}>
-        <View style={localStyles.cardHeaderRow}>
-          <Text style={localStyles.inputTitle}>Amount</Text>
-          {draft.amount ? (
-            <Pressable accessibilityLabel="Clear amount" onPress={clearAmount} style={localStyles.clearButton}>
-              <Ionicons color={colors.muted} name="close" size={24} />
-            </Pressable>
-          ) : (
-            <View style={localStyles.clearButtonPlaceholder} />
-          )}
+      <View style={localStyles.topBar}>
+        <View style={localStyles.titleBlock}>
+          <Text style={localStyles.screenTitle}>{draft.id ? 'Edit Fixed Expense' : 'New Fixed Expense'}</Text>
+          <Text style={localStyles.screenSubtitle}>Added automatically every month.</Text>
         </View>
-        <TextInput
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-          inputMode="numeric"
-          keyboardType="number-pad"
-          onChangeText={(value) => updateDraft({ amount: sanitizeWholeNumber(value) })}
-          placeholder="¥ 0"
-          placeholderTextColor={colors.subtle}
-          selection={{ start: amountDisplayValue.length, end: amountDisplayValue.length }}
-          style={localStyles.amountInput}
-          value={amountDisplayValue}
-        />
+        {draft.id ? (
+          <Pressable onPress={startCreate} style={[styles.button, styles.secondaryButton, localStyles.compactButton]}>
+            <Text style={[styles.buttonText, styles.secondaryButtonText]}>New</Text>
+          </Pressable>
+        ) : null}
+      </View>
+
+      <BentoCard variant="form" style={localStyles.previewCard}>
+        <Text style={localStyles.previewTag}>ADDED MONTHLY</Text>
+        <View style={localStyles.previewRow}>
+          <View style={[localStyles.previewIcon, { backgroundColor: tintFromAccent(selectedCategoryColor) }]}>
+            <Ionicons color={selectedCategoryColor} name={selectedCategoryIcon} size={22} />
+          </View>
+          <View style={localStyles.previewBody}>
+            <Text numberOfLines={1} style={localStyles.previewTitle}>{previewTitle}</Text>
+            <View style={localStyles.previewMetaRow}>
+              <TypePill ownership={draft.ownership} />
+              <Text numberOfLines={1} style={localStyles.previewMeta}>
+                {draft.ownership === 'personal' ? payerName : `${payerName} pays`} · day {draft.generateDay}
+              </Text>
+            </View>
+          </View>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.previewAmount}>
+            {draftAmountYen > 0 ? formatYen(draftAmountYen) : '¥0'}
+          </Text>
+        </View>
       </BentoCard>
 
-      <BentoCard variant="form" style={localStyles.formCard}>
-        <View style={localStyles.headerRow}>
-          <Text style={styles.h2}>{draft.id ? 'Edit Rule' : 'New Rule'}</Text>
-          {draft.id ? (
-            <Pressable onPress={startCreate} style={[styles.button, styles.secondaryButton, localStyles.compactButton]}>
-              <Text style={[styles.buttonText, styles.secondaryButtonText]}>New</Text>
-            </Pressable>
-          ) : null}
-        </View>
-
-        <TextInput
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-          onChangeText={(name) => updateDraft({ name })}
-          placeholder="Name"
-          placeholderTextColor={colors.subtle}
-          style={styles.input}
-          value={draft.name}
-        />
-
-        <BentoCard variant="form" style={localStyles.inlineFieldCard}>
-          <Text style={styles.upperLabel}>Bill Date</Text>
-          {Platform.OS === 'web' ? (
-            <GenerateDayInput
-              onChange={(day) => updateDraft({ generateDay: day })}
-              value={draft.generateDay}
-            />
-          ) : (
-            <Pressable
-              onPress={() => runAfterKeyboardDismiss(() => setNativeGenerateDatePickerOpen((current) => !current))}
-              style={({ pressed }) => [localStyles.dateTrigger, pressed && localStyles.pressed]}
-            >
-              <Ionicons color={colors.ink} name="calendar-outline" size={22} />
-              <Text style={localStyles.dateText}>{formatGenerateDayLabel(draft.generateDay)}</Text>
-              <Ionicons color={colors.ink} name="chevron-forward" size={20} />
-            </Pressable>
-          )}
-        </BentoCard>
-
-        <BentoCard variant="form" style={localStyles.inlineFieldCard}>
-          <View accessibilityLabel="Fixed expense ownership" style={localStyles.ownershipSelector}>
-            {[
-              { label: 'Personal', value: 'personal' as const },
-              { label: 'Shared', value: 'shared' as const }
-            ].map((option) => {
-              const selected = option.value === draft.ownership;
-              return (
-                <Pressable
-                  key={option.value}
-                  onPress={() => selectOwnership(option.value)}
-                  style={({ pressed }) => [
-                    localStyles.ownershipOption,
-                    selected && localStyles.ownershipOptionActive,
-                    pressed && localStyles.pressed
-                  ]}
-                >
-                  <Text style={[localStyles.ownershipText, selected && localStyles.ownershipTextActive]}>
-                    {option.label}
-                  </Text>
+      <BentoCard variant="form" style={localStyles.groupCard}>
+        <GroupHead icon="pricetag-outline" label="What" />
+        <View style={localStyles.fieldGroup}>
+          <TextInput
+            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+            onChangeText={(name) => updateDraft({ name })}
+            placeholder="Name"
+            placeholderTextColor={colors.subtle}
+            style={localStyles.textInput}
+            value={draft.name}
+          />
+          <View style={localStyles.amountCategoryRow}>
+            <View style={localStyles.amountInputWrap}>
+              <TextInput
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                inputMode="numeric"
+                keyboardType="number-pad"
+                onChangeText={(value) => updateDraft({ amount: sanitizeWholeNumber(value) })}
+                placeholder="¥ 0"
+                placeholderTextColor={colors.subtle}
+                selection={{ start: amountDisplayValue.length, end: amountDisplayValue.length }}
+                style={localStyles.amountInput}
+                value={amountDisplayValue}
+              />
+              {draft.amount ? (
+                <Pressable accessibilityLabel="Clear amount" onPress={clearAmount} style={localStyles.clearInlineButton}>
+                  <Ionicons color={colors.muted} name="close" size={18} />
                 </Pressable>
-              );
-            })}
-          </View>
-        </BentoCard>
-
-        {draft.ownership === 'shared' ? (
-          <View style={localStyles.categoryBlock}>
-            <Text style={styles.upperLabel}>Split</Text>
-            <View style={localStyles.row}>
-              <TextInput
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                inputMode="numeric"
-                keyboardType="number-pad"
-                onChangeText={(ratioA) => updateDraft({ ratioA: sanitizeWholeNumber(ratioA), ratioB: String(100 - Math.min(100, Number(sanitizeWholeNumber(ratioA) || 0))) })}
-                placeholder={memberNames[0]}
-                placeholderTextColor={colors.subtle}
-                style={[styles.input, localStyles.flexInput]}
-                value={draft.ratioA}
-              />
-              <TextInput
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                inputMode="numeric"
-                keyboardType="number-pad"
-                onChangeText={(ratioB) => updateDraft({ ratioB: sanitizeWholeNumber(ratioB), ratioA: String(100 - Math.min(100, Number(sanitizeWholeNumber(ratioB) || 0))) })}
-                placeholder={memberNames[1]}
-                placeholderTextColor={colors.subtle}
-                style={[styles.input, localStyles.flexInput]}
-                value={draft.ratioB}
-              />
+              ) : null}
             </View>
+            <Pressable
+              onPress={() => runAfterKeyboardDismiss(() => setCategoryMenuOpen((current) => !current))}
+              style={({ pressed }) => [localStyles.categoryTrigger, pressed && localStyles.pressed]}
+            >
+              <View style={localStyles.categorySelected}>
+                <Ionicons color={selectedCategoryColor} name={selectedCategoryIcon} size={18} />
+                <Text numberOfLines={1} style={localStyles.categoryText}>{selectedCategoryLabel}</Text>
+              </View>
+              <Ionicons color={colors.ink} name={categoryMenuOpen ? 'chevron-up' : 'chevron-down'} size={18} />
+            </Pressable>
           </View>
-        ) : null}
-
-        <View style={localStyles.categoryBlock}>
-          <Text style={styles.upperLabel}>Category</Text>
-          <Pressable
-            onPress={() => runAfterKeyboardDismiss(() => setCategoryMenuOpen((current) => !current))}
-            style={localStyles.categoryTrigger}
-          >
-            <View style={localStyles.categorySelected}>
-              <Ionicons color={categoryColor(draft.categoryId)} name={categoryIconName(draft.categoryId)} size={20} />
-              <Text style={localStyles.categoryText}>{categoryLabel(draft.categoryId)}</Text>
-            </View>
-            <Ionicons color={colors.ink} name={categoryMenuOpen ? 'chevron-up' : 'chevron-down'} size={20} />
-          </Pressable>
           {categoryMenuOpen ? (
             <View style={localStyles.categoryMenu}>
               {PRIMARY_CATEGORIES.map((category) => (
@@ -533,29 +520,31 @@ export default function RecurringExpenseRulesScreen() {
                     updateDraft({ categoryId: category.id, subcategory: '' });
                     setCategoryMenuOpen(false);
                   }}
-                  style={localStyles.categoryOption}
+                  style={({ pressed }) => [localStyles.categoryOption, pressed && localStyles.pressed]}
                 >
-                  <Ionicons color={category.color} name={category.icon} size={18} />
+                  <View style={[localStyles.optionIcon, { backgroundColor: tintFromAccent(category.color) }]}>
+                    <Ionicons color={category.color} name={category.icon} size={16} />
+                  </View>
                   <Text style={localStyles.categoryText}>{category.label}</Text>
                 </Pressable>
               ))}
             </View>
           ) : null}
-        </View>
-
-        <View style={localStyles.categoryBlock}>
-          <Text style={styles.upperLabel}>Subcategory</Text>
           <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>
-            <View style={localStyles.chipRow}>
+            <View style={localStyles.subcategoryRail}>
               {currentSubcategoryPresets.map((option) => {
                 const selected = option === draft.subcategory.trim();
                 return (
                   <Pressable
                     key={option}
                     onPress={() => updateDraft({ subcategory: selected ? '' : option })}
-                    style={[localStyles.chip, selected && localStyles.chipActive]}
+                    style={({ pressed }) => [
+                      localStyles.subcategoryChip,
+                      selected && localStyles.subcategoryChipActive,
+                      pressed && localStyles.pressed
+                    ]}
                   >
-                    <Text style={[localStyles.chipText, selected && localStyles.chipTextActive]}>{option}</Text>
+                    <Text style={[localStyles.subcategoryChipText, selected && localStyles.subcategoryChipTextActive]}>{option}</Text>
                   </Pressable>
                 );
               })}
@@ -566,99 +555,143 @@ export default function RecurringExpenseRulesScreen() {
             onChangeText={(subcategory) => updateDraft({ subcategory })}
             placeholder="Optional tag"
             placeholderTextColor={colors.subtle}
-            style={styles.input}
+            style={localStyles.textInput}
             value={draft.subcategory}
           />
         </View>
+      </BentoCard>
 
-        <View style={localStyles.categoryBlock}>
-          <Text style={styles.upperLabel}>Paid By</Text>
-          <View style={localStyles.chipRow}>
-            {members.slice(0, 2).map((member) => {
-              const selected = member.user_id === draft.paidBy;
+      <BentoCard variant="form" style={localStyles.groupCard}>
+        <GroupHead icon="disc-outline" label="When · charge day" />
+        <ScrollView horizontal keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false} style={localStyles.dayRail}>
+          <View style={localStyles.dayRailTrack}>
+            {GENERATE_DAY_OPTIONS.map((day) => {
+              const selected = Number(draft.generateDay) === day;
               return (
                 <Pressable
-                  key={member.user_id}
-                  onPress={() => updateDraft({ paidBy: member.user_id })}
-                  style={[localStyles.memberChip, selected && localStyles.memberChipActive]}
+                  key={day}
+                  onPress={() => selectGenerateDay(day)}
+                  style={({ pressed }) => [
+                    localStyles.dayRailItem,
+                    selected && localStyles.dayRailItemActive,
+                    pressed && localStyles.pressed
+                  ]}
                 >
-                  <Text style={[localStyles.memberChipText, selected && localStyles.memberChipTextActive]}>
-                    {displayName(member.profile.display_name)}
-                  </Text>
+                  <Text style={[localStyles.dayRailText, selected && localStyles.dayRailTextActive]}>{day}</Text>
                 </Pressable>
               );
             })}
           </View>
-          <Text style={localStyles.helpText}>Each month is paid by this member. Edit the generated expense if one month differs.</Text>
-        </View>
-
-        <View style={localStyles.row}>
-          <TextInput
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            onChangeText={(startMonth) => updateDraft({ startMonth })}
-            placeholder="Start YYYY-MM"
-            placeholderTextColor={colors.subtle}
-            style={[styles.input, localStyles.flexInput]}
-            value={draft.startMonth}
-          />
-          <TextInput
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            onChangeText={(endMonth) => updateDraft({ endMonth })}
-            placeholder="End YYYY-MM"
-            placeholderTextColor={colors.subtle}
-            style={[styles.input, localStyles.flexInput]}
-            value={draft.endMonth}
-          />
-        </View>
-
+        </ScrollView>
         <Pressable
-          onPress={() => updateDraft({ isActive: !draft.isActive })}
-          style={[localStyles.activeToggle, draft.isActive && localStyles.activeToggleOn]}
+          onPress={() => runAfterKeyboardDismiss(() => setNativeGenerateDatePickerOpen((current) => !current))}
+          style={({ pressed }) => [localStyles.railCaption, pressed && Platform.OS !== 'web' && localStyles.pressed]}
         >
-          <Ionicons color={draft.isActive ? '#FFFFFF' : colors.muted} name={draft.isActive ? 'toggle' : 'toggle-outline'} size={22} />
-          <Text style={[localStyles.activeToggleText, draft.isActive && localStyles.activeToggleTextOn]}>
-            {draft.isActive ? 'Active' : 'Inactive'}
-          </Text>
-        </Pressable>
-
-        <Pressable disabled={saving} onPress={() => void saveRule()} style={[styles.button, saving && localStyles.disabled]}>
-          <Text style={styles.buttonText}>{saving ? 'Saving...' : 'Save Rule'}</Text>
+          <Ionicons color={colors.muted} name="move-outline" size={15} />
+          <Text style={localStyles.railCaptionText}>{formatGenerateDayLabel(draft.generateDay)}</Text>
         </Pressable>
       </BentoCard>
 
-      <BentoCard variant="list" style={localStyles.rulesCard}>
-        <Text style={styles.h2}>Rules</Text>
-        <View style={localStyles.rulesList}>
-          {rules.length === 0 ? (
-            <Text style={styles.muted}>No fixed monthly expenses yet.</Text>
-          ) : rules.map((rule) => (
-            <View key={rule.id} style={localStyles.ruleRow}>
-              <View style={localStyles.ruleIcon}>
-                <Ionicons color={categoryColor(rule.category_id)} name={categoryIconName(rule.category_id)} size={20} />
-              </View>
-              <View style={localStyles.ruleBody}>
-                <Text style={localStyles.ruleTitle}>{rule.name}</Text>
-                <Text style={localStyles.ruleMeta}>
-                  {categoryLabel(rule.category_id)}{rule.subcategory ? ` · ${rule.subcategory}` : ''} · {formatYen(rule.amount_yen)}
+      <BentoCard variant="form" style={localStyles.groupCard}>
+        <GroupHead icon="people-outline" label="Who" />
+        <View accessibilityLabel="Fixed expense ownership" style={localStyles.ownershipSelector}>
+          {[
+            { label: 'Personal', value: 'personal' as const },
+            { label: 'Shared', value: 'shared' as const }
+          ].map((option) => {
+            const selected = option.value === draft.ownership;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => selectOwnership(option.value)}
+                style={({ pressed }) => [
+                  localStyles.ownershipOption,
+                  selected && localStyles.ownershipOptionActive,
+                  pressed && localStyles.pressed
+                ]}
+              >
+                <Text style={[localStyles.ownershipText, selected && localStyles.ownershipTextActive]}>
+                  {option.label}
                 </Text>
-                <Text style={localStyles.ruleMeta}>
-                  {rule.ownership === 'personal' ? 'Personal' : 'Shared'} · Day {rule.generate_day} · {memberNameById.get(rule.paid_by) || 'Unknown payer'} pays{rule.ownership === 'shared' ? ` · ${rule.split_ratio_a}/${rule.split_ratio_b}` : ''}
-                </Text>
-              </View>
-              <View style={localStyles.ruleActions}>
-                <Pressable onPress={() => startEdit(rule)} style={[styles.button, styles.secondaryButton, localStyles.compactButton]}>
-                  <Text style={[styles.buttonText, styles.secondaryButtonText]}>Edit</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={localStyles.fieldGroup}>
+          <Text style={localStyles.fieldLabel}>{draft.ownership === 'personal' ? 'Belongs to' : 'Paid by'}</Text>
+          <View style={localStyles.memberOptionRow}>
+            {members.slice(0, 2).map((member, index) => {
+              const selected = member.user_id === draft.paidBy;
+              const accent = MEMBER_COLORS[index] || colors.primaryDark;
+              return (
+                <MemberOption
+                  accent={accent}
+                  key={member.user_id}
+                  label={displayName(member.profile.display_name)}
+                  onPress={() => updateDraft({ paidBy: member.user_id })}
+                  selected={selected}
+                />
+              );
+            })}
+          </View>
+        </View>
+
+        {draft.ownership === 'shared' ? (
+          <View style={localStyles.fieldGroup}>
+            <View style={localStyles.shareHeaderRow}>
+              <Text style={localStyles.fieldLabel}>Each person&apos;s share</Text>
+              <View style={localStyles.splitQuickRow}>
+                <Pressable onPress={splitEvenly} style={[localStyles.splitQuick, splitEvenlySelected && localStyles.splitQuickActive]}>
+                  <Ionicons color={splitEvenlySelected ? colors.primaryDark : colors.muted} name="checkmark" size={13} />
+                  <Text style={[localStyles.splitQuickText, splitEvenlySelected && localStyles.splitQuickTextActive]}>Split evenly</Text>
                 </Pressable>
-                <Pressable onPress={() => void toggleRule(rule)} style={[localStyles.statusPill, rule.is_active && localStyles.statusPillActive]}>
-                  <Text style={[localStyles.statusPillText, rule.is_active && localStyles.statusPillTextActive]}>
-                    {rule.is_active ? 'Active' : 'Inactive'}
-                  </Text>
+                <Pressable onPress={clearSplit} style={localStyles.splitQuick}>
+                  <Text style={localStyles.splitQuickText}>Clear</Text>
                 </Pressable>
               </View>
             </View>
-          ))}
-        </View>
+            <ShareAmountRow
+              accent={MEMBER_COLORS[0]}
+              amountYen={shareA}
+              label={memberNames[0]}
+              onChange={(value) => updateSharedAmount(0, value)}
+            />
+            <ShareAmountRow
+              accent={MEMBER_COLORS[1]}
+              amountYen={shareB}
+              label={memberNames[1]}
+              onChange={(value) => updateSharedAmount(1, value)}
+            />
+            <View style={localStyles.divider} />
+            <View style={localStyles.balanceRow}>
+              <View style={localStyles.balanceTextRow}>
+                <Ionicons
+                  color={splitBalanceValid ? colors.primaryDark : colors.danger}
+                  name={splitBalanceValid ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+                  size={16}
+                />
+                <Text style={[localStyles.balanceText, !splitBalanceValid && localStyles.balanceTextError]}>
+                  {splitBalanceValid ? 'Adds up to total' : 'Check split total'}
+                </Text>
+              </View>
+              <Text style={localStyles.balanceAmount}>{draftAmountYen > 0 ? formatYen(draftAmountYen) : '¥0'}</Text>
+            </View>
+          </View>
+        ) : null}
       </BentoCard>
+
+      <View style={localStyles.activeSaveArea}>
+        <Pressable onPress={() => updateDraft({ isActive: !draft.isActive })} style={({ pressed }) => [localStyles.activeRow, pressed && localStyles.pressed]}>
+          <Text style={localStyles.fieldLabel}>Active immediately</Text>
+          <ToggleSwitch active={draft.isActive} />
+        </Pressable>
+
+        <Pressable disabled={saving} onPress={() => void saveRule()} style={({ pressed }) => [localStyles.saveButton, saving && localStyles.disabled, pressed && !saving && localStyles.pressed]}>
+          <Ionicons color="#FFFFFF" name="checkmark" size={18} />
+          <Text style={localStyles.saveButtonText}>{saving ? 'Saving...' : 'Save Rule'}</Text>
+        </Pressable>
+      </View>
 
       {Platform.OS !== 'web' ? (
         <Modal
@@ -711,160 +744,227 @@ export default function RecurringExpenseRulesScreen() {
   );
 }
 
-const webDateInputStyle = {
-  backgroundColor: 'rgba(255,255,255,0.86)',
-  border: `1px solid ${colors.line}`,
-  borderRadius: theme.radii.control,
-  color: colors.ink,
-  fontFamily: `${fontFamilies.regular}, ${fontFamilies.fallback}`,
-  fontSize: 16,
-  minHeight: 48,
-  outline: 'none',
-  padding: '10px 12px',
-  width: '100%'
-};
+function GroupHead({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={localStyles.groupHead}>
+      <View style={localStyles.groupHeadIcon}>
+        <Ionicons color={colors.primaryDark} name={icon} size={16} />
+      </View>
+      <Text style={localStyles.groupHeadLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function TypePill({ ownership }: { ownership: ExpenseOwnership }) {
+  const personal = ownership === 'personal';
+  return (
+    <View style={[localStyles.typePill, personal ? localStyles.typePillPersonal : localStyles.typePillShared]}>
+      <Text style={[localStyles.typePillText, personal ? localStyles.typePillTextPersonal : localStyles.typePillTextShared]}>
+        {personal ? 'PERSONAL' : 'SHARED'}
+      </Text>
+    </View>
+  );
+}
+
+function MemberOption({
+  accent,
+  label,
+  onPress,
+  selected
+}: {
+  accent: string;
+  label: string;
+  onPress: () => void;
+  selected: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        localStyles.memberOption,
+        selected && { backgroundColor: accent, borderColor: accent },
+        pressed && localStyles.pressed
+      ]}
+    >
+      <View style={[
+        localStyles.memberAvatar,
+        selected
+          ? { backgroundColor: 'rgba(255,255,255,0.92)', borderColor: 'rgba(255,255,255,0.72)' }
+          : { borderColor: accent }
+      ]}>
+        <Text style={[localStyles.memberAvatarText, { color: accent }]}>{initialFor(label)}</Text>
+      </View>
+      <Text numberOfLines={1} style={[localStyles.memberOptionText, selected && localStyles.memberOptionTextSelected]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ShareAmountRow({
+  accent,
+  amountYen,
+  label,
+  onChange
+}: {
+  accent: string;
+  amountYen: number;
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  const value = amountYen > 0 ? formatYenInput(String(amountYen)) : '¥ ';
+
+  return (
+    <View style={localStyles.shareAmountRow}>
+      <View style={[localStyles.shareAvatar, { borderColor: accent }]}>
+        <Text style={[localStyles.shareAvatarText, { color: accent }]}>{initialFor(label)}</Text>
+      </View>
+      <Text numberOfLines={1} style={localStyles.shareName}>{label}</Text>
+      <View style={localStyles.shareInputWrap}>
+        <TextInput
+          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+          inputMode="numeric"
+          keyboardType="number-pad"
+          onChangeText={onChange}
+          placeholder="¥ 0"
+          placeholderTextColor={colors.subtle}
+          selection={{ start: value.length, end: value.length }}
+          style={[localStyles.shareInput, { color: accent }]}
+          value={value}
+        />
+      </View>
+    </View>
+  );
+}
+
+function initialFor(label: string) {
+  return (label.trim()[0] || '?').toUpperCase();
+}
 
 const localStyles = StyleSheet.create({
-  activeToggle: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    borderColor: colors.line,
-    borderRadius: 999,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  activeToggleOn: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
-  },
-  activeToggleText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.bold,
-    fontSize: 13,
-    fontWeight: '700'
-  },
-  activeToggleTextOn: {
-    color: '#FFFFFF'
-  },
-  amountCard: {
-    gap: 0,
-    minHeight: 92,
-    paddingBottom: 12,
-    paddingHorizontal: 18,
-    paddingTop: 10
-  },
-  amountInput: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
-    fontSize: 40,
-    fontWeight: '700',
-    letterSpacing: 0,
-    minHeight: 46,
-    paddingVertical: 0
-  },
-  cardHeaderRow: {
+  activeRow: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    minHeight: 36
+    minHeight: 44,
+    paddingHorizontal: 4
   },
-  categoryBlock: {
-    gap: 8
+  activeSaveArea: {
+    gap: 12
+  },
+  amountCategoryRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  amountInput: {
+    color: colors.primaryDark,
+    flex: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 18,
+    fontWeight: '700',
+    minHeight: 48,
+    minWidth: 0,
+    paddingVertical: 0
+  },
+  amountInputWrap: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    minHeight: 48,
+    minWidth: 170,
+    paddingLeft: 12,
+    paddingRight: 8
+  },
+  balanceAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20
+  },
+  balanceRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between'
+  },
+  balanceText: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.bold,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16
+  },
+  balanceTextError: {
+    color: colors.danger
+  },
+  balanceTextRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6
   },
   categoryMenu: {
     borderColor: colors.line,
-    borderRadius: 14,
+    borderRadius: theme.radii.control,
     borderWidth: 1,
     overflow: 'hidden'
   },
   categoryOption: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.68)',
+    backgroundColor: 'rgba(255,255,255,0.72)',
     flexDirection: 'row',
     gap: 10,
-    minHeight: 44,
-    paddingHorizontal: 12
+    minHeight: 46,
+    paddingHorizontal: 12,
+    paddingVertical: 8
   },
   categorySelected: {
     alignItems: 'center',
+    flex: 1,
     flexDirection: 'row',
-    gap: 10
+    gap: 7,
+    minWidth: 0
   },
   categoryText: {
     color: colors.ink,
     flex: 1,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 14,
-    fontWeight: '600'
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    minWidth: 0
   },
   categoryTrigger: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(255,255,255,0.86)',
     borderColor: colors.line,
-    borderRadius: 14,
+    borderRadius: theme.radii.control,
     borderWidth: 1,
+    flex: 1,
     flexDirection: 'row',
+    gap: 8,
     justifyContent: 'space-between',
     minHeight: 48,
+    minWidth: 148,
     paddingHorizontal: 12
   },
-  chip: {
-    borderColor: colors.line,
-    borderRadius: theme.radii.pill,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  chipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8
-  },
-  chipText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.bold,
-    fontSize: 13,
-    fontWeight: '700'
-  },
-  chipTextActive: {
-    color: '#FFFFFF'
-  },
-  clearButton: {
+  clearInlineButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(17,24,39,0.05)',
-    borderRadius: 18,
-    height: 36,
+    borderRadius: 15,
+    height: 30,
     justifyContent: 'center',
-    width: 36
-  },
-  clearButtonPlaceholder: {
-    height: 36,
-    width: 36
+    width: 30
   },
   compactButton: {
     minHeight: 38,
     paddingHorizontal: 14,
     paddingVertical: 8
-  },
-  dateText: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 16,
-    fontWeight: '600'
-  },
-  dateTrigger: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 48
   },
   dayGrid: {
     flexDirection: 'row',
@@ -894,22 +994,79 @@ const localStyles = StyleSheet.create({
   dayOptionTextActive: {
     color: '#FFFFFF'
   },
+  dayRail: {
+    marginHorizontal: -2
+  },
+  dayRailItem: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    borderColor: colors.line,
+    borderRadius: 18,
+    borderWidth: 1,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
+  },
+  dayRailItemActive: {
+    backgroundColor: colors.primaryDark,
+    borderColor: colors.primaryDark
+  },
+  dayRailText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700'
+  },
+  dayRailTextActive: {
+    color: '#FFFFFF'
+  },
+  dayRailTrack: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 2,
+    paddingVertical: 2
+  },
   disabled: {
     opacity: 0.6
   },
-  flexInput: {
-    flex: 1,
-    minWidth: 126
+  divider: {
+    backgroundColor: colors.line,
+    height: 1
   },
-  formCard: {
+  fieldGroup: {
+    gap: 10
+  },
+  fieldLabel: {
+    color: colors.muted,
+    fontFamily: fontFamilies.bold,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0,
+    lineHeight: 15
+  },
+  groupCard: {
     gap: 14,
-    padding: 18
+    padding: 16
   },
-  headerRow: {
+  groupHead: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between'
+    gap: 9
+  },
+  groupHeadIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.tint,
+    borderRadius: 14,
+    height: 28,
+    justifyContent: 'center',
+    width: 28
+  },
+  groupHeadLabel: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 19
   },
   helpText: {
     color: colors.muted,
@@ -917,39 +1074,48 @@ const localStyles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17
   },
-  inlineFieldCard: {
-    gap: 10,
-    padding: 16
+  memberAvatar: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderRadius: 15,
+    borderWidth: 1.5,
+    height: 30,
+    justifyContent: 'center',
+    width: 30
   },
-  inputTitle: {
-    color: colors.ink,
+  memberAvatarText: {
     fontFamily: fontFamilies.bold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20
+    fontSize: 12,
+    fontWeight: '700'
   },
-  memberChip: {
+  memberOption: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.58)',
     borderColor: colors.line,
-    borderRadius: theme.radii.pill,
+    borderRadius: theme.radii.control,
     borderWidth: 1,
     flex: 1,
-    minHeight: 42,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 48,
     minWidth: 130,
-    paddingHorizontal: 12,
-    paddingVertical: 10
+    paddingHorizontal: 10
   },
-  memberChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
+  memberOptionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
   },
-  memberChipText: {
+  memberOptionText: {
     color: colors.ink,
+    flex: 1,
     fontFamily: fontFamilies.bold,
     fontSize: 13,
     fontWeight: '700',
-    textAlign: 'center'
+    lineHeight: 18,
+    minWidth: 0
   },
-  memberChipTextActive: {
+  memberOptionTextSelected: {
     color: '#FFFFFF'
   },
   modalBackdrop: {
@@ -974,17 +1140,32 @@ const localStyles = StyleSheet.create({
     gap: 12,
     padding: 18
   },
+  notFoundState: {
+    gap: 12,
+    padding: 24
+  },
+  optionIcon: {
+    alignItems: 'center',
+    borderRadius: 14,
+    height: 28,
+    justifyContent: 'center',
+    width: 28
+  },
   ownershipOption: {
     alignItems: 'center',
     borderRadius: theme.radii.pill,
     flex: 1,
     justifyContent: 'center',
-    minHeight: 42,
+    minHeight: 40,
     paddingHorizontal: 14
   },
   ownershipOptionActive: {
     backgroundColor: colors.surface,
-    ...theme.shadow
+    shadowColor: '#0F172A',
+    shadowOffset: { height: 4, width: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 2
   },
   ownershipSelector: {
     backgroundColor: 'rgba(15,118,110,0.08)',
@@ -1009,76 +1190,272 @@ const localStyles = StyleSheet.create({
   pressed: {
     opacity: 0.76
   },
-  row: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10
+  previewAmount: {
+    color: colors.ink,
+    flexShrink: 0,
+    fontFamily: fontFamilies.bold,
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 22,
+    maxWidth: 126,
+    textAlign: 'right'
   },
-  ruleActions: {
-    alignItems: 'flex-end',
-    gap: 8
-  },
-  ruleBody: {
+  previewBody: {
     flex: 1,
-    gap: 2,
+    gap: 4,
     minWidth: 0
   },
-  ruleIcon: {
-    alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderRadius: 12,
-    height: 40,
-    justifyContent: 'center',
-    width: 40
+  previewCard: {
+    gap: 10,
+    padding: 16
   },
-  ruleMeta: {
+  previewIcon: {
+    alignItems: 'center',
+    borderRadius: 21,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
+  },
+  previewMeta: {
     color: colors.muted,
+    flex: 1,
     fontFamily: fontFamilies.regular,
     fontSize: 12,
-    lineHeight: 17
+    lineHeight: 16,
+    minWidth: 0
   },
-  ruleRow: {
+  previewMetaRow: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.58)',
-    borderColor: colors.line,
-    borderRadius: 14,
-    borderWidth: 1,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    padding: 12
+    gap: 6,
+    minWidth: 0
   },
-  ruleTitle: {
+  previewRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 52
+  },
+  previewTag: {
+    color: colors.primaryDark,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 14
+  },
+  previewTitle: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 20
   },
-  rulesCard: {
-    gap: 12
+  railCaption: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minHeight: 28
   },
-  rulesList: {
-    gap: 10
+  railCaptionText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16
   },
-  statusPill: {
+  saveButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: theme.radii.control,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 50,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    shadowColor: colors.primary,
+    shadowOffset: { height: 6, width: 0 },
+    shadowOpacity: 0.22,
+    shadowRadius: 14,
+    elevation: 3
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700'
+  },
+  screenSubtitle: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 13,
+    lineHeight: 18
+  },
+  screenTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 25,
+    fontWeight: '800',
+    lineHeight: 31
+  },
+  shareAmountRow: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 50,
+    paddingHorizontal: 10
+  },
+  shareAvatar: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
+    borderRadius: 17,
+    borderWidth: 1.5,
+    height: 34,
+    justifyContent: 'center',
+    width: 34
+  },
+  shareAvatarText: {
+    fontFamily: fontFamilies.bold,
+    fontSize: 12,
+    fontWeight: '700'
+  },
+  shareHeaderRow: {
+    gap: 8
+  },
+  shareInput: {
+    flex: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    minHeight: 38,
+    paddingVertical: 0,
+    textAlign: 'right'
+  },
+  shareInputWrap: {
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderColor: colors.line,
+    borderRadius: 15,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: 112,
+    paddingHorizontal: 10
+  },
+  shareName: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    minWidth: 0
+  },
+  splitQuick: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.72)',
     borderColor: colors.line,
     borderRadius: theme.radii.pill,
     borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 6
+    flexDirection: 'row',
+    gap: 4,
+    minHeight: 28,
+    paddingHorizontal: 9
   },
-  statusPillActive: {
+  splitQuickActive: {
     backgroundColor: colors.tint,
     borderColor: 'rgba(15,118,110,0.18)'
   },
-  statusPillText: {
+  splitQuickRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7
+  },
+  splitQuickText: {
     color: colors.muted,
     fontFamily: fontFamilies.bold,
     fontSize: 11,
     fontWeight: '700'
   },
-  statusPillTextActive: {
+  splitQuickTextActive: {
+    color: colors.primaryDark
+  },
+  subcategoryChip: {
+    backgroundColor: 'rgba(255,255,255,0.66)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.pill,
+    borderWidth: 1,
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7
+  },
+  subcategoryChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary
+  },
+  subcategoryChipText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.bold,
+    fontSize: 12,
+    fontWeight: '700'
+  },
+  subcategoryChipTextActive: {
+    color: '#FFFFFF'
+  },
+  subcategoryRail: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 2
+  },
+  textInput: {
+    backgroundColor: 'rgba(255,255,255,0.86)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    color: colors.ink,
+    fontFamily: fontFamilies.regular,
+    fontSize: 15,
+    minHeight: 48,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  titleBlock: {
+    flex: 1,
+    gap: 5,
+    minWidth: 0
+  },
+  topBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 4
+  },
+  typePill: {
+    borderRadius: theme.radii.pill,
+    paddingHorizontal: 6,
+    paddingVertical: 3
+  },
+  typePillPersonal: {
+    backgroundColor: 'rgba(99,102,241,0.12)'
+  },
+  typePillShared: {
+    backgroundColor: colors.tint
+  },
+  typePillText: {
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 12
+  },
+  typePillTextPersonal: {
+    color: colors.accent
+  },
+  typePillTextShared: {
     color: colors.primaryDark
   }
 });
