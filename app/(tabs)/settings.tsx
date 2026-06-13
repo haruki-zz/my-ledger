@@ -170,6 +170,8 @@ export default function SettingsScreen() {
         ownership: rule.ownership || 'shared',
         splitRatioA: rule.split_ratio_a,
         splitRatioB: rule.split_ratio_b,
+        splitAmountA: rule.split_amount_a,
+        splitAmountB: rule.split_amount_b,
         generateDay: rule.generate_day,
         startMonth: rule.start_month,
         endMonth: rule.end_month,

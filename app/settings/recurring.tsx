@@ -46,8 +46,8 @@ type Draft = {
   amount: string;
   paidBy: string;
   ownership: ExpenseOwnership;
-  ratioA: string;
-  ratioB: string;
+  splitAmountA: string;
+  splitAmountB: string;
   generateDay: string;
   startMonth: string;
   endMonth: string;
@@ -68,6 +68,16 @@ function parsePositiveInteger(value: string) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+function parseNonNegativeInteger(value: string) {
+  const sanitized = sanitizeWholeNumber(value.trim());
+  if (!sanitized) {
+    return null;
+  }
+
+  const parsed = Number(sanitized);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 function formatNumberInput(value: string) {
   if (!value) {
     return '';
@@ -83,6 +93,37 @@ function formatYenInput(value: string) {
 function parseRatio(value: string) {
   const parsed = Number(value.trim());
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 100 ? parsed : null;
+}
+
+function splitAmountsFromRatio(amountYen: number, ratioA: number) {
+  const splitAmountA = Math.round((amountYen * ratioA) / 100);
+  return [splitAmountA, amountYen - splitAmountA] as const;
+}
+
+function evenSplitAmounts(amountYen: number) {
+  if (amountYen <= 0) {
+    return ['', ''] as const;
+  }
+
+  const splitAmountA = Math.round(amountYen / 2);
+  return [String(splitAmountA), String(amountYen - splitAmountA)] as const;
+}
+
+function isEvenSplit(amountYen: number, splitAmountA: string, splitAmountB: string) {
+  if (amountYen <= 0) {
+    return !splitAmountA && !splitAmountB;
+  }
+
+  const [evenA, evenB] = evenSplitAmounts(amountYen);
+  return splitAmountA === evenA && splitAmountB === evenB;
+}
+
+function ratioFromSplitAmount(amountYen: number, splitAmountA: number) {
+  if (amountYen <= 0) {
+    return 0;
+  }
+
+  return Math.round((splitAmountA / amountYen) * 100);
 }
 
 function dateForGenerateDay(day: string) {
@@ -108,8 +149,8 @@ function emptyDraft(members: LedgerMemberProfile[]): Draft {
     amount: '',
     paidBy: members[0]?.user_id || '',
     ownership: 'shared',
-    ratioA: '50',
-    ratioB: '50',
+    splitAmountA: '',
+    splitAmountB: '',
     generateDay: '1',
     startMonth: currentMonth,
     endMonth: '',
@@ -118,6 +159,11 @@ function emptyDraft(members: LedgerMemberProfile[]): Draft {
 }
 
 function draftFromRule(rule: RecurringExpenseRule): Draft {
+  const ratioA = parseRatio(String(rule.split_ratio_a)) ?? 50;
+  const [fallbackSplitA, fallbackSplitB] = splitAmountsFromRatio(rule.amount_yen, ratioA);
+  const splitAmountA = rule.split_amount_a ?? fallbackSplitA;
+  const splitAmountB = rule.split_amount_b ?? fallbackSplitB;
+
   return {
     id: rule.id,
     name: rule.name,
@@ -126,8 +172,8 @@ function draftFromRule(rule: RecurringExpenseRule): Draft {
     amount: String(rule.amount_yen),
     paidBy: rule.paid_by,
     ownership: rule.ownership || 'shared',
-    ratioA: String(rule.split_ratio_a),
-    ratioB: String(rule.split_ratio_b),
+    splitAmountA: rule.ownership === 'shared' ? String(splitAmountA) : '',
+    splitAmountB: rule.ownership === 'shared' ? String(splitAmountB) : '',
     generateDay: String(rule.generate_day),
     startMonth: dateStringToMonthKey(rule.start_month),
     endMonth: rule.end_month ? dateStringToMonthKey(rule.end_month) : '',
@@ -274,10 +320,15 @@ export default function RecurringExpenseRulesScreen() {
     if (!draft.paidBy || !members.some((member) => member.user_id === draft.paidBy)) {
       return 'Choose a payer from this ledger';
     }
-    const ratioA = parseRatio(draft.ratioA);
-    const ratioB = parseRatio(draft.ratioB);
-    if (ratioA === null || ratioB === null || ratioA + ratioB !== 100) {
-      return 'Split ratios must be whole numbers that add up to 100';
+    if (draft.ownership === 'shared') {
+      const splitAmountA = parseNonNegativeInteger(draft.splitAmountA);
+      const splitAmountB = parseNonNegativeInteger(draft.splitAmountB);
+      if (splitAmountA === null || splitAmountB === null) {
+        return 'Split amounts must be whole yen values';
+      }
+      if (splitAmountA + splitAmountB !== amountYen) {
+        return 'Split amounts must add up to the total amount';
+      }
     }
     const generateDay = parsePositiveInteger(draft.generateDay);
     if (!generateDay || generateDay > 31) {
@@ -306,12 +357,19 @@ export default function RecurringExpenseRulesScreen() {
     }
 
     const amountYen = parsePositiveInteger(nextDraft.amount);
-    const ratioA = parseRatio(nextDraft.ratioA);
-    const ratioB = parseRatio(nextDraft.ratioB);
+    const splitAmountA = nextDraft.ownership === 'shared' ? parseNonNegativeInteger(nextDraft.splitAmountA) : null;
+    const splitAmountB = nextDraft.ownership === 'shared' ? parseNonNegativeInteger(nextDraft.splitAmountB) : null;
     const generateDay = parsePositiveInteger(nextDraft.generateDay);
-    if (!amountYen || ratioA === null || ratioB === null || !generateDay) {
+    if (!amountYen || !generateDay) {
       return;
     }
+    if (nextDraft.ownership === 'shared' && (splitAmountA === null || splitAmountB === null || splitAmountA + splitAmountB !== amountYen)) {
+      return;
+    }
+    const ratioA = nextDraft.ownership === 'shared' && splitAmountA !== null
+      ? ratioFromSplitAmount(amountYen, splitAmountA)
+      : 100;
+    const ratioB = 100 - ratioA;
 
     setSaving(true);
     try {
@@ -326,6 +384,8 @@ export default function RecurringExpenseRulesScreen() {
         ownership: nextDraft.ownership,
         splitRatioA: ratioA,
         splitRatioB: ratioB,
+        splitAmountA,
+        splitAmountB,
         generateDay,
         startMonth: monthKeyToStartDate(nextDraft.startMonth),
         endMonth: nextDraft.endMonth ? monthKeyToStartDate(nextDraft.endMonth) : null,
@@ -365,23 +425,38 @@ export default function RecurringExpenseRulesScreen() {
   }
 
   function clearAmount() {
-    updateDraft({ amount: '' });
+    updateDraft({ amount: '', splitAmountA: '', splitAmountB: '' });
+  }
+
+  function updateAmount(value: string) {
+    const nextAmount = sanitizeWholeNumber(value);
+    const currentAmountYen = parsePositiveInteger(draft.amount) || 0;
+    const nextAmountYen = parsePositiveInteger(nextAmount) || 0;
+    if (draft.ownership !== 'shared' || !isEvenSplit(currentAmountYen, draft.splitAmountA, draft.splitAmountB)) {
+      updateDraft({ amount: nextAmount });
+      return;
+    }
+
+    const [splitAmountA, splitAmountB] = evenSplitAmounts(nextAmountYen);
+    updateDraft({ amount: nextAmount, splitAmountA, splitAmountB });
   }
 
   function selectOwnership(nextOwnership: ExpenseOwnership) {
     if (nextOwnership === 'personal') {
       updateDraft({
         ownership: nextOwnership,
-        ratioA: '100',
-        ratioB: '0'
+        splitAmountA: '',
+        splitAmountB: ''
       });
       return;
     }
 
+    const amountYen = parsePositiveInteger(draft.amount) || 0;
+    const [splitAmountA, splitAmountB] = evenSplitAmounts(amountYen);
     updateDraft({
       ownership: nextOwnership,
-      ratioA: draft.ratioA === '100' && draft.ratioB === '0' ? '50' : draft.ratioA,
-      ratioB: draft.ratioA === '100' && draft.ratioB === '0' ? '50' : draft.ratioB
+      splitAmountA: draft.splitAmountA || splitAmountA,
+      splitAmountB: draft.splitAmountB || splitAmountB
     });
   }
 
@@ -396,37 +471,40 @@ export default function RecurringExpenseRulesScreen() {
   const selectedCategoryLabel = categoryLabel(draft.categoryId);
   const payerName = memberNameById.get(draft.paidBy) || memberNames[0];
   const previewTitle = draft.name.trim() || selectedCategoryLabel;
-  const ratioA = parseRatio(draft.ratioA) ?? 0;
-  const ratioB = parseRatio(draft.ratioB) ?? 0;
-  const shareA = draftAmountYen > 0 ? Math.round((draftAmountYen * ratioA) / 100) : 0;
-  const shareB = draftAmountYen > 0 ? draftAmountYen - shareA : 0;
-  const splitBalanceValid = draft.ownership === 'personal' || (ratioA + ratioB === 100 && draftAmountYen > 0);
-  const splitEvenlySelected = ratioA === 50 && ratioB === 50;
+  const shareA = parseNonNegativeInteger(draft.splitAmountA) ?? 0;
+  const shareB = parseNonNegativeInteger(draft.splitAmountB) ?? 0;
+  const splitBalanceValid = draft.ownership === 'personal' || (shareA + shareB === draftAmountYen && draftAmountYen > 0);
+  const splitEvenlySelected = isEvenSplit(draftAmountYen, draft.splitAmountA, draft.splitAmountB);
 
   function updateSharedAmount(memberIndex: 0 | 1, value: string) {
     const amountYen = parsePositiveInteger(draft.amount);
-    const shareYen = Number(sanitizeWholeNumber(value));
+    const sanitizedValue = sanitizeWholeNumber(value);
+    if (!sanitizedValue) {
+      updateDraft(memberIndex === 0 ? { splitAmountA: '' } : { splitAmountB: '' });
+      return;
+    }
+
+    const shareYen = Number(sanitizedValue);
     if (!amountYen || !Number.isFinite(shareYen)) {
-      updateDraft({ ratioA: '0', ratioB: '0' });
+      updateDraft(memberIndex === 0 ? { splitAmountA: sanitizedValue } : { splitAmountB: sanitizedValue });
       return;
     }
-
     const clampedShare = Math.min(amountYen, Math.max(0, shareYen));
-    const nextRatio = Math.round((clampedShare / amountYen) * 100);
     if (memberIndex === 0) {
-      updateDraft({ ratioA: String(nextRatio), ratioB: String(100 - nextRatio) });
+      updateDraft({ splitAmountA: String(clampedShare), splitAmountB: String(amountYen - clampedShare) });
       return;
     }
 
-    updateDraft({ ratioA: String(100 - nextRatio), ratioB: String(nextRatio) });
+    updateDraft({ splitAmountA: String(amountYen - clampedShare), splitAmountB: String(clampedShare) });
   }
 
   function splitEvenly() {
-    updateDraft({ ratioA: '50', ratioB: '50' });
+    const [splitAmountA, splitAmountB] = evenSplitAmounts(draftAmountYen);
+    updateDraft({ splitAmountA, splitAmountB });
   }
 
   function clearSplit() {
-    updateDraft({ ratioA: '0', ratioB: '0' });
+    updateDraft({ splitAmountA: '', splitAmountB: '' });
   }
 
   return (
@@ -487,7 +565,7 @@ export default function RecurringExpenseRulesScreen() {
                 inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
                 inputMode="numeric"
                 keyboardType="number-pad"
-                onChangeText={(value) => updateDraft({ amount: sanitizeWholeNumber(value) })}
+                onChangeText={updateAmount}
                 placeholder="¥ 0"
                 placeholderTextColor={colors.subtle}
                 selection={{ start: amountDisplayValue.length, end: amountDisplayValue.length }}
@@ -653,15 +731,15 @@ export default function RecurringExpenseRulesScreen() {
             </View>
             <ShareAmountRow
               accent={MEMBER_COLORS[0]}
-              amountYen={shareA}
               label={memberNames[0]}
               onChange={(value) => updateSharedAmount(0, value)}
+              value={draft.splitAmountA}
             />
             <ShareAmountRow
               accent={MEMBER_COLORS[1]}
-              amountYen={shareB}
               label={memberNames[1]}
               onChange={(value) => updateSharedAmount(1, value)}
+              value={draft.splitAmountB}
             />
             <View style={localStyles.divider} />
             <View style={localStyles.balanceRow}>
@@ -803,16 +881,16 @@ function MemberOption({
 
 function ShareAmountRow({
   accent,
-  amountYen,
   label,
-  onChange
+  onChange,
+  value
 }: {
   accent: string;
-  amountYen: number;
   label: string;
   onChange: (value: string) => void;
+  value: string;
 }) {
-  const value = amountYen > 0 ? formatYenInput(String(amountYen)) : '¥ ';
+  const displayValue = formatYenInput(value);
 
   return (
     <View style={localStyles.shareAmountRow}>
@@ -828,9 +906,9 @@ function ShareAmountRow({
           onChangeText={onChange}
           placeholder="¥ 0"
           placeholderTextColor={colors.subtle}
-          selection={{ start: value.length, end: value.length }}
+          selection={{ start: displayValue.length, end: displayValue.length }}
           style={[localStyles.shareInput, { color: accent }]}
-          value={value}
+          value={displayValue}
         />
       </View>
     </View>

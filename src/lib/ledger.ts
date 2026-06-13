@@ -301,6 +301,8 @@ export type SaveRecurringExpenseRuleInput = {
   ownership: ExpenseOwnership;
   splitRatioA: number;
   splitRatioB: number;
+  splitAmountA: number | null;
+  splitAmountB: number | null;
   generateDay: number;
   startMonth: string;
   endMonth: string | null;

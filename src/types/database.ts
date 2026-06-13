@@ -115,6 +115,8 @@ export type Database = {
           ownership: ExpenseOwnership;
           split_ratio_a: number;
           split_ratio_b: number;
+          split_amount_a: number | null;
+          split_amount_b: number | null;
           generate_day: number;
           start_month: string;
           end_month: string | null;
@@ -135,6 +137,8 @@ export type Database = {
           ownership?: ExpenseOwnership;
           split_ratio_a?: number;
           split_ratio_b?: number;
+          split_amount_a?: number | null;
+          split_amount_b?: number | null;
           generate_day?: number;
           start_month: string;
           end_month?: string | null;
@@ -155,6 +159,8 @@ export type Database = {
           ownership?: ExpenseOwnership;
           split_ratio_a?: number;
           split_ratio_b?: number;
+          split_amount_a?: number | null;
+          split_amount_b?: number | null;
           generate_day?: number;
           start_month?: string;
           end_month?: string | null;
@@ -357,6 +363,8 @@ export type Database = {
           p_ownership: ExpenseOwnership;
           p_split_ratio_a: number;
           p_split_ratio_b: number;
+          p_split_amount_a: number | null;
+          p_split_amount_b: number | null;
           p_generate_day: number;
           p_start_month: string;
           p_end_month: string | null;

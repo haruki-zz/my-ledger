@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'my-ledger-offline.db';
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const WEB_DATABASE_OPEN_TIMEOUT_MS = 2500;
 const LOCAL_DB_OPEN_TIMEOUT = Symbol('local-db-open-timeout');
 
@@ -217,6 +217,8 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
           ownership TEXT NOT NULL DEFAULT 'shared',
           split_ratio_a INTEGER NOT NULL,
           split_ratio_b INTEGER NOT NULL,
+          split_amount_a INTEGER,
+          split_amount_b INTEGER,
           generate_day INTEGER NOT NULL,
           start_month TEXT NOT NULL,
           end_month TEXT,
@@ -386,6 +388,8 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
           ownership TEXT NOT NULL DEFAULT 'shared',
           split_ratio_a INTEGER NOT NULL,
           split_ratio_b INTEGER NOT NULL,
+          split_amount_a INTEGER,
+          split_amount_b INTEGER,
           generate_day INTEGER NOT NULL,
           start_month TEXT NOT NULL,
           end_month TEXT,
@@ -412,6 +416,19 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
         'ownership',
         "TEXT NOT NULL DEFAULT 'shared'"
       );
+    }
+
+    if (currentVersion > 0 && currentVersion < 5) {
+      await addColumnIfMissing(db, 'recurring_expense_rules', 'split_amount_a', 'INTEGER');
+      await addColumnIfMissing(db, 'recurring_expense_rules', 'split_amount_b', 'INTEGER');
+      await db.execAsync(`
+        UPDATE recurring_expense_rules
+        SET split_amount_a = ROUND(amount_yen * split_ratio_a / 100.0),
+            split_amount_b = amount_yen - ROUND(amount_yen * split_ratio_a / 100.0)
+        WHERE ownership = 'shared'
+          AND split_amount_a IS NULL
+          AND split_amount_b IS NULL;
+      `);
     }
 
     await db.runAsync(

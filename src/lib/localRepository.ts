@@ -83,6 +83,8 @@ type SaveRecurringRulePayload = {
   ownership: ExpenseRow['ownership'];
   splitRatioA: number;
   splitRatioB: number;
+  splitAmountA: number | null;
+  splitAmountB: number | null;
   generateDay: number;
   startMonth: string;
   endMonth: string | null;
@@ -649,6 +651,7 @@ export async function getCachedRecurringRules(ledgerId: string): Promise<Recurri
   const db = await getLocalDb();
   const rows = await db.getAllAsync<LocalRecurringRuleRow>(
     `SELECT id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
+       split_amount_a, split_amount_b,
        generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at
      FROM recurring_expense_rules
      WHERE ledger_id = ? AND deleted_locally = 0
@@ -720,6 +723,8 @@ export async function saveLocalRecurringRule(input: {
   ownership: ExpenseRow['ownership'];
   splitRatioA: number;
   splitRatioB: number;
+  splitAmountA: number | null;
+  splitAmountB: number | null;
   generateDay: number;
   startMonth: string;
   endMonth: string | null;
@@ -751,6 +756,8 @@ export async function saveLocalRecurringRule(input: {
     ownership: input.ownership,
     splitRatioA: input.splitRatioA,
     splitRatioB: input.splitRatioB,
+    splitAmountA: input.splitAmountA,
+    splitAmountB: input.splitAmountB,
     generateDay: input.generateDay,
     startMonth: input.startMonth,
     endMonth: input.endMonth,
@@ -762,9 +769,10 @@ export async function saveLocalRecurringRule(input: {
     await db.runAsync(
       `INSERT OR REPLACE INTO recurring_expense_rules (
          id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
+         split_amount_a, split_amount_b,
          generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
          local_status, deleted_locally, base_updated_at, last_synced_updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
       ruleId,
       input.ledgerId,
       payload.name,
@@ -775,6 +783,8 @@ export async function saveLocalRecurringRule(input: {
       input.ownership,
       input.splitRatioA,
       input.splitRatioB,
+      input.splitAmountA,
+      input.splitAmountB,
       input.generateDay,
       input.startMonth,
       input.endMonth,
@@ -1041,6 +1051,8 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
       p_ownership: payload.ownership,
       p_split_ratio_a: payload.splitRatioA,
       p_split_ratio_b: payload.splitRatioB,
+      p_split_amount_a: payload.splitAmountA,
+      p_split_amount_b: payload.splitAmountB,
       p_generate_day: payload.generateDay,
       p_start_month: payload.startMonth,
       p_end_month: payload.endMonth,
@@ -1346,9 +1358,10 @@ async function upsertRemoteRecurringRule(tx: LocalTransaction, rule: RecurringEx
   await tx.runAsync(
     `INSERT OR REPLACE INTO recurring_expense_rules (
        id, ledger_id, name, category_id, subcategory, amount_yen, paid_by, ownership, split_ratio_a, split_ratio_b,
+       split_amount_a, split_amount_b,
        generate_day, start_month, end_month, timezone, is_active, created_by, created_at, updated_at,
        local_status, deleted_locally, base_updated_at, last_synced_updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
     rule.id,
     rule.ledger_id,
     rule.name,
@@ -1359,6 +1372,8 @@ async function upsertRemoteRecurringRule(tx: LocalTransaction, rule: RecurringEx
     rule.ownership,
     rule.split_ratio_a,
     rule.split_ratio_b,
+    rule.split_amount_a,
+    rule.split_amount_b,
     rule.generate_day,
     rule.start_month,
     rule.end_month,
@@ -1396,6 +1411,8 @@ function mapLocalRecurringRule(row: LocalRecurringRuleRow): RecurringExpenseRule
     ownership: row.ownership,
     split_ratio_a: row.split_ratio_a,
     split_ratio_b: row.split_ratio_b,
+    split_amount_a: row.split_amount_a,
+    split_amount_b: row.split_amount_b,
     generate_day: row.generate_day,
     start_month: row.start_month,
     end_month: row.end_month,
