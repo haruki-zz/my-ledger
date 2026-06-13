@@ -126,17 +126,6 @@ function ratioFromSplitAmount(amountYen: number, splitAmountA: number) {
   return Math.round((splitAmountA / amountYen) * 100);
 }
 
-function dateForGenerateDay(day: string) {
-  const parsedDay = Math.min(31, Math.max(1, Number(sanitizeWholeNumber(day) || 1)));
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), parsedDay);
-}
-
-function formatGenerateDayLabel(day: string) {
-  const date = dateForGenerateDay(day);
-  return `Day ${date.getDate()} of each month`;
-}
-
 const GENERATE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1);
 
 function emptyDraft(members: LedgerMemberProfile[]): Draft {
@@ -280,10 +269,6 @@ export default function RecurringExpenseRulesScreen() {
     return [firstName, secondName] as const;
   }, [members]);
 
-  const memberNameById = useMemo(
-    () => new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)])),
-    [members]
-  );
   const amountDisplayValue = formatYenInput(draft.amount);
 
   const currentSubcategoryPresets = useMemo(() => subcategoryPresets(draft.categoryId), [draft.categoryId]);
@@ -469,8 +454,6 @@ export default function RecurringExpenseRulesScreen() {
   const selectedCategoryColor = categoryColor(draft.categoryId);
   const selectedCategoryIcon = categoryIconName(draft.categoryId);
   const selectedCategoryLabel = categoryLabel(draft.categoryId);
-  const payerName = memberNameById.get(draft.paidBy) || memberNames[0];
-  const previewTitle = draft.name.trim() || selectedCategoryLabel;
   const shareA = parseNonNegativeInteger(draft.splitAmountA) ?? 0;
   const shareB = parseNonNegativeInteger(draft.splitAmountB) ?? 0;
   const splitBalanceValid = draft.ownership === 'personal' || (shareA + shareB === draftAmountYen && draftAmountYen > 0);
@@ -515,38 +498,13 @@ export default function RecurringExpenseRulesScreen() {
     >
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
 
-      <View style={localStyles.topBar}>
-        <View style={localStyles.titleBlock}>
-          <Text style={localStyles.screenTitle}>{draft.id ? 'Edit Fixed Expense' : 'New Fixed Expense'}</Text>
-          <Text style={localStyles.screenSubtitle}>Added automatically every month.</Text>
-        </View>
-        {draft.id ? (
+      {draft.id ? (
+        <View style={localStyles.topBar}>
           <Pressable onPress={startCreate} style={[styles.button, styles.secondaryButton, localStyles.compactButton]}>
             <Text style={[styles.buttonText, styles.secondaryButtonText]}>New</Text>
           </Pressable>
-        ) : null}
-      </View>
-
-      <BentoCard variant="form" style={localStyles.previewCard}>
-        <Text style={localStyles.previewTag}>ADDED MONTHLY</Text>
-        <View style={localStyles.previewRow}>
-          <View style={[localStyles.previewIcon, { backgroundColor: tintFromAccent(selectedCategoryColor) }]}>
-            <Ionicons color={selectedCategoryColor} name={selectedCategoryIcon} size={22} />
-          </View>
-          <View style={localStyles.previewBody}>
-            <Text numberOfLines={1} style={localStyles.previewTitle}>{previewTitle}</Text>
-            <View style={localStyles.previewMetaRow}>
-              <TypePill ownership={draft.ownership} />
-              <Text numberOfLines={1} style={localStyles.previewMeta}>
-                {draft.ownership === 'personal' ? payerName : `${payerName} pays`} · day {draft.generateDay}
-              </Text>
-            </View>
-          </View>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.previewAmount}>
-            {draftAmountYen > 0 ? formatYen(draftAmountYen) : '¥0'}
-          </Text>
         </View>
-      </BentoCard>
+      ) : null}
 
       <BentoCard variant="form" style={localStyles.groupCard}>
         <GroupHead icon="pricetag-outline" label="What" />
@@ -661,13 +619,6 @@ export default function RecurringExpenseRulesScreen() {
             })}
           </View>
         </ScrollView>
-        <Pressable
-          onPress={() => runAfterKeyboardDismiss(() => setNativeGenerateDatePickerOpen((current) => !current))}
-          style={({ pressed }) => [localStyles.railCaption, pressed && Platform.OS !== 'web' && localStyles.pressed]}
-        >
-          <Ionicons color={colors.muted} name="move-outline" size={15} />
-          <Text style={localStyles.railCaptionText}>{formatGenerateDayLabel(draft.generateDay)}</Text>
-        </Pressable>
       </BentoCard>
 
       <BentoCard variant="form" style={localStyles.groupCard}>
@@ -833,17 +784,6 @@ function GroupHead({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; labe
   );
 }
 
-function TypePill({ ownership }: { ownership: ExpenseOwnership }) {
-  const personal = ownership === 'personal';
-  return (
-    <View style={[localStyles.typePill, personal ? localStyles.typePillPersonal : localStyles.typePillShared]}>
-      <Text style={[localStyles.typePillText, personal ? localStyles.typePillTextPersonal : localStyles.typePillTextShared]}>
-        {personal ? 'PERSONAL' : 'SHARED'}
-      </Text>
-    </View>
-  );
-}
-
 function MemberOption({
   accent,
   label,
@@ -897,8 +837,8 @@ function ShareAmountRow({
       <View style={[localStyles.shareAvatar, { borderColor: accent }]}>
         <Text style={[localStyles.shareAvatarText, { color: accent }]}>{initialFor(label)}</Text>
       </View>
-      <Text numberOfLines={1} style={localStyles.shareName}>{label}</Text>
-      <View style={localStyles.shareInputWrap}>
+      <View style={localStyles.shareBody}>
+        <Text numberOfLines={1} style={localStyles.shareName}>{label}</Text>
         <TextInput
           inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           inputMode="numeric"
@@ -1268,79 +1208,6 @@ const localStyles = StyleSheet.create({
   pressed: {
     opacity: 0.76
   },
-  previewAmount: {
-    color: colors.ink,
-    flexShrink: 0,
-    fontFamily: fontFamilies.bold,
-    fontSize: 17,
-    fontWeight: '700',
-    lineHeight: 22,
-    maxWidth: 126,
-    textAlign: 'right'
-  },
-  previewBody: {
-    flex: 1,
-    gap: 4,
-    minWidth: 0
-  },
-  previewCard: {
-    gap: 10,
-    padding: 16
-  },
-  previewIcon: {
-    alignItems: 'center',
-    borderRadius: 21,
-    height: 42,
-    justifyContent: 'center',
-    width: 42
-  },
-  previewMeta: {
-    color: colors.muted,
-    flex: 1,
-    fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    lineHeight: 16,
-    minWidth: 0
-  },
-  previewMetaRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    minWidth: 0
-  },
-  previewRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 52
-  },
-  previewTag: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0,
-    lineHeight: 14
-  },
-  previewTitle: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20
-  },
-  railCaption: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 28
-  },
-  railCaptionText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    lineHeight: 16
-  },
   saveButton: {
     alignItems: 'center',
     backgroundColor: colors.primary,
@@ -1363,29 +1230,17 @@ const localStyles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700'
   },
-  screenSubtitle: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 13,
-    lineHeight: 18
-  },
-  screenTitle: {
-    color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 25,
-    fontWeight: '800',
-    lineHeight: 31
-  },
   shareAmountRow: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.58)',
+    backgroundColor: 'rgba(255,255,255,0.78)',
     borderColor: colors.line,
     borderRadius: theme.radii.control,
     borderWidth: 1,
     flexDirection: 'row',
-    gap: 10,
-    minHeight: 50,
-    paddingHorizontal: 10
+    gap: 12,
+    minHeight: 58,
+    paddingHorizontal: 12,
+    paddingVertical: 8
   },
   shareAvatar: {
     alignItems: 'center',
@@ -1404,23 +1259,21 @@ const localStyles = StyleSheet.create({
   shareHeaderRow: {
     gap: 8
   },
-  shareInput: {
+  shareBody: {
+    alignItems: 'center',
     flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minWidth: 0
+  },
+  shareInput: {
     fontFamily: fontFamilies.bold,
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
-    minHeight: 38,
+    minHeight: 36,
+    minWidth: 118,
     paddingVertical: 0,
     textAlign: 'right'
-  },
-  shareInputWrap: {
-    backgroundColor: 'rgba(255,255,255,0.84)',
-    borderColor: colors.line,
-    borderRadius: 15,
-    borderWidth: 1,
-    flex: 1,
-    minWidth: 112,
-    paddingHorizontal: 10
   },
   shareName: {
     color: colors.ink,
@@ -1500,40 +1353,10 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10
   },
-  titleBlock: {
-    flex: 1,
-    gap: 5,
-    minWidth: 0
-  },
   topBar: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     paddingHorizontal: 4
-  },
-  typePill: {
-    borderRadius: theme.radii.pill,
-    paddingHorizontal: 6,
-    paddingVertical: 3
-  },
-  typePillPersonal: {
-    backgroundColor: 'rgba(99,102,241,0.12)'
-  },
-  typePillShared: {
-    backgroundColor: colors.tint
-  },
-  typePillText: {
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0,
-    lineHeight: 12
-  },
-  typePillTextPersonal: {
-    color: colors.accent
-  },
-  typePillTextShared: {
-    color: colors.primaryDark
   }
 });
