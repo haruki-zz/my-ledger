@@ -6,7 +6,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'food_dining',
     label: 'Food & Dining',
     icon: 'restaurant-outline',
-    color: '#6F8FBF',
+    color: '#D9454A',
     splitRatio: [50, 50],
     sortOrder: 10,
     subcategories: ['Groceries', 'Restaurant', 'Cafe', 'Delivery', 'Drinks']
@@ -15,7 +15,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'household',
     label: 'Household',
     icon: 'basket-outline',
-    color: '#8491A3',
+    color: '#45A170',
     splitRatio: [50, 50],
     sortOrder: 20,
     subcategories: ['Daily Goods', 'Cleaning', 'Furniture', 'Kitchen', 'Laundry']
@@ -24,7 +24,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'transport',
     label: 'Transport',
     icon: 'bus-outline',
-    color: '#9B86B8',
+    color: '#3E58DA',
     splitRatio: [50, 50],
     sortOrder: 30,
     subcategories: ['Train', 'Taxi', 'Bus', 'Parking', 'Fuel']
@@ -33,7 +33,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'housing',
     label: 'Housing',
     icon: 'home-outline',
-    color: '#5FC0A6',
+    color: '#9484C2',
     splitRatio: [50, 50],
     sortOrder: 40,
     subcategories: ['Rent', 'Mortgage', 'Building Fee', 'Repair', 'Moving']
@@ -42,7 +42,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'utilities',
     label: 'Utilities',
     icon: 'flash-outline',
-    color: '#B66A6A',
+    color: '#F0C519',
     splitRatio: [50, 50],
     sortOrder: 50,
     subcategories: ['Electricity', 'Gas', 'Water', 'Heating']
@@ -51,7 +51,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'communications',
     label: 'Communications',
     icon: 'chatbubbles-outline',
-    color: '#7B6CA6',
+    color: '#589ABB',
     splitRatio: [50, 50],
     sortOrder: 60,
     subcategories: ['Mobile', 'Internet', 'Phone', 'Postage']
@@ -60,7 +60,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'healthcare',
     label: 'Healthcare',
     icon: 'medkit-outline',
-    color: '#78A87E',
+    color: '#67B159',
     splitRatio: [50, 50],
     sortOrder: 70,
     subcategories: ['Doctor', 'Pharmacy', 'Dental', 'Wellness']
@@ -69,7 +69,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'entertainment',
     label: 'Entertainment',
     icon: 'film-outline',
-    color: '#B47790',
+    color: '#B055CE',
     splitRatio: [50, 50],
     sortOrder: 80,
     subcategories: ['Movies & Shows', 'Dating', 'Games', 'Music', 'Subscription', 'Hobby', 'Sports']
@@ -78,7 +78,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'shopping',
     label: 'Shopping',
     icon: 'bag-outline',
-    color: '#A982A8',
+    color: '#D84F9D',
     splitRatio: [50, 50],
     sortOrder: 90,
     subcategories: ['Clothes', 'Electronics', 'Gifts', 'Beauty & Salon', 'Books']
@@ -87,7 +87,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'travel',
     label: 'Travel',
     icon: 'airplane-outline',
-    color: '#6FA7B8',
+    color: '#8EAB49',
     splitRatio: [50, 50],
     sortOrder: 100,
     subcategories: ['Hotel', 'Flight', 'Local Transport', 'Activities', 'Souvenirs']
@@ -96,7 +96,7 @@ export const PRIMARY_CATEGORIES = [
     id: 'other',
     label: 'Other',
     icon: 'ellipsis-horizontal',
-    color: '#98A2B3',
+    color: '#969CA6',
     splitRatio: [50, 50],
     sortOrder: 110,
     subcategories: ['Insurance', 'Fees', 'Gift', 'Misc']
