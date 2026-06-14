@@ -884,7 +884,7 @@ const uiStyles = StyleSheet.create({
     borderRadius: theme.radii.surface,
     borderWidth: 1,
     padding: 16,
-    ...theme.shadow
+    ...theme.glassShadow
   },
   iconButton: {
     alignItems: 'center',

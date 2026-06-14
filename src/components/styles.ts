@@ -18,10 +18,10 @@ export const fontFamilies = {
 export const theme = {
   colors: {
     accent: '#6366F1',
-    bg: '#F6F8FB',
+    bg: '#EBEFF7',
     danger: '#DC2626',
-    glass: 'rgba(255,255,255,0.76)',
-    glassBorder: 'rgba(255,255,255,0.72)',
+    glass: '#FFFFFF',
+    glassBorder: 'rgba(255,255,255,0.9)',
     ink: '#111827',
     line: 'rgba(17,24,39,0.08)',
     muted: '#667085',
@@ -44,6 +44,22 @@ export const theme = {
     shadowOffset: { height: 12, width: 0 },
     shadowOpacity: 0.08,
     shadowRadius: 24
+  },
+  glassShadow: {
+    boxShadow: '0 2px 5px rgba(15,23,42,0.05), 0 20px 36px -12px rgba(15,23,42,0.24)',
+    elevation: 4,
+    shadowColor: '#0F172A',
+    shadowOffset: { height: 18, width: 0 },
+    shadowOpacity: 0.18,
+    shadowRadius: 28
+  },
+  daySectionShadow: {
+    boxShadow: '0 14px 30px -14px rgba(15,23,42,0.20)',
+    elevation: 3,
+    shadowColor: '#0F172A',
+    shadowOffset: { height: 14, width: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 22
   },
   chart: {
     grid: 'rgba(17,24,39,0.08)',
@@ -113,7 +129,7 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 12,
     padding: 16,
-    ...theme.shadow
+    ...theme.glassShadow
   },
   input: {
     backgroundColor: 'rgba(255,255,255,0.86)',

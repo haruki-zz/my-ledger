@@ -819,16 +819,14 @@ const localStyles = StyleSheet.create({
     marginLeft: 82
   },
   sectionDetailSegment: {
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderColor: 'rgba(100,116,139,0.08)',
+    backgroundColor: colors.surface,
+    borderColor: colors.glassBorder,
     borderLeftWidth: 1,
     borderRightWidth: 1,
     overflow: 'hidden'
   },
   sectionDetailSegmentFirst: {
-    ...theme.shadow,
-    shadowOpacity: 0.025,
-    shadowRadius: 10
+    ...theme.daySectionShadow
   },
   sectionDetailSegmentLast: {
     borderBottomLeftRadius: 18,
@@ -838,8 +836,8 @@ const localStyles = StyleSheet.create({
   },
   sectionHeader: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderColor: 'rgba(100,116,139,0.08)',
+    backgroundColor: colors.surface,
+    borderColor: colors.glassBorder,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
@@ -848,9 +846,7 @@ const localStyles = StyleSheet.create({
     minHeight: 64,
     paddingHorizontal: 18,
     paddingVertical: 13,
-    ...theme.shadow,
-    shadowOpacity: 0.09,
-    shadowRadius: 18
+    ...theme.daySectionShadow
   },
   sectionHeaderCollapsed: {
     borderRadius: theme.radii.surface,
