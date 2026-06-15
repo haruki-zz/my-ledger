@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, Animated, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DailyChart } from '@/src/components/DailyChart';
 import { PieChart } from '@/src/components/PieChart';
+import { SlidingValueText } from '@/src/components/SlidingValueText';
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { TransferChecklistCard } from '@/src/components/TransferChecklistCard';
 import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/components/ui';
@@ -45,7 +46,7 @@ export default function DashboardScreen() {
   const [monthKey, setMonthKey] = useState(currentMonthKey());
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [selectedCategory, setSelectedCategory] = useState<SelectedCategoryState | null>(null);
-  const [drillProgress] = useState(() => new Animated.Value(1));
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const {
     ledger,
     members,
@@ -54,7 +55,6 @@ export default function DashboardScreen() {
     minimumMonthKey,
     loadedMonthKey,
     stats,
-    loading,
     refreshing,
     error,
     reload
@@ -86,46 +86,23 @@ export default function DashboardScreen() {
   ), [currentUserId, userIds]);
   const currentUserColor = currentUserId ? userColorById.get(currentUserId) || colors.primaryDark : colors.primaryDark;
   const otherUserColor = otherUserId ? userColorById.get(otherUserId) || colors.warm : colors.warm;
-  const drillAnimatedStyle = {
-    opacity: drillProgress,
-    transform: [
-      {
-        translateY: drillProgress.interpolate({
-          inputRange: [0, 1],
-          outputRange: [10, 0]
-        })
-      },
-      {
-        scale: drillProgress.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0.985, 1]
-        })
-      }
-    ]
-  };
-
-  const runDrillTransition = useCallback(() => {
-    drillProgress.stopAnimation();
-    drillProgress.setValue(0);
-    Animated.timing(drillProgress, {
-      duration: 240,
-      toValue: 1,
-      useNativeDriver: true
-    }).start();
-  }, [drillProgress]);
 
   const moveMonth = useCallback((amount: number) => {
     if (period !== 'month') {
       return;
     }
 
-    runDrillTransition();
     setSelectedCategory(null);
     setMonthKey((current) => addMonths(current, amount));
-  }, [period, runDrillTransition]);
+  }, [period]);
 
-  const refreshDashboard = useCallback(() => {
-    void Promise.all([reload(), reloadTransfers()]);
+  const refreshDashboard = useCallback(async () => {
+    setManualRefreshing(true);
+    try {
+      await Promise.all([reload(), reloadTransfers()]);
+    } finally {
+      setManualRefreshing(false);
+    }
   }, [reload, reloadTransfers]);
 
   function selectPeriod(nextPeriod: DashboardPeriod) {
@@ -133,7 +110,6 @@ export default function DashboardScreen() {
       return;
     }
 
-    runDrillTransition();
     setSelectedCategory(null);
     setPeriod(nextPeriod);
     if (nextPeriod !== 'month') {
@@ -184,7 +160,7 @@ export default function DashboardScreen() {
       <ScrollView
         refreshControl={
           <RefreshControl
-            refreshing={(loading && !ledger) || refreshing || transferRefreshing}
+            refreshing={manualRefreshing}
             onRefresh={refreshDashboard}
           />
         }
@@ -220,7 +196,7 @@ export default function DashboardScreen() {
             </View>
 
             <BentoCard variant="hero" style={localStyles.heroCard}>
-              <Animated.View style={[localStyles.heroContent, drillAnimatedStyle]}>
+              <View style={localStyles.heroContent}>
                 <View style={localStyles.heroTopRow}>
                   <Text style={localStyles.monthlyTotalLabel}>Total</Text>
                   <PillTabs
@@ -233,9 +209,12 @@ export default function DashboardScreen() {
                   />
                 </View>
 
-                <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.heroAmount}>
-                  {formatYen(stats.totalYen)}
-                </Text>
+                <SlidingValueText
+                  formatValue={formatYen}
+                  textStyle={localStyles.heroAmount}
+                  value={stats.totalYen}
+                  wrapperStyle={localStyles.heroAmountSlot}
+                />
 
                 <View style={localStyles.comparisonRow}>
                   <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.comparisonAmountText, { color: comparisonColor(stats.comparison.direction) }]}>
@@ -282,7 +261,7 @@ export default function DashboardScreen() {
                     <Text style={styles.muted}>{isSwitchingMonth ? 'Updating...' : 'Syncing...'}</Text>
                   </View>
                 ) : null}
-              </Animated.View>
+              </View>
             </BentoCard>
           </View>
 
@@ -496,6 +475,9 @@ const localStyles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0,
     lineHeight: 62
+  },
+  heroAmountSlot: {
+    height: 62
   },
   heroCard: {
     gap: 0,
