@@ -398,7 +398,7 @@ export default function RecurringExpenseRulesScreen() {
       }
       await load(ledger, 'background');
       if (!editingRuleId) {
-        setDraft(draftFromRule(savedRule));
+        router.back();
       }
     } catch (saveError) {
       Alert.alert('Save Failed', getErrorMessage(saveError));

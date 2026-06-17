@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -53,6 +53,24 @@ type DashboardRowProps = {
 
 const LEDGER_COLORS = ['#0F766E', '#6366F1', '#2563EB', '#C2410C', '#8B5CF6', '#14B8A6'];
 
+function preserveExistingRuleOrder(
+  currentRules: RecurringExpenseRule[],
+  nextRules: RecurringExpenseRule[]
+) {
+  if (currentRules.length === 0 || nextRules.length === 0) {
+    return nextRules;
+  }
+
+  const nextRuleById = new Map(nextRules.map((rule) => [rule.id, rule]));
+  const orderedRules = currentRules
+    .map((rule) => nextRuleById.get(rule.id))
+    .filter((rule): rule is RecurringExpenseRule => Boolean(rule));
+  const knownRuleIds = new Set(orderedRules.map((rule) => rule.id));
+  const appendedRules = nextRules.filter((rule) => !knownRuleIds.has(rule.id));
+
+  return [...orderedRules, ...appendedRules];
+}
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { session, signOut: signOutSession } = useAuth();
@@ -85,7 +103,7 @@ export default function SettingsScreen() {
         getRecurringExpenseRules(ledgerId)
       ]);
       setMembers(nextMembers);
-      setRules(nextRules);
+      setRules((currentRules) => preserveExistingRuleOrder(currentRules, nextRules));
     } catch (loadError) {
       setMembers([]);
       setRules([]);
@@ -98,6 +116,10 @@ export default function SettingsScreen() {
   useEffect(() => {
     void loadDetails();
   }, [loadDetails]);
+
+  useFocusEffect(useCallback(() => {
+    void loadDetails();
+  }, [loadDetails]));
 
   const currentUserId = session?.user.id;
   const currentMember = useMemo(
@@ -518,7 +540,6 @@ function FixedExpensesPanel({
             </View>
           </View>
           <View style={localStyles.fixedSummaryActions}>
-            <CircleIcon backgroundColor={colors.tint} color={colors.primaryDark} icon="repeat-outline" size={46} />
             {hasRules ? (
               <CircleIcon
                 backgroundColor="rgba(255,255,255,0.72)"
