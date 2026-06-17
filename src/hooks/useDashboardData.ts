@@ -45,7 +45,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
     currentLedgerRef.current = currentLedger;
   }, [currentLedger]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { userInitiated?: boolean }) => {
     if (ledgerLoading) {
       return;
     }
@@ -108,7 +108,11 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
       hasLoadedData.current = true;
     } catch (loadError) {
       if (requestSequence.current === requestId) {
-        setError(loadError instanceof Error ? loadError.message : 'Could not load dashboard');
+        if (shouldKeepCurrentData && !options?.userInitiated) {
+          console.warn('Dashboard background reload failed:', loadError instanceof Error ? loadError.message : String(loadError));
+        } else {
+          setError(loadError instanceof Error ? loadError.message : 'Could not load dashboard');
+        }
       }
     } finally {
       if (requestSequence.current === requestId) {

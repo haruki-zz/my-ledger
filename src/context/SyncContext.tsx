@@ -125,34 +125,20 @@ export function useSyncContext() {
 }
 
 function SyncStatusBanner() {
-  const { conflict, failed, online, pending, syncing } = useSyncContext();
+  const { conflict } = useSyncContext();
   const insets = useSafeAreaInsets();
-  const visible = !online || conflict > 0 || failed > 0 || pending > 0 || syncing > 0;
 
-  if (!visible) {
+  if (conflict <= 0) {
     return null;
   }
 
-  const label = !online
-    ? 'Offline'
-    : conflict > 0
-      ? `${conflict} sync conflict${conflict === 1 ? '' : 's'}`
-      : failed > 0
-        ? `${failed} sync failed`
-        : syncing > 0
-          ? 'Syncing'
-          : `${pending} pending sync`;
+  const label = `${conflict} sync conflict${conflict === 1 ? '' : 's'}`;
 
   return (
     <View pointerEvents="box-none" style={[syncStyles.overlay, { top: insets.top + 8 }]}>
       <Pressable
         onPress={() => router.push('/settings/sync')}
-        style={[
-          syncStyles.banner,
-          !online && syncStyles.offline,
-          conflict > 0 && syncStyles.conflict,
-          failed > 0 && syncStyles.failed
-        ]}
+        style={[syncStyles.banner, syncStyles.conflict]}
       >
         <Text style={syncStyles.text}>{label}</Text>
       </Pressable>
@@ -178,14 +164,8 @@ const syncStyles = StyleSheet.create({
     shadowOpacity: 0.14,
     shadowRadius: 18
   },
-  offline: {
-    backgroundColor: colors.ink
-  },
   conflict: {
     backgroundColor: colors.danger
-  },
-  failed: {
-    backgroundColor: colors.accent
   },
   text: {
     color: '#fff',

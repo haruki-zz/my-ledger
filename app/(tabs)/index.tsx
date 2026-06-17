@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DailyChart } from '@/src/components/DailyChart';
@@ -53,16 +53,13 @@ export default function DashboardScreen() {
     currentUserId,
     otherUserId,
     minimumMonthKey,
-    loadedMonthKey,
     stats,
-    refreshing,
     error,
     reload
   } = useDashboardData(monthKey, period);
   const {
     items: transferItems,
     loading: transferLoading,
-    refreshing: transferRefreshing,
     saving: transferSaving,
     error: transferError,
     reload: reloadTransfers,
@@ -74,7 +71,6 @@ export default function DashboardScreen() {
   const atCurrentMonth = compareMonthKeys(monthKey, currentMonthKey()) >= 0;
   const atMinimumMonth = minimumMonthKey ? compareMonthKeys(monthKey, minimumMonthKey) <= 0 : false;
   const monthNavigationDisabled = period !== 'month';
-  const isSwitchingMonth = refreshing && Boolean(loadedMonthKey && loadedMonthKey !== monthKey);
   const memberStats = stats.memberTotals;
   const currentMemberStat = memberStats.find((member) => member.userId === currentUserId);
   const otherMemberStat = memberStats.find((member) => member.userId === otherUserId);
@@ -99,7 +95,7 @@ export default function DashboardScreen() {
   const refreshDashboard = useCallback(async () => {
     setManualRefreshing(true);
     try {
-      await Promise.all([reload(), reloadTransfers()]);
+      await Promise.all([reload({ userInitiated: true }), reloadTransfers({ userInitiated: true })]);
     } finally {
       setManualRefreshing(false);
     }
@@ -254,13 +250,6 @@ export default function DashboardScreen() {
                     </>
                   ) : null}
                 </View>
-
-                {refreshing ? (
-                  <View style={localStyles.refreshRow}>
-                    <ActivityIndicator color={colors.primary} size="small" />
-                    <Text style={styles.muted}>{isSwitchingMonth ? 'Updating...' : 'Syncing...'}</Text>
-                  </View>
-                ) : null}
               </View>
             </BentoCard>
           </View>
@@ -272,7 +261,6 @@ export default function DashboardScreen() {
             loading={transferLoading}
             members={members}
             onSetConfirmations={setConfirmations}
-            refreshing={transferRefreshing}
             saving={transferSaving}
           />
 
@@ -590,12 +578,6 @@ const localStyles = StyleSheet.create({
     flex: 1,
     maxWidth: 236,
     minWidth: 168
-  },
-  refreshRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    paddingBottom: 14
   },
   sectionHeader: {
     alignItems: 'center',

@@ -20,7 +20,7 @@ export function useTransferChecklist(ledgerId: string | null) {
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { userInitiated?: boolean }) => {
     if (!ledgerId) {
       setItems([]);
       setLoading(false);
@@ -47,7 +47,11 @@ export function useTransferChecklist(ledgerId: string | null) {
       hasLoadedData.current = true;
     } catch (loadError) {
       if (requestSequence.current === requestId) {
-        setError(loadError instanceof Error ? loadError.message : 'Could not load transfers');
+        if (shouldKeepCurrentData && !options?.userInitiated) {
+          console.warn('Transfer background reload failed:', loadError instanceof Error ? loadError.message : String(loadError));
+        } else {
+          setError(loadError instanceof Error ? loadError.message : 'Could not load transfers');
+        }
       }
     } finally {
       if (requestSequence.current === requestId) {

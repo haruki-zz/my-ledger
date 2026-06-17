@@ -22,7 +22,6 @@ type TransferChecklistCardProps = {
   loading: boolean;
   members: LedgerMemberProfile[];
   onSetConfirmations: (updates: TransferConfirmationUpdate[]) => Promise<void>;
-  refreshing: boolean;
   saving: boolean;
 };
 
@@ -40,7 +39,6 @@ export function TransferChecklistCard({
   loading,
   members,
   onSetConfirmations,
-  refreshing,
   saving
 }: TransferChecklistCardProps) {
   const [overlayVisible, setOverlayVisible] = useState(false);
@@ -142,7 +140,6 @@ export function TransferChecklistCard({
                 </Text>
               )}
               {error ? <Text style={styles.error}>{error}</Text> : null}
-              {refreshing ? <Text style={styles.muted}>Syncing</Text> : null}
             </View>
 
             <View style={localStyles.amountGroup}>
