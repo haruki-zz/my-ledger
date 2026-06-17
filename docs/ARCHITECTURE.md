@@ -94,8 +94,8 @@ Root Stack (_layout.tsx)
 ├── expenses/[id]   → edit expense form
 ├── settings/account
 ├── settings/categories
-├── settings/ledgers
-└── settings/ledger/[id]
+├── settings/ledgers → create, join, switch, delete, and leave ledgers
+└── settings/ledger/[id] → legacy redirect to settings/ledgers
 ```
 
 Mobile uses a floating bottom tab bar; screens wider than 768px switch to a left sidebar.

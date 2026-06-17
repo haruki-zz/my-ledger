@@ -285,8 +285,6 @@ export default function SettingsScreen() {
         memberCount={memberCount}
         members={members}
         onManage={() => router.push('/settings/ledgers')}
-        onManageLedger={(id) => router.push(`/settings/ledger/${id}`)}
-        onOpenDetails={() => ledger ? router.push(`/settings/ledger/${ledger.id}`) : undefined}
         onShare={shareInviteCode}
         onSwitch={switchLedger}
         otherLedgers={otherLedgers}
@@ -363,8 +361,6 @@ function LedgersPanel({
   memberCount,
   members,
   onManage,
-  onManageLedger,
-  onOpenDetails,
   onShare,
   onSwitch,
   otherLedgers
@@ -374,8 +370,6 @@ function LedgersPanel({
   memberCount: number;
   members: LedgerMemberProfile[];
   onManage: () => void;
-  onManageLedger: (ledgerId: string) => void;
-  onOpenDetails: () => void | undefined;
   onShare: () => void;
   onSwitch: (ledgerId: string) => void;
   otherLedgers: LedgerMembership[];
@@ -386,11 +380,7 @@ function LedgersPanel({
     <View style={localStyles.panelGroup}>
       <SectionHead title="Ledgers" />
       <Card>
-        <Pressable
-          disabled={!activeLedger}
-          onPress={onOpenDetails}
-          style={({ pressed }) => [localStyles.activeLedger, pressed && localStyles.pressed]}
-        >
+        <View style={localStyles.activeLedger}>
           <View style={localStyles.activeLedgerHeader}>
             <CircleIcon backgroundColor={activeColor} color="#FFFFFF" icon="journal" shadowColor={activeColor} size={46} />
             <View style={localStyles.activeLedgerText}>
@@ -402,7 +392,6 @@ function LedgersPanel({
                 {activeLedger?.ledger.name || 'No ledger selected'}
               </Text>
             </View>
-            <CircleIcon backgroundColor="rgba(255,255,255,0.72)" color={colors.muted} icon="ellipsis-horizontal" size={34} />
           </View>
 
           <View style={localStyles.memberChips}>
@@ -426,7 +415,7 @@ function LedgersPanel({
             </View>
             <PillButton disabled={!inviteCode} icon="share-social-outline" label="Share" onPress={onShare} />
           </View>
-        </Pressable>
+        </View>
 
         {otherLedgers.length > 0 ? (
           <View>
@@ -437,7 +426,6 @@ function LedgersPanel({
                 key={membership.ledger.id}
                 last={index === otherLedgers.length - 1}
                 membership={membership}
-                onManage={() => onManageLedger(membership.ledger.id)}
                 onSwitch={() => onSwitch(membership.ledger.id)}
               />
             ))}
@@ -459,19 +447,17 @@ function LedgersPanel({
 function SwitchLedgerRow({
   last,
   membership,
-  onManage,
   onSwitch
 }: {
   last: boolean;
   membership: LedgerMembership;
-  onManage: () => void;
   onSwitch: () => void;
 }) {
   const ledgerColor = colorForId(membership.ledger.id);
   return (
     <View>
       <View style={localStyles.switchRow}>
-        <Pressable onPress={onManage} style={({ pressed }) => [localStyles.switchMain, pressed && localStyles.pressed]}>
+        <View style={localStyles.switchMain}>
           <CircleIcon
             backgroundColor={tintFromAccent(ledgerColor)}
             color={ledgerColor}
@@ -480,9 +466,9 @@ function SwitchLedgerRow({
           />
           <View style={localStyles.switchText}>
             <Text numberOfLines={1} style={localStyles.switchTitle}>{membership.ledger.name}</Text>
-            <Text style={localStyles.switchDescription}>{membership.isOwner ? 'Owner' : 'Member'} · tap to manage</Text>
+            <Text style={localStyles.switchDescription}>{membership.isOwner ? 'Owner' : 'Member'} · available ledger</Text>
           </View>
-        </Pressable>
+        </View>
         <View style={localStyles.switchAction}>
           <PillButton icon="swap-horizontal" label="Switch" onPress={onSwitch} />
         </View>

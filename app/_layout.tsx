@@ -50,15 +50,6 @@ export default function RootLayout() {
     router.replace('/(tabs)/settings');
   }
 
-  function dismissLedgerDetail() {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace('/settings/ledgers');
-  }
-
   if (!fontsLoaded && !fontError) {
     return null;
   }
@@ -75,9 +66,6 @@ export default function RootLayout() {
 
   const settingsHeaderLeft = () => (
     <BackButton onPress={dismissSettingsDetail} />
-  );
-  const ledgerHeaderLeft = () => (
-    <BackButton onPress={dismissLedgerDetail} />
   );
   const expenseHeaderLeft = () => (
     <BackButton onPress={dismissExpense} />
@@ -119,13 +107,6 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen name="settings/sync" options={{ headerLeft: settingsHeaderLeft, title: 'Sync Status' }} />
-            <Stack.Screen
-              name="settings/ledger/[id]"
-              options={{
-                headerLeft: ledgerHeaderLeft,
-                title: 'Ledger Details'
-              }}
-            />
             {/* Expense detail screens */}
             <Stack.Screen
               name="expenses/new"
