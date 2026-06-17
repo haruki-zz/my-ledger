@@ -144,12 +144,12 @@ describe('resolveDashboardDateRange', () => {
     });
   });
 
-  it('uses today as the current month cutoff', () => {
+  it('uses the full selected month for current month totals', () => {
     expect(resolveDashboardDateRange('month', '2026-06', '2026-06-03')).toMatchObject({
       startDateString: '2026-06-01',
-      endDateString: '2026-06-03',
+      endDateString: '2026-06-30',
       comparisonStartDateString: '2026-05-01',
-      comparisonEndDateString: '2026-05-03'
+      comparisonEndDateString: '2026-05-31'
     });
   });
 
@@ -214,6 +214,15 @@ describe('buildDashboardPeriodStats', () => {
     });
   });
 
+  it('includes current-month fixed expenses generated after today', () => {
+    const stats = buildStats('month', [
+      expense({ amountYen: 1200, category: 'Utilities', spentOn: '2026-06-20' })
+    ]);
+
+    expect(stats.totalYen).toBe(1200);
+    expect(stats.dailyUserSeries[19].totalAmountYen).toBe(1200);
+  });
+
   it('aggregates category rows as top four plus Other', () => {
     const stats = buildStats('month', [
       expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
@@ -257,7 +266,8 @@ describe('buildDashboardPeriodStats', () => {
       userIds: [CURRENT_USER_ID, OTHER_USER_ID]
     });
 
-    expect(series.map((day) => day.totalAmountYen)).toEqual([0, 200, 100]);
+    expect(series).toHaveLength(30);
+    expect(series.slice(0, 3).map((day) => day.totalAmountYen)).toEqual([0, 200, 100]);
   });
 
   it('merges an existing Other category into the aggregated Other row', () => {

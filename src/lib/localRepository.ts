@@ -100,7 +100,7 @@ type LocalTransaction = {
 
 let drainRequester: DrainRequester | null = null;
 let online = true;
-let draining = false;
+let drainPromise: Promise<void> | null = null;
 let currentUserId: string | null = null;
 const expenseRefreshesByLedger = new Map<string, Promise<void>>();
 
@@ -647,6 +647,22 @@ export async function refreshLedgerCategories(ledgerId: string) {
   emitLedgerDataChanged(ledgerId);
 }
 
+export async function getCachedExpenseByRecurringRule(
+  ledgerId: string,
+  ruleId: string,
+  recurringMonth: string
+): Promise<{ id: string } | null> {
+  const db = await getLocalDb();
+  return db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM expenses
+     WHERE ledger_id = ? AND recurring_rule_id = ? AND recurring_month = ? AND deleted_locally = 0
+     LIMIT 1`,
+    ledgerId,
+    ruleId,
+    recurringMonth
+  );
+}
+
 export async function getCachedRecurringRules(ledgerId: string): Promise<RecurringExpenseRule[]> {
   const db = await getLocalDb();
   const rows = await db.getAllAsync<LocalRecurringRuleRow>(
@@ -804,6 +820,33 @@ export async function saveLocalRecurringRule(input: {
   return (await getCachedRecurringRules(input.ledgerId)).find((rule) => rule.id === ruleId);
 }
 
+export async function deleteLocalRecurringRule(ruleId: string) {
+  const db = await getLocalDb();
+  const rule = await db.getFirstAsync<LocalRecurringRuleRow>(
+    'SELECT * FROM recurring_expense_rules WHERE id = ? AND deleted_locally = 0',
+    ruleId
+  );
+  if (!rule) {
+    throw new Error('Fixed monthly expense is not available locally');
+  }
+
+  const now = new Date().toISOString();
+  await withLocalTransaction(async () => {
+    await db.runAsync(
+      `UPDATE recurring_expense_rules
+       SET local_status = 'pending', deleted_locally = 1, updated_at = ?, base_updated_at = ?
+       WHERE id = ?`,
+      now,
+      rule.updated_at,
+      ruleId
+    );
+    await enqueueMutation(db, 'recurring_rule', ruleId, rule.ledger_id, 'delete', { id: ruleId }, rule.updated_at);
+  });
+
+  emitLedgerDataChanged(rule.ledger_id);
+  requestSyncDrain();
+}
+
 export async function saveLocalLedgerCategory(input: {
   ledgerId: string;
   categoryId: string;
@@ -940,55 +983,62 @@ export async function cacheTransferItems(ledgerId: string, items: TransferCheckl
 }
 
 export async function drainSyncQueue() {
-  if (!online || draining) {
+  if (!online) {
     return;
   }
 
-  draining = true;
-  try {
-    const db = await getLocalDb();
-    while (online) {
-      const now = Date.now();
-      const row = await db.getFirstAsync<SyncQueueRecord<string>>(
-        `SELECT * FROM sync_queue
-         WHERE status = 'queued'
-            OR (status = 'failed' AND next_attempt_at > 0 AND next_attempt_at <= ?)
-         ORDER BY sequence ASC
-         LIMIT 1`,
-        now
-      );
+  if (drainPromise) {
+    await drainPromise;
+    return drainSyncQueue();
+  }
 
-      if (!row) {
-        break;
-      }
+  drainPromise = drainSyncQueueOnce().finally(() => {
+    drainPromise = null;
+  });
+  return drainPromise;
+}
 
-      await db.runAsync('UPDATE sync_queue SET status = ?, updated_at = ? WHERE sequence = ?', 'syncing', new Date().toISOString(), row.sequence);
-      emitLedgerDataChanged(row.ledger_id);
+async function drainSyncQueueOnce() {
+  const db = await getLocalDb();
+  while (online) {
+    const now = Date.now();
+    const row = await db.getFirstAsync<SyncQueueRecord<string>>(
+      `SELECT * FROM sync_queue
+       WHERE status = 'queued'
+          OR (status = 'failed' AND next_attempt_at > 0 AND next_attempt_at <= ?)
+       ORDER BY sequence ASC
+       LIMIT 1`,
+      now
+    );
 
-      try {
-        await syncQueueRow({ ...row, payload: safeJsonParse(row.payload) });
-        await db.runAsync('DELETE FROM sync_queue WHERE sequence = ?', row.sequence);
-        emitLedgerDataChanged(row.ledger_id);
-      } catch (syncError) {
-        const failure = nextFailureState(syncError, row.retry_count);
-        const message = syncError instanceof Error ? syncError.message : String(syncError);
-        await db.runAsync(
-          `UPDATE sync_queue
-           SET status = ?, error = ?, retry_count = ?, next_attempt_at = ?, updated_at = ?
-           WHERE sequence = ?`,
-          failure.status,
-          message,
-          failure.retryCount,
-          failure.nextAttemptAt,
-          new Date().toISOString(),
-          row.sequence
-        );
-        await markLocalEntityStatus(row.entity_type, row.entity_id, failure.status);
-        emitLedgerDataChanged(row.ledger_id);
-      }
+    if (!row) {
+      break;
     }
-  } finally {
-    draining = false;
+
+    await db.runAsync('UPDATE sync_queue SET status = ?, updated_at = ? WHERE sequence = ?', 'syncing', new Date().toISOString(), row.sequence);
+    emitLedgerDataChanged(row.ledger_id);
+
+    try {
+      await syncQueueRow({ ...row, payload: safeJsonParse(row.payload) });
+      await db.runAsync('DELETE FROM sync_queue WHERE sequence = ?', row.sequence);
+      emitLedgerDataChanged(row.ledger_id);
+    } catch (syncError) {
+      const failure = nextFailureState(syncError, row.retry_count);
+      const message = syncError instanceof Error ? syncError.message : String(syncError);
+      await db.runAsync(
+        `UPDATE sync_queue
+         SET status = ?, error = ?, retry_count = ?, next_attempt_at = ?, updated_at = ?
+         WHERE sequence = ?`,
+        failure.status,
+        message,
+        failure.retryCount,
+        failure.nextAttemptAt,
+        new Date().toISOString(),
+        row.sequence
+      );
+      await markLocalEntityStatus(row.entity_type, row.entity_id, failure.status);
+      emitLedgerDataChanged(row.ledger_id);
+    }
   }
 }
 
@@ -1036,7 +1086,18 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
 
   if (row.entity_type === 'recurring_rule') {
     if (row.action === 'delete') {
-      throw new Error('Recurring rule delete is not supported; deactivate the rule instead');
+      const payload = row.payload as { id: string };
+      const { error } = await supabase.rpc('delete_recurring_expense_rule_offline', {
+        p_rule_id: payload.id,
+        p_ledger_id: row.ledger_id,
+        p_base_updated_at: row.base_updated_at
+      });
+      if (error) {
+        throw error;
+      }
+      const db = await getLocalDb();
+      await db.runAsync('DELETE FROM recurring_expense_rules WHERE id = ?', payload.id);
+      return;
     }
 
     const payload = row.payload as SaveRecurringRulePayload;

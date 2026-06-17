@@ -395,6 +395,10 @@ export type Database = {
         Args: { p_expense_id: string; p_ledger_id: string; p_base_updated_at: string | null };
         Returns: undefined;
       };
+      delete_recurring_expense_rule_offline: {
+        Args: { p_rule_id: string; p_ledger_id: string; p_base_updated_at: string | null };
+        Returns: undefined;
+      };
       get_open_transfer_items: {
         Args: { p_ledger_id: string };
         Returns: {

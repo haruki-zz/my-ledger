@@ -4,7 +4,10 @@ import {
   cacheTransferItems,
   deleteLocalExpense,
   deleteLocalLedgerCategory,
+  deleteLocalRecurringRule,
+  drainSyncQueue,
   getCachedExpense,
+  getCachedExpenseByRecurringRule,
   getCachedExpenses,
   getCachedExpensesByMonth,
   getCachedFirstExpenseSpentOn,
@@ -271,6 +274,16 @@ async function ignoreOfflineError(fn: () => Promise<unknown>) {
   }
 }
 
+async function ignoreLocalCacheError(fn: () => Promise<unknown>) {
+  try {
+    await fn();
+  } catch (error) {
+    if (!isOfflineError(error) && !isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+  }
+}
+
 export type SaveLedgerCategoryInput = {
   ledgerId: string;
   categoryId: string;
@@ -311,11 +324,76 @@ export type SaveRecurringExpenseRuleInput = {
 };
 
 export async function saveRecurringExpenseRule(input: SaveRecurringExpenseRuleInput): Promise<RecurringExpenseRule> {
-  const savedRule = await saveLocalRecurringRule(input);
-  if (!savedRule) {
-    throw new Error('Could not save fixed monthly expense locally');
+  try {
+    const savedRule = await saveLocalRecurringRule(input);
+    if (!savedRule) {
+      throw new Error('Could not save fixed monthly expense locally');
+    }
+    return savedRule;
+  } catch (error) {
+    if (!isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+
+    return saveRemoteRecurringExpenseRule(input);
   }
-  return savedRule;
+}
+
+export async function deleteRecurringExpenseRule(ledgerId: string, ruleId: string): Promise<void> {
+  try {
+    await deleteLocalRecurringRule(ruleId);
+    return;
+  } catch (error) {
+    if (!isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+  }
+
+  if (!isLocalRepositoryOnline()) {
+    throw new Error('Deleting fixed monthly expenses requires an internet connection');
+  }
+
+  const { error } = await supabase.rpc('delete_recurring_expense_rule_offline', {
+    p_rule_id: ruleId,
+    p_ledger_id: ledgerId,
+    p_base_updated_at: null
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await ignoreLocalCacheError(() => refreshRecurringRules(ledgerId));
+}
+
+async function saveRemoteRecurringExpenseRule(input: SaveRecurringExpenseRuleInput): Promise<RecurringExpenseRule> {
+  const { data, error } = await supabase.rpc('save_recurring_expense_rule_offline', {
+    p_rule_id: input.id || createUuid(),
+    p_ledger_id: input.ledgerId,
+    p_name: input.name.trim(),
+    p_category_id: input.categoryId,
+    p_subcategory: input.subcategory?.trim() || null,
+    p_amount_yen: input.amountYen,
+    p_paid_by: input.paidBy,
+    p_ownership: input.ownership,
+    p_split_ratio_a: input.splitRatioA,
+    p_split_ratio_b: input.splitRatioB,
+    p_split_amount_a: input.splitAmountA,
+    p_split_amount_b: input.splitAmountB,
+    p_generate_day: input.generateDay,
+    p_start_month: input.startMonth,
+    p_end_month: input.endMonth,
+    p_timezone: input.timezone?.trim() || 'Asia/Tokyo',
+    p_is_active: input.isActive,
+    p_base_updated_at: null
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await ignoreLocalCacheError(() => refreshRecurringRules(input.ledgerId));
+  return data as RecurringExpenseRule;
 }
 
 export type GenerateRecurringExpenseResult = {
@@ -335,6 +413,8 @@ export async function generateRecurringExpenses(
   }
 
   try {
+    await ignoreLocalCacheError(() => drainSyncQueue());
+
     const { data, error } = await supabase.rpc('generate_recurring_expenses', {
       p_ledger_id: ledgerId,
       p_until_month: untilMonth
@@ -345,9 +425,9 @@ export async function generateRecurringExpenses(
     }
 
     const rows = (data || []) as GenerateRecurringExpenseResult[];
-    const inserted = rows.some((row) => row.status === 'inserted');
-    if (inserted) {
-      await ignoreOfflineError(() => refreshExpenses(ledgerId));
+    const generatedRowsMayAffectCache = rows.some((row) => row.status === 'inserted' || row.status === 'exists');
+    if (generatedRowsMayAffectCache) {
+      await ignoreLocalCacheError(() => refreshExpenses(ledgerId));
     }
 
     return rows;
@@ -357,6 +437,54 @@ export async function generateRecurringExpenses(
     }
     throw error;
   }
+}
+
+export async function deleteRecurringGeneratedExpense(ledgerId: string, ruleId: string): Promise<void> {
+  let row: { id: string } | null = null;
+  try {
+    row = await getCachedExpenseByRecurringRule(ledgerId, ruleId, currentMonthStartDate());
+  } catch (error) {
+    if (!isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+  }
+
+  if (!row) {
+    if (!isLocalRepositoryOnline()) {
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .select('id, updated_at')
+      .eq('ledger_id', ledgerId)
+      .eq('recurring_rule_id', ruleId)
+      .eq('recurring_month', currentMonthStartDate())
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return;
+    }
+
+    const { error: deleteError } = await supabase.rpc('delete_expense_offline', {
+      p_expense_id: data.id,
+      p_ledger_id: ledgerId,
+      p_base_updated_at: data.updated_at
+    });
+
+    if (deleteError) {
+      throw deleteError;
+    }
+
+    await ignoreLocalCacheError(() => refreshExpenses(ledgerId));
+    return;
+  }
+
+  await deleteLocalExpense(row.id);
 }
 
 export async function deleteLedgerCategory(ledgerId: string, categoryName: string) {
@@ -704,4 +832,17 @@ export async function setTransferConfirmations(updates: TransferConfirmationUpda
   if (error) {
     throw error;
   }
+}
+
+function createUuid() {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  if (randomUuid) {
+    return randomUuid;
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = char === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
 }

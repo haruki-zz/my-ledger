@@ -150,7 +150,7 @@ export function resolveDashboardDateRange(
     return resolveWeekDateRange(todayDate);
   }
 
-  return resolveMonthDateRange(monthKey, todayDate);
+  return resolveMonthDateRange(monthKey);
 }
 
 function resolveTodayDateRange(todayDate: Date): DashboardDateRange {
@@ -190,18 +190,13 @@ function resolveWeekDateRange(todayDate: Date): DashboardDateRange {
   };
 }
 
-function resolveMonthDateRange(monthKey: string, todayDate: Date): DashboardDateRange {
-  const currentKey = toMonthKey(todayDate);
-  const todayString = formatDateString(todayDate);
+function resolveMonthDateRange(monthKey: string): DashboardDateRange {
   const effectiveMonthKey = monthKey;
-  const selectedIsCurrentMonth = effectiveMonthKey === currentKey;
   const monthStartString = monthStartDateString(effectiveMonthKey);
-  const monthEndString = selectedIsCurrentMonth ? todayString : monthEndDateString(effectiveMonthKey);
+  const monthEndString = monthEndDateString(effectiveMonthKey);
   const comparisonMonthKey = addMonths(effectiveMonthKey, -1);
   const comparisonStartString = monthStartDateString(comparisonMonthKey);
-  const comparisonEndString = selectedIsCurrentMonth
-    ? formatDateString(dateInMonthCapped(comparisonMonthKey, todayDate.getDate()))
-    : monthEndDateString(comparisonMonthKey);
+  const comparisonEndString = monthEndDateString(comparisonMonthKey);
 
   return {
     period: 'month',
@@ -210,7 +205,7 @@ function resolveMonthDateRange(monthKey: string, todayDate: Date): DashboardDate
     endDateString: monthEndString,
     comparisonStartDateString: comparisonStartString,
     comparisonEndDateString: comparisonEndString,
-    label: selectedIsCurrentMonth ? formatRangeLabel(monthStartString, monthEndString) : formatMonthLabel(effectiveMonthKey),
+    label: formatMonthLabel(effectiveMonthKey),
     comparisonLabel: `vs ${formatShortMonthLabel(comparisonMonthKey)}`
   };
 }
@@ -594,12 +589,6 @@ function startOfWeekMonday(date: Date) {
   const day = date.getDay();
   const daysSinceMonday = day === 0 ? 6 : day - 1;
   return addDays(startOfDay(date), -daysSinceMonday);
-}
-
-function dateInMonthCapped(monthKey: string, day: number) {
-  const [year, month] = parseMonthKey(monthKey);
-  const lastDay = new Date(year, month, 0).getDate();
-  return new Date(year, month - 1, Math.min(day, lastDay));
 }
 
 function formatRangeLabel(startDateString: string, endDateString: string) {

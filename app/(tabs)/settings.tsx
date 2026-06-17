@@ -27,6 +27,8 @@ import { categoryColor, categoryIconName, categoryLabel } from '@/src/lib/catego
 import { tintFromAccent } from '@/src/lib/color';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
+  deleteRecurringGeneratedExpense,
+  generateRecurringExpenses,
   getErrorMessage,
   getLedgerMembers,
   getRecurringExpenseRules,
@@ -178,6 +180,11 @@ export default function SettingsScreen() {
         timezone: rule.timezone,
         isActive: nextIsActive
       });
+      if (nextIsActive) {
+        await generateRecurringExpenses(ledgerId).catch(() => []);
+      } else {
+        await deleteRecurringGeneratedExpense(ledgerId, rule.id).catch(() => {});
+      }
       await loadDetails();
     } catch (toggleError) {
       setRules(previousRules);
@@ -256,6 +263,7 @@ export default function SettingsScreen() {
         memberCount={memberCount}
         members={members}
         onManage={() => router.push('/settings/ledgers')}
+        onManageLedger={(id) => router.push(`/settings/ledger/${id}`)}
         onOpenDetails={() => ledger ? router.push(`/settings/ledger/${ledger.id}`) : undefined}
         onShare={shareInviteCode}
         onSwitch={switchLedger}
@@ -333,6 +341,7 @@ function LedgersPanel({
   memberCount,
   members,
   onManage,
+  onManageLedger,
   onOpenDetails,
   onShare,
   onSwitch,
@@ -343,6 +352,7 @@ function LedgersPanel({
   memberCount: number;
   members: LedgerMemberProfile[];
   onManage: () => void;
+  onManageLedger: (ledgerId: string) => void;
   onOpenDetails: () => void | undefined;
   onShare: () => void;
   onSwitch: (ledgerId: string) => void;
@@ -352,12 +362,7 @@ function LedgersPanel({
 
   return (
     <View style={localStyles.panelGroup}>
-      <SectionHead
-        action={
-          <PillButton icon="albums-outline" label="Manage" onPress={onManage} tone="secondary" />
-        }
-        title="Ledgers"
-      />
+      <SectionHead title="Ledgers" />
       <Card>
         <Pressable
           disabled={!activeLedger}
@@ -404,17 +409,26 @@ function LedgersPanel({
         {otherLedgers.length > 0 ? (
           <View>
             <View style={localStyles.fullDivider} />
-            <Text style={localStyles.switchLabel}>SWITCH TO</Text>
+            <Text style={localStyles.switchLabel}>OTHER LEDGERS</Text>
             {otherLedgers.map((membership, index) => (
               <SwitchLedgerRow
                 key={membership.ledger.id}
                 last={index === otherLedgers.length - 1}
                 membership={membership}
-                onPress={() => onSwitch(membership.ledger.id)}
+                onManage={() => onManageLedger(membership.ledger.id)}
+                onSwitch={() => onSwitch(membership.ledger.id)}
               />
             ))}
           </View>
         ) : null}
+
+        <View style={localStyles.fullDivider} />
+        <DashboardRow
+          description="Create, join, switch, or edit ledgers"
+          icon="albums-outline"
+          onPress={onManage}
+          title="Manage ledgers"
+        />
       </Card>
     </View>
   );
@@ -423,28 +437,34 @@ function LedgersPanel({
 function SwitchLedgerRow({
   last,
   membership,
-  onPress
+  onManage,
+  onSwitch
 }: {
   last: boolean;
   membership: LedgerMembership;
-  onPress: () => void;
+  onManage: () => void;
+  onSwitch: () => void;
 }) {
   const ledgerColor = colorForId(membership.ledger.id);
   return (
     <View>
-      <Pressable onPress={onPress} style={({ pressed }) => [localStyles.switchRow, pressed && localStyles.pressed]}>
-        <CircleIcon
-          backgroundColor={tintFromAccent(ledgerColor)}
-          color={ledgerColor}
-          icon="journal-outline"
-          size={38}
-        />
-        <View style={localStyles.switchText}>
-          <Text numberOfLines={1} style={localStyles.switchTitle}>{membership.ledger.name}</Text>
-          <Text style={localStyles.switchDescription}>{membership.isOwner ? 'Owner' : 'Member'} · tap to switch</Text>
+      <View style={localStyles.switchRow}>
+        <Pressable onPress={onManage} style={({ pressed }) => [localStyles.switchMain, pressed && localStyles.pressed]}>
+          <CircleIcon
+            backgroundColor={tintFromAccent(ledgerColor)}
+            color={ledgerColor}
+            icon="journal-outline"
+            size={38}
+          />
+          <View style={localStyles.switchText}>
+            <Text numberOfLines={1} style={localStyles.switchTitle}>{membership.ledger.name}</Text>
+            <Text style={localStyles.switchDescription}>{membership.isOwner ? 'Owner' : 'Member'} · tap to manage</Text>
+          </View>
+        </Pressable>
+        <View style={localStyles.switchAction}>
+          <PillButton icon="swap-horizontal" label="Switch" onPress={onSwitch} />
         </View>
-        <CircleIcon backgroundColor="transparent" color={colors.subtle} icon="chevron-forward" size={32} />
-      </Pressable>
+      </View>
       {!last ? <View style={localStyles.insetDivider} /> : null}
     </View>
   );
@@ -479,10 +499,7 @@ function FixedExpensesPanel({
 
   return (
     <View style={localStyles.panelGroup}>
-      <SectionHead
-        action={<PillButton icon="add" label="Add" onPress={onOpen} tone="secondary" />}
-        title="Fixed Expense"
-      />
+      <SectionHead title="Fixed Expense" />
       <Card>
         <Pressable
           onPress={hasRules ? onToggleExpanded : onOpen}
@@ -492,7 +509,7 @@ function FixedExpensesPanel({
             pressed && localStyles.pressed
           ]}
         >
-          <View style={localStyles.fixedSummaryText}>
+          <View style={localStyles.fixedSummaryMain}>
             <Text style={localStyles.totalLabel}>TOTAL / MONTH</Text>
             <Text style={localStyles.totalValue}>{formatYen(total)}</Text>
             <View style={localStyles.fixedPillRow}>
@@ -528,18 +545,14 @@ function FixedExpensesPanel({
             ))}
           </View>
         ) : null}
-        {!hasRules ? (
-          <>
-            <View style={localStyles.fullDivider} />
-            <DashboardRow
-              description="No monthly fixed expenses yet"
-              icon="calendar-outline"
-              onPress={onOpen}
-              title="Create the first fixed expense"
-              tone="warm"
-            />
-          </>
-        ) : null}
+
+        <View style={localStyles.fullDivider} />
+        <DashboardRow
+          description="Create and manage monthly fixed expenses"
+          icon="add-circle-outline"
+          onPress={onOpen}
+          title="Add fixed expense"
+        />
       </Card>
     </View>
   );
@@ -934,7 +947,7 @@ const localStyles = StyleSheet.create({
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0
   },
-  fixedSummaryText: {
+  fixedSummaryMain: {
     flex: 1,
     gap: 8,
     minWidth: 0
@@ -1123,6 +1136,8 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     height: 36,
+    justifyContent: 'center',
+    minWidth: 92,
     paddingHorizontal: 13,
     shadowColor: colors.primary,
     shadowOffset: { height: 4, width: 0 },
@@ -1186,6 +1201,9 @@ const localStyles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 14
   },
+  switchAction: {
+    flexShrink: 0
+  },
   switchDescription: {
     color: colors.muted,
     fontFamily: fontFamilies.regular,
@@ -1202,6 +1220,13 @@ const localStyles = StyleSheet.create({
     paddingBottom: 8,
     paddingHorizontal: 16,
     paddingTop: 12
+  },
+  switchMain: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minWidth: 0
   },
   switchRow: {
     alignItems: 'center',

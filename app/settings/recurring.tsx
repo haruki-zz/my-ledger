@@ -28,6 +28,8 @@ import { tintFromAccent } from '@/src/lib/color';
 import { displayName, formatYen } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import {
+  deleteRecurringExpenseRule,
+  deleteRecurringGeneratedExpense,
   generateRecurringExpenses,
   getErrorMessage,
   getLedgerMembers,
@@ -180,6 +182,7 @@ export default function RecurringExpenseRulesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const initializedRuleIdRef = useRef<string | null>(null);
 
@@ -245,8 +248,13 @@ export default function RecurringExpenseRulesScreen() {
       return;
     }
 
+    const previousEditingRuleId = initializedRuleIdRef.current;
     initializedRuleIdRef.current = null;
-    setDraft((current) => (current.id || !current.paidBy ? emptyDraft(members) : current));
+    setDraft((current) => (
+      !current.paidBy || (previousEditingRuleId && current.id === previousEditingRuleId)
+        ? emptyDraft(members)
+        : current
+    ));
   }, [editingRuleId, members]);
 
   useEffect(() => {
@@ -282,32 +290,38 @@ export default function RecurringExpenseRulesScreen() {
     setDraft((current) => ({ ...current, ...patch }));
   }
 
-  function startCreate() {
-    setDraft(emptyDraft(members));
-    setCategoryMenuOpen(false);
-    setNativeGenerateDatePickerOpen(false);
+  function toggleDraftActive() {
+    if (saving) {
+      return;
+    }
+
+    const nextDraft = { ...draft, isActive: !draft.isActive };
+    updateDraft({ isActive: nextDraft.isActive });
+    if (nextDraft.id) {
+      void saveRule(nextDraft);
+    }
   }
 
-  function validateDraft() {
+  function validateDraft(nextDraft: Draft = draft) {
     if (!ledger) {
       return 'No active ledger';
     }
-    if (draft.ownership === 'shared' && members.length !== 2) {
+    if (nextDraft.ownership === 'shared' && members.length !== 2) {
       return 'Fixed monthly expenses require two ledger members';
     }
-    if (!draft.name.trim()) {
+    if (!nextDraft.name.trim()) {
       return 'Enter a rule name';
     }
-    const amountYen = parsePositiveInteger(draft.amount);
+    const amountYen = parsePositiveInteger(nextDraft.amount);
     if (!amountYen) {
       return 'Enter an amount greater than 0';
     }
-    if (!draft.paidBy || !members.some((member) => member.user_id === draft.paidBy)) {
+    if (!nextDraft.paidBy || !members.some((member) => member.user_id === nextDraft.paidBy)) {
       return 'Choose a payer from this ledger';
     }
-    if (draft.ownership === 'shared') {
-      const splitAmountA = parseNonNegativeInteger(draft.splitAmountA);
-      const splitAmountB = parseNonNegativeInteger(draft.splitAmountB);
+    if (nextDraft.ownership === 'shared') {
+      const splitAmountA = parseNonNegativeInteger(nextDraft.splitAmountA);
+      const splitAmountB = parseNonNegativeInteger(nextDraft.splitAmountB);
       if (splitAmountA === null || splitAmountB === null) {
         return 'Split amounts must be whole yen values';
       }
@@ -315,17 +329,17 @@ export default function RecurringExpenseRulesScreen() {
         return 'Split amounts must add up to the total amount';
       }
     }
-    const generateDay = parsePositiveInteger(draft.generateDay);
+    const generateDay = parsePositiveInteger(nextDraft.generateDay);
     if (!generateDay || generateDay > 31) {
       return 'Generate day must be between 1 and 31';
     }
-    if (!isValidMonthKey(draft.startMonth)) {
+    if (!isValidMonthKey(nextDraft.startMonth)) {
       return 'Start month must use YYYY-MM';
     }
-    if (draft.endMonth && !isValidMonthKey(draft.endMonth)) {
+    if (nextDraft.endMonth && !isValidMonthKey(nextDraft.endMonth)) {
       return 'End month must use YYYY-MM';
     }
-    if (draft.endMonth && draft.endMonth < draft.startMonth) {
+    if (nextDraft.endMonth && nextDraft.endMonth < nextDraft.startMonth) {
       return 'End month cannot be before start month';
     }
     return null;
@@ -335,7 +349,7 @@ export default function RecurringExpenseRulesScreen() {
     if (!ledger) {
       return;
     }
-    const validationMessage = nextDraft === draft ? validateDraft() : null;
+    const validationMessage = validateDraft(nextDraft);
     if (validationMessage) {
       Alert.alert('Save Failed', validationMessage);
       return;
@@ -358,7 +372,7 @@ export default function RecurringExpenseRulesScreen() {
 
     setSaving(true);
     try {
-      await saveRecurringExpenseRule({
+      const savedRule = await saveRecurringExpenseRule({
         id: nextDraft.id,
         ledgerId: ledger.id,
         name: nextDraft.name,
@@ -377,15 +391,53 @@ export default function RecurringExpenseRulesScreen() {
         timezone: 'Asia/Tokyo',
         isActive: nextDraft.isActive
       });
-      await generateRecurringExpenses(ledger.id, currentMonthStartDate()).catch(() => []);
+      if (nextDraft.isActive) {
+        await generateRecurringExpenses(ledger.id, currentMonthStartDate()).catch(() => []);
+      } else {
+        await deleteRecurringGeneratedExpense(ledger.id, savedRule.id).catch(() => {});
+      }
       await load(ledger, 'background');
-      if (nextDraft === draft && !nextDraft.id) {
-        startCreate();
+      if (!editingRuleId) {
+        setDraft(draftFromRule(savedRule));
       }
     } catch (saveError) {
       Alert.alert('Save Failed', getErrorMessage(saveError));
     } finally {
       setSaving(false);
+    }
+  }
+
+  function confirmDeleteRule() {
+    if (!ledger || !draft.id || deleting || saving) {
+      return;
+    }
+
+    Alert.alert('Delete Fixed Expense', 'This fixed monthly expense will be removed. The generated item for the current month will also be deleted if it exists.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          void deleteRule();
+        }
+      }
+    ]);
+  }
+
+  async function deleteRule() {
+    if (!ledger || !draft.id) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      await deleteRecurringGeneratedExpense(ledger.id, draft.id);
+      await deleteRecurringExpenseRule(ledger.id, draft.id);
+      router.back();
+    } catch (deleteError) {
+      Alert.alert('Delete Failed', getErrorMessage(deleteError));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -497,14 +549,6 @@ export default function RecurringExpenseRulesScreen() {
       contentContainerStyle={styles.content}
     >
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
-
-      {draft.id ? (
-        <View style={localStyles.topBar}>
-          <Pressable onPress={startCreate} style={[styles.button, styles.secondaryButton, localStyles.compactButton]}>
-            <Text style={[styles.buttonText, styles.secondaryButtonText]}>New</Text>
-          </Pressable>
-        </View>
-      ) : null}
 
       <BentoCard variant="form" style={localStyles.groupCard}>
         <GroupHead icon="pricetag-outline" label="What" />
@@ -711,7 +755,7 @@ export default function RecurringExpenseRulesScreen() {
       </BentoCard>
 
       <View style={localStyles.activeSaveArea}>
-        <Pressable onPress={() => updateDraft({ isActive: !draft.isActive })} style={({ pressed }) => [localStyles.activeRow, pressed && localStyles.pressed]}>
+        <Pressable onPress={toggleDraftActive} style={({ pressed }) => [localStyles.activeRow, pressed && localStyles.pressed]}>
           <Text style={localStyles.fieldLabel}>Active immediately</Text>
           <ToggleSwitch active={draft.isActive} />
         </Pressable>
@@ -720,6 +764,23 @@ export default function RecurringExpenseRulesScreen() {
           <Ionicons color="#FFFFFF" name="checkmark" size={18} />
           <Text style={localStyles.saveButtonText}>{saving ? 'Saving...' : 'Save Rule'}</Text>
         </Pressable>
+
+        {draft.id ? (
+          <Pressable
+            disabled={deleting || saving}
+            onPress={confirmDeleteRule}
+            style={({ pressed }) => [
+              styles.button,
+              styles.dangerButton,
+              localStyles.deleteButton,
+              (deleting || saving) && localStyles.disabled,
+              pressed && !deleting && !saving && localStyles.pressed
+            ]}
+          >
+            <Ionicons color="#FFFFFF" name="trash-outline" size={18} />
+            <Text style={styles.buttonText}>{deleting ? 'Deleting...' : 'Delete Fixed Expense'}</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       {Platform.OS !== 'web' ? (
@@ -1011,6 +1072,10 @@ const localStyles = StyleSheet.create({
   },
   dayOptionTextActive: {
     color: '#FFFFFF'
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    gap: 8
   },
   dayRail: {
     marginHorizontal: -2
@@ -1353,10 +1418,4 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10
   },
-  topBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    paddingHorizontal: 4
-  }
 });
