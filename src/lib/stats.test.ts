@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildDashboardDailyUserSeriesForCategories,
   buildDashboardPeriodStats,
+  filterCurrentMonthSettledExpenses,
   resolveDashboardDateRange,
   type DashboardPeriod
 } from './stats';
@@ -214,13 +215,18 @@ describe('buildDashboardPeriodStats', () => {
     });
   });
 
-  it('includes current-month fixed expenses generated after today', () => {
-    const stats = buildStats('month', [
-      expense({ amountYen: 1200, category: 'Utilities', spentOn: '2026-06-20' })
-    ]);
+  it('excludes current-month fixed expenses generated after today from settled dashboard stats', () => {
+    const expenses = filterCurrentMonthSettledExpenses({
+      expenses: [
+        expense({ amountYen: 1200, category: 'Utilities', recurringRuleId: 'rule-utilities', recurringMonth: '2026-06-01', spentOn: '2026-06-20' })
+      ],
+      recurringRules: [{ id: 'rule-utilities', is_active: true }],
+      today: '2026-06-03'
+    });
+    const stats = buildStats('month', expenses);
 
-    expect(stats.totalYen).toBe(1200);
-    expect(stats.dailyUserSeries[19].totalAmountYen).toBe(1200);
+    expect(stats.totalYen).toBe(0);
+    expect(stats.dailyUserSeries[19].totalAmountYen).toBe(0);
   });
 
   it('aggregates category rows as top four plus Other', () => {
@@ -309,6 +315,92 @@ describe('buildDashboardPeriodStats', () => {
   });
 });
 
+describe('filterCurrentMonthSettledExpenses', () => {
+  it('keeps current-month active fixed expenses on the pay day boundary', () => {
+    const expenses = [
+      expense({ amountYen: 1200, category: 'Utilities', recurringRuleId: 'rule-utilities', recurringMonth: '2026-06-01', spentOn: '2026-06-01' })
+    ];
+
+    expect(filterCurrentMonthSettledExpenses({
+      expenses,
+      recurringRules: [{ id: 'rule-utilities', is_active: true }],
+      today: '2026-06-01'
+    })).toEqual(expenses);
+  });
+
+  it('keeps current-month active fixed expenses before today', () => {
+    const expenses = [
+      expense({ amountYen: 1200, category: 'Utilities', recurringRuleId: 'rule-utilities', recurringMonth: '2026-06-01', spentOn: '2026-06-02' })
+    ];
+
+    expect(filterCurrentMonthSettledExpenses({
+      expenses,
+      recurringRules: [{ id: 'rule-utilities', is_active: true }],
+      today: '2026-06-03'
+    })).toEqual(expenses);
+  });
+
+  it('excludes current-month active fixed expenses after today', () => {
+    const expenses = [
+      expense({ amountYen: 1200, category: 'Utilities', recurringRuleId: 'rule-utilities', recurringMonth: '2026-06-01', spentOn: '2026-06-20' })
+    ];
+
+    expect(filterCurrentMonthSettledExpenses({
+      expenses,
+      recurringRules: [{ id: 'rule-utilities', is_active: true }],
+      today: '2026-06-03'
+    })).toEqual([]);
+  });
+
+  it('excludes current-month inactive fixed expenses', () => {
+    const expenses = [
+      expense({ amountYen: 1200, category: 'Utilities', recurringRuleId: 'rule-utilities', recurringMonth: '2026-06-01', spentOn: '2026-06-02' })
+    ];
+
+    expect(filterCurrentMonthSettledExpenses({
+      expenses,
+      recurringRules: [{ id: 'rule-utilities', is_active: false }],
+      today: '2026-06-03'
+    })).toEqual([]);
+  });
+
+  it('keeps previous-month fixed expenses even when the current rule is inactive', () => {
+    const expenses = [
+      expense({ amountYen: 1200, category: 'Utilities', recurringRuleId: 'rule-utilities', recurringMonth: '2026-05-01', spentOn: '2026-05-20' })
+    ];
+
+    expect(filterCurrentMonthSettledExpenses({
+      expenses,
+      recurringRules: [{ id: 'rule-utilities', is_active: false }],
+      today: '2026-06-03'
+    })).toEqual(expenses);
+  });
+
+  it('keeps recurring expenses whose rule no longer exists', () => {
+    const expenses = [
+      expense({ amountYen: 1200, category: 'Utilities', recurringRuleId: 'deleted-rule', recurringMonth: '2026-06-01', spentOn: '2026-06-02' })
+    ];
+
+    expect(filterCurrentMonthSettledExpenses({
+      expenses,
+      recurringRules: [],
+      today: '2026-06-03'
+    })).toEqual(expenses);
+  });
+
+  it('keeps ordinary expenses regardless of fixed expense rule state', () => {
+    const expenses = [
+      expense({ amountYen: 1200, category: 'Utilities', spentOn: '2026-06-20' })
+    ];
+
+    expect(filterCurrentMonthSettledExpenses({
+      expenses,
+      recurringRules: [{ id: 'rule-utilities', is_active: false }],
+      today: '2026-06-03'
+    })).toEqual(expenses);
+  });
+});
+
 function buildStats(period: DashboardPeriod, expenses: Expense[]) {
   return buildDashboardPeriodStats({
     expenses,
@@ -325,6 +417,8 @@ function expense(input: {
   category: string;
   ownership?: 'personal' | 'shared';
   paidBy?: string;
+  recurringMonth?: string;
+  recurringRuleId?: string;
   spentOn: string;
   splits?: [number, number];
 }): Expense {
@@ -339,8 +433,8 @@ function expense(input: {
     category: input.category,
     category_id: mapLegacyCategoryToId(input.category),
     subcategory: null,
-    recurring_rule_id: null,
-    recurring_month: null,
+    recurring_rule_id: input.recurringRuleId || null,
+    recurring_month: input.recurringMonth || null,
     paid_by: paidBy,
     recorded_by: CURRENT_USER_ID,
     ownership,

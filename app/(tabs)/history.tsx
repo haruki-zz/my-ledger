@@ -33,22 +33,26 @@ import { buildUserColorMap } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
+  generateRecurringExpenses,
   getExpenses,
   getLedgerMembers,
-  getProfiles
+  getProfiles,
+  getRecurringExpenseRules
 } from '@/src/lib/ledger';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
+import { currentMonthStartDate } from '@/src/lib/recurring';
 import {
   amountForUser,
   addMonths,
   compareMonthKeys,
   currentMonthKey,
   expenseCategoryId,
+  filterCurrentMonthSettledExpenses,
   formatMonthLabel,
   monthKeyFromDateString
 } from '@/src/lib/stats';
 import { useHistoryFilters, type HistoryFilterDropdownKey } from '@/src/hooks/useHistoryFilters';
-import type { Expense, Ledger, Profile } from '@/src/types/database';
+import type { Expense, Ledger, Profile, RecurringExpenseRule } from '@/src/types/database';
 
 type FilteredExpense = HistoryExpenseItem;
 
@@ -88,8 +92,10 @@ export default function HistoryScreen() {
   const activeLedgerId = activeLedger?.ledger.id || null;
   const currentUserId = session?.user.id || null;
   const currentLedgerRef = useRef<Ledger | null>(null);
+  const loadInFlightRef = useRef(false);
   const collapseDefaultsMonthRef = useRef<string | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [recurringRules, setRecurringRules] = useState<RecurringExpenseRule[] | null>(null);
   const [activeMemberIds, setActiveMemberIds] = useState<Set<string>>(new Set());
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [loading, setLoading] = useState(true);
@@ -124,6 +130,7 @@ export default function HistoryScreen() {
       return;
     }
 
+    loadInFlightRef.current = true;
     setError(null);
     if (mode === 'initial') {
       setLoading(true);
@@ -139,9 +146,15 @@ export default function HistoryScreen() {
         return;
       }
 
-      const [nextExpenses, nextMembers] = await Promise.all([
+      await generateRecurringExpenses(activeLedger.id, currentMonthStartDate());
+
+      const [nextExpenses, nextMembers, nextRecurringRules] = await Promise.all([
         getExpenses(activeLedger.id),
-        getLedgerMembers(activeLedger.id)
+        getLedgerMembers(activeLedger.id),
+        getRecurringExpenseRules(activeLedger.id, { emitChange: false, refreshFirst: true }).catch((rulesError) => {
+          console.warn('History fixed expense rules reload failed:', rulesError instanceof Error ? rulesError.message : String(rulesError));
+          return null;
+        })
       ]);
       const profileIds = new Set<string>();
       for (const expense of nextExpenses) {
@@ -152,6 +165,9 @@ export default function HistoryScreen() {
       nextMembers.forEach((member) => profileIds.add(member.user_id));
 
       setExpenses(nextExpenses);
+      if (nextRecurringRules !== null) {
+        setRecurringRules(nextRecurringRules);
+      }
       setActiveMemberIds(new Set(nextMembers.map((member) => member.user_id)));
       setProfiles(await getProfiles([...profileIds]));
     } catch (loadError) {
@@ -163,11 +179,14 @@ export default function HistoryScreen() {
       if (mode === 'refresh') {
         setRefreshing(false);
       }
+      loadInFlightRef.current = false;
     }
   }, [ledgerLoading]);
 
   useEffect(() => {
+    loadInFlightRef.current = false;
     setExpenses([]);
+    setRecurringRules(null);
     setProfiles({});
     setActiveMemberIds(new Set());
     resetFilters();
@@ -189,6 +208,9 @@ export default function HistoryScreen() {
     }
 
     return subscribeToLedgerData(ledgerId, () => {
+      if (loadInFlightRef.current) {
+        return;
+      }
       void load('background');
     });
   }, [ledgerId, load]);
@@ -198,17 +220,25 @@ export default function HistoryScreen() {
     return `${displayName(profiles[userId]?.display_name)}${suffix}`;
   }, [activeMemberIds, profiles]);
 
+  const settledExpenses = useMemo(
+    // If rule refresh is unavailable, keep showing cached/raw expenses instead of hiding data.
+    () => recurringRules
+      ? filterCurrentMonthSettledExpenses({ expenses, recurringRules })
+      : expenses,
+    [expenses, recurringRules]
+  );
+
   const userOptionIds = useMemo(() => {
     const userIds = new Set<string>();
     activeMemberIds.forEach((userId) => userIds.add(userId));
 
-    for (const expense of expenses) {
+    for (const expense of settledExpenses) {
       userIds.add(expense.paid_by);
       expense.splits.forEach((split) => userIds.add(split.user_id));
     }
 
     return [...userIds];
-  }, [activeMemberIds, expenses]);
+  }, [activeMemberIds, settledExpenses]);
 
   const sortedUserIds = useMemo(() => (
     [...userOptionIds].sort((a, b) => {
@@ -229,29 +259,29 @@ export default function HistoryScreen() {
   ), [profileDisplayName, sortedUserIds]);
 
   const categoryOptions = useMemo<HistoryFilterOption[]>(() => (
-    [...new Set(expenses.map((expense) => expenseCategoryId(expense)).filter(Boolean))]
+    [...new Set(settledExpenses.map((expense) => expenseCategoryId(expense)).filter(Boolean))]
       .sort((a, b) => resolveCategory({ categoryId: a }).label.localeCompare(resolveCategory({ categoryId: b }).label))
       .map((categoryId) => ({
         label: resolveCategory({ categoryId }).label,
         value: categoryId
       }))
-  ), [expenses]);
+  ), [settledExpenses]);
 
   const minimumMonthKey = useMemo(() => {
-    const expenseMonthKeys = expenses.map((expense) => monthKeyFromDateString(expense.spent_on));
+    const expenseMonthKeys = settledExpenses.map((expense) => monthKeyFromDateString(expense.spent_on));
     if (expenseMonthKeys.length === 0) {
       return currentMonthKey();
     }
 
     return expenseMonthKeys.sort(compareMonthKeys)[0];
-  }, [expenses]);
+  }, [settledExpenses]);
   const atCurrentMonth = compareMonthKeys(selectedMonth, currentMonthKey()) >= 0;
   const atMinimumMonth = minimumMonthKey ? compareMonthKeys(selectedMonth, minimumMonthKey) <= 0 : false;
 
   const filteredExpenses = useMemo<FilteredExpense[]>(() => {
     const nextFilteredExpenses: FilteredExpense[] = [];
 
-    for (const expense of expenses) {
+    for (const expense of settledExpenses) {
       const displayAmountYen = selectedUserId ? amountForUser(expense, selectedUserId) : expense.amount_yen;
 
       if (selectedUserId && displayAmountYen <= 0) {
@@ -274,7 +304,7 @@ export default function HistoryScreen() {
       b.expense.spent_on.localeCompare(a.expense.spent_on) ||
       b.expense.created_at.localeCompare(a.expense.created_at)
     ));
-  }, [expenses, selectedCategories, selectedMonth, selectedUserId]);
+  }, [selectedCategories, selectedMonth, selectedUserId, settledExpenses]);
 
   const hasActiveFilters = Boolean(
     selectedUserId ||
@@ -309,7 +339,7 @@ export default function HistoryScreen() {
     }
 
     const today = todayDateString();
-    const monthDates = expenses
+    const monthDates = settledExpenses
       .filter((expense) => monthKeyFromDateString(expense.spent_on) === selectedMonth)
       .map((expense) => expense.spent_on);
 
@@ -324,7 +354,7 @@ export default function HistoryScreen() {
 
     setCollapsedSections(defaultCollapsedDates);
     collapseDefaultsMonthRef.current = selectedMonth;
-  }, [expenses, selectedMonth]);
+  }, [selectedMonth, settledExpenses]);
 
   function openDropdown(dropdown: HistoryFilterDropdownKey) {
     toggleDropdown(dropdown);

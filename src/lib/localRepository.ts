@@ -412,13 +412,13 @@ export async function hasCachedExpensesSnapshot(ledgerId: string) {
   return Boolean(row);
 }
 
-export async function refreshExpenses(ledgerId: string) {
+export async function refreshExpenses(ledgerId: string, options: { force?: boolean } = {}) {
   if (!online) {
     return;
   }
 
   const existingRefresh = expenseRefreshesByLedger.get(ledgerId);
-  if (existingRefresh) {
+  if (existingRefresh && !options.force) {
     return existingRefresh;
   }
 
@@ -509,7 +509,7 @@ export async function saveLocalExpense(input: {
   const existing = input.id ? await getCachedExpense(input.id) : null;
   const expenseId = input.id || createUuid();
   const action: SyncAction = existing ? 'edit' : 'create';
-  const baseUpdatedAt = existing?.updated_at || null;
+  const baseUpdatedAt = syncedBaseUpdatedAt(existing);
   const resolvedCategory = resolveCategory({
     categoryId: input.categoryId,
     category: input.category,
@@ -553,7 +553,7 @@ export async function saveLocalExpense(input: {
       existing?.created_at || now,
       now,
       baseUpdatedAt,
-      existing?.updated_at || null
+      syncedBaseUpdatedAt(existing)
     );
     await db.runAsync('DELETE FROM expense_splits WHERE expense_id = ?', expenseId);
     for (const split of input.splits) {
@@ -677,7 +677,7 @@ export async function getCachedRecurringRules(ledgerId: string): Promise<Recurri
   return rows.map(mapLocalRecurringRule);
 }
 
-export async function refreshRecurringRules(ledgerId: string) {
+export async function refreshRecurringRules(ledgerId: string, options: { emitChange?: boolean } = {}) {
   if (!online) {
     return;
   }
@@ -716,7 +716,9 @@ export async function refreshRecurringRules(ledgerId: string) {
       );
     }
   });
-  emitLedgerDataChanged(ledgerId);
+  if (options.emitChange !== false) {
+    emitLedgerDataChanged(ledgerId);
+  }
 }
 
 export async function refreshLedgerLocalData(ledgerId: string) {
@@ -758,7 +760,7 @@ export async function saveLocalRecurringRule(input: {
     ? await db.getFirstAsync<LocalRecurringRuleRow>('SELECT * FROM recurring_expense_rules WHERE id = ?', input.id)
     : null;
   const action: SyncAction = existing && existing.deleted_locally === 0 ? 'edit' : 'create';
-  const baseUpdatedAt = existing?.updated_at || null;
+  const baseUpdatedAt = syncedBaseUpdatedAt(existing);
   const primaryCategory = getPrimaryCategory(input.categoryId);
   const timezone = input.timezone?.trim() || 'Asia/Tokyo';
   const payload: SaveRecurringRulePayload = {
@@ -810,7 +812,7 @@ export async function saveLocalRecurringRule(input: {
       existing?.created_at || now,
       now,
       baseUpdatedAt,
-      existing?.updated_at || null
+      syncedBaseUpdatedAt(existing)
     );
     await enqueueMutation(db, 'recurring_rule', ruleId, input.ledgerId, action, payload, baseUpdatedAt);
   });
@@ -837,10 +839,10 @@ export async function deleteLocalRecurringRule(ruleId: string) {
        SET local_status = 'pending', deleted_locally = 1, updated_at = ?, base_updated_at = ?
        WHERE id = ?`,
       now,
-      rule.updated_at,
+      syncedBaseUpdatedAt(rule),
       ruleId
     );
-    await enqueueMutation(db, 'recurring_rule', ruleId, rule.ledger_id, 'delete', { id: ruleId }, rule.updated_at);
+    await enqueueMutation(db, 'recurring_rule', ruleId, rule.ledger_id, 'delete', { id: ruleId }, syncedBaseUpdatedAt(rule));
   });
 
   emitLedgerDataChanged(rule.ledger_id);
@@ -866,7 +868,7 @@ export async function saveLocalLedgerCategory(input: {
   );
   const categoryId = existing?.id || createUuid();
   const action: SyncAction = existing && existing.deleted_locally === 0 ? 'edit' : 'create';
-  const baseUpdatedAt = existing?.updated_at || null;
+  const baseUpdatedAt = syncedBaseUpdatedAt(existing);
   const payload: SaveCategoryPayload = {
     id: categoryId,
     ledgerId: input.ledgerId,
@@ -893,7 +895,7 @@ export async function saveLocalLedgerCategory(input: {
       existing?.created_at || now,
       now,
       baseUpdatedAt,
-      existing?.updated_at || null
+      syncedBaseUpdatedAt(existing)
     );
     await enqueueMutation(db, 'category', categoryId, input.ledgerId, action, payload, baseUpdatedAt);
   });
@@ -921,14 +923,14 @@ export async function deleteLocalLedgerCategory(ledgerId: string, categoryName: 
        SET local_status = 'pending', deleted_locally = 1, updated_at = ?, base_updated_at = ?
        WHERE id = ?`,
       now,
-      category.updated_at,
+      syncedBaseUpdatedAt(category),
       category.id
     );
     await enqueueMutation(db, 'category', category.id, ledgerId, 'delete', {
       id: category.id,
       ledgerId,
       categoryName
-    }, category.updated_at);
+    }, syncedBaseUpdatedAt(category));
   });
 
   emitLedgerDataChanged(ledgerId);
@@ -1024,7 +1026,7 @@ async function drainSyncQueueOnce() {
       emitLedgerDataChanged(row.ledger_id);
     } catch (syncError) {
       const failure = nextFailureState(syncError, row.retry_count);
-      const message = syncError instanceof Error ? syncError.message : String(syncError);
+      const message = formatSyncError(syncError);
       await db.runAsync(
         `UPDATE sync_queue
          SET status = ?, error = ?, retry_count = ?, next_attempt_at = ?, updated_at = ?
@@ -1101,30 +1103,11 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
     }
 
     const payload = row.payload as SaveRecurringRulePayload;
-    const { data, error } = await supabase.rpc('save_recurring_expense_rule_offline', {
-      p_rule_id: payload.id,
-      p_ledger_id: payload.ledgerId,
-      p_name: payload.name,
-      p_category_id: payload.categoryId,
-      p_subcategory: payload.subcategory,
-      p_amount_yen: payload.amountYen,
-      p_paid_by: payload.paidBy,
-      p_ownership: payload.ownership,
-      p_split_ratio_a: payload.splitRatioA,
-      p_split_ratio_b: payload.splitRatioB,
-      p_split_amount_a: payload.splitAmountA,
-      p_split_amount_b: payload.splitAmountB,
-      p_generate_day: payload.generateDay,
-      p_start_month: payload.startMonth,
-      p_end_month: payload.endMonth,
-      p_timezone: payload.timezone,
-      p_is_active: payload.isActive,
-      p_base_updated_at: row.base_updated_at
-    });
-    if (error) {
-      throw error;
+    const savedRule = await saveRecurringRulePayload(payload, row.base_updated_at);
+    await cacheSyncedRecurringRule(savedRule);
+    if (savedRule.ledger_id !== row.ledger_id) {
+      emitLedgerDataChanged(savedRule.ledger_id);
     }
-    await cacheSyncedRecurringRule(data as RecurringExpenseRule);
     return;
   }
 
@@ -1207,6 +1190,113 @@ async function cacheSyncedRecurringRule(rule: RecurringExpenseRule) {
       rule.updated_at
     );
   });
+}
+
+async function saveRecurringRulePayload(
+  payload: SaveRecurringRulePayload,
+  baseUpdatedAt: string | null
+) {
+  let ledgerId = payload.ledgerId;
+  let result = await saveRecurringRulePayloadForLedger(payload, ledgerId, baseUpdatedAt);
+  if (!result.error) {
+    return result.data as RecurringExpenseRule;
+  }
+
+  if (isRecurringRulePrimaryKeyDuplicate(result.error)) {
+    // Older queued edits may contain a stale ledgerId for an existing rule. Re-resolve the
+    // server-owned ledger before retrying so the edit path can update instead of inserting.
+    const remote = await getRemoteRecurringRuleSyncInfo(payload.id);
+    if (!remote || remote.ledger_id === ledgerId) {
+      throw result.error;
+    }
+
+    ledgerId = remote.ledger_id;
+    result = await saveRecurringRulePayloadForLedger(payload, ledgerId, baseUpdatedAt);
+    if (!result.error) {
+      return result.data as RecurringExpenseRule;
+    }
+  }
+
+  if (!isSyncConflictError(result.error)) {
+    throw result.error;
+  }
+
+  const remote = await getRemoteRecurringRuleSyncInfo(payload.id);
+  if (!remote) {
+    throw result.error;
+  }
+
+  const retry = await saveRecurringRulePayloadForLedger(payload, remote.ledger_id, remote.updated_at);
+  if (retry.error) {
+    throw retry.error;
+  }
+  return retry.data as RecurringExpenseRule;
+}
+
+function saveRecurringRulePayloadForLedger(
+  payload: SaveRecurringRulePayload,
+  ledgerId: string,
+  baseUpdatedAt: string | null
+) {
+  return supabase.rpc('save_recurring_expense_rule_offline', {
+    p_rule_id: payload.id,
+    p_ledger_id: ledgerId,
+    p_name: payload.name,
+    p_category_id: payload.categoryId,
+    p_subcategory: payload.subcategory,
+    p_amount_yen: payload.amountYen,
+    p_paid_by: payload.paidBy,
+    p_ownership: payload.ownership,
+    p_split_ratio_a: payload.splitRatioA,
+    p_split_ratio_b: payload.splitRatioB,
+    p_split_amount_a: payload.splitAmountA,
+    p_split_amount_b: payload.splitAmountB,
+    p_generate_day: payload.generateDay,
+    p_start_month: payload.startMonth,
+    p_end_month: payload.endMonth,
+    p_timezone: payload.timezone,
+    p_is_active: payload.isActive,
+    p_base_updated_at: baseUpdatedAt
+  });
+}
+
+async function getRemoteRecurringRuleSyncInfo(ruleId: string) {
+  const { data, error } = await supabase
+    .from('recurring_expense_rules')
+    .select('ledger_id, updated_at')
+    .eq('id', ruleId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+function isRecurringRulePrimaryKeyDuplicate(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const details = error as { code?: unknown; details?: unknown; message?: unknown };
+  return (
+    details.code === '23505' &&
+    `${details.message || ''} ${details.details || ''}`.includes('recurring_expense_rules_pkey')
+  );
+}
+
+function isSyncConflictError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const details = error as { code?: unknown; message?: unknown };
+  return details.code === 'PT409' || String(details.message || '').includes('sync_conflict');
+}
+
+function syncedBaseUpdatedAt(row: { last_synced_updated_at?: string | null; updated_at?: string | null } | null | undefined) {
+  return row?.last_synced_updated_at || row?.updated_at || null;
 }
 
 async function enqueueMutation(
@@ -1490,6 +1580,39 @@ function safeJsonParse(value: string) {
     return JSON.parse(value);
   } catch {
     return value;
+  }
+}
+
+function formatSyncError(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (!error || typeof error !== 'object') {
+    return String(error);
+  }
+
+  const details = error as {
+    code?: unknown;
+    details?: unknown;
+    hint?: unknown;
+    message?: unknown;
+  };
+  const parts = [
+    typeof details.message === 'string' ? details.message : null,
+    typeof details.code === 'string' ? `code: ${details.code}` : null,
+    typeof details.details === 'string' ? `details: ${details.details}` : null,
+    typeof details.hint === 'string' ? `hint: ${details.hint}` : null
+  ].filter(Boolean);
+
+  if (parts.length > 0) {
+    return parts.join(' · ');
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
   }
 }
 

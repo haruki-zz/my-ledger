@@ -372,7 +372,7 @@ export default function RecurringExpenseRulesScreen() {
 
     setSaving(true);
     try {
-      const savedRule = await saveRecurringExpenseRule({
+      await saveRecurringExpenseRule({
         id: nextDraft.id,
         ledgerId: ledger.id,
         name: nextDraft.name,
@@ -392,9 +392,9 @@ export default function RecurringExpenseRulesScreen() {
         isActive: nextDraft.isActive
       });
       if (nextDraft.isActive) {
-        await generateRecurringExpenses(ledger.id, currentMonthStartDate()).catch(() => []);
-      } else {
-        await deleteRecurringGeneratedExpense(ledger.id, savedRule.id).catch(() => {});
+        await generateRecurringExpenses(ledger.id, currentMonthStartDate());
+      } else if (nextDraft.id) {
+        await deleteRecurringGeneratedExpense(ledger.id, nextDraft.id);
       }
       await load(ledger, 'background');
       if (!editingRuleId) {

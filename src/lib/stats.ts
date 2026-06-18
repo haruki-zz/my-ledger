@@ -1,6 +1,6 @@
 import { buildUserColorMap, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './entityColors';
 import { categoryColor, categoryLabel, resolveCategory } from './categorySystem';
-import type { Expense } from '../types/database';
+import type { Expense, RecurringExpenseRule } from '../types/database';
 
 export type DashboardRange = 'all' | 'current' | 'other';
 export type DashboardPeriod = 'today' | 'week' | 'month';
@@ -86,6 +86,8 @@ const dayFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
 });
+const RECURRING_EXPENSE_TIME_ZONE = 'Asia/Tokyo';
+
 function padDatePart(value: number) {
   return String(value).padStart(2, '0');
 }
@@ -100,6 +102,37 @@ export function currentMonthKey() {
 
 export function monthKeyFromDateString(dateString: string) {
   return dateString.slice(0, 7);
+}
+
+export function filterCurrentMonthSettledExpenses(input: {
+  expenses: Expense[];
+  recurringRules: Pick<RecurringExpenseRule, 'id' | 'is_active'>[];
+  today?: Date | string;
+}) {
+  const todayString = typeof input.today === 'string'
+    ? input.today
+    : input.today
+      ? formatDateString(startOfDay(input.today))
+      : formatDateStringInTimeZone(new Date(), RECURRING_EXPENSE_TIME_ZONE);
+  const todayMonthKey = monthKeyFromDateString(todayString);
+  const recurringRulesById = new Map(input.recurringRules.map((rule) => [rule.id, rule]));
+
+  return input.expenses.filter((expense) => {
+    if (!expense.recurring_rule_id) {
+      return true;
+    }
+
+    if (monthKeyFromDateString(expense.spent_on) !== todayMonthKey) {
+      return true;
+    }
+
+    if (expense.spent_on > todayString) {
+      return false;
+    }
+
+    const rule = recurringRulesById.get(expense.recurring_rule_id);
+    return !rule || rule.is_active;
+  });
 }
 
 export function compareMonthKeys(a: string, b: string) {
@@ -621,4 +654,15 @@ function formatDateString(date: Date) {
     padDatePart(date.getMonth() + 1),
     padDatePart(date.getDate())
   ].join('-');
+}
+
+function formatDateStringInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    day: '2-digit',
+    month: '2-digit',
+    timeZone,
+    year: 'numeric'
+  }).formatToParts(date);
+  const valueByType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return [valueByType.year, valueByType.month, valueByType.day].join('-');
 }

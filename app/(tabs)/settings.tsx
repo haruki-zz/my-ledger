@@ -183,9 +183,10 @@ export default function SettingsScreen() {
     try {
       // Recurring rules are saved through the same full-replace path as the editor so offline sync
       // queues one consistent mutation shape. Keep this payload in step with SaveRecurringExpenseRuleInput.
+      const ruleLedgerId = rule.ledger_id || ledgerId;
       await saveRecurringExpenseRule({
         id: rule.id,
-        ledgerId,
+        ledgerId: ruleLedgerId,
         name: rule.name,
         categoryId: rule.category_id,
         subcategory: rule.subcategory,
@@ -203,9 +204,9 @@ export default function SettingsScreen() {
         isActive: nextIsActive
       });
       if (nextIsActive) {
-        await generateRecurringExpenses(ledgerId).catch(() => []);
+        await generateRecurringExpenses(ruleLedgerId);
       } else {
-        await deleteRecurringGeneratedExpense(ledgerId, rule.id).catch(() => {});
+        await deleteRecurringGeneratedExpense(ruleLedgerId, rule.id);
       }
       await loadDetails();
     } catch (toggleError) {

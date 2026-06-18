@@ -4,20 +4,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
+  generateRecurringExpenses,
   getExpensesByMonth,
   getFirstExpenseSpentOn,
   getLedgerMembers,
-  getProfiles
+  getProfiles,
+  getRecurringExpenseRules
 } from '@/src/lib/ledger';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
   buildDashboardPeriodStats,
   compareMonthKeys,
+  currentMonthKey,
+  filterCurrentMonthSettledExpenses,
   monthKeyFromDateString,
+  monthStartDateString,
   resolveDashboardDateRange,
   type DashboardPeriod
 } from '@/src/lib/stats';
-import type { Expense, Ledger, LedgerMemberProfile, Profile } from '@/src/types/database';
+import type { Expense, Ledger, LedgerMemberProfile, Profile, RecurringExpenseRule } from '@/src/types/database';
 
 export function useDashboardData(monthKey: string, period: DashboardPeriod) {
   const { session } = useAuth();
@@ -28,6 +33,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [recurringRules, setRecurringRules] = useState<RecurringExpenseRule[] | null>(null);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
@@ -39,6 +45,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
   const [dataVersion, setDataVersion] = useState(0);
   const requestSequence = useRef(0);
   const hasLoadedData = useRef(false);
+  const loadInFlightRef = useRef(false);
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
 
   useEffect(() => {
@@ -53,6 +60,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
     const requestId = requestSequence.current + 1;
     requestSequence.current = requestId;
     const shouldKeepCurrentData = hasLoadedData.current;
+    loadInFlightRef.current = true;
 
     setError(null);
     setLoading(!shouldKeepCurrentData);
@@ -72,10 +80,23 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
       }
 
       const dateRange = resolveDashboardDateRange(period, monthKey);
-      const [nextMembers, firstExpenseSpentOn, nextExpenses] = await Promise.all([
+      const generationMonthKey = monthKeyFromDateString(dateRange.endDateString);
+      const generationPromise = generateRecurringExpenses(activeLedger.id, monthStartDateString(generationMonthKey));
+      if (generationMonthKey === currentMonthKey()) {
+        await generationPromise;
+      } else {
+        generationPromise.catch((generateError) => {
+          console.warn('Dashboard fixed expense generation failed:', generateError instanceof Error ? generateError.message : String(generateError));
+        });
+      }
+      const [nextMembers, firstExpenseSpentOn, nextExpenses, nextRecurringRules] = await Promise.all([
         getLedgerMembers(activeLedger.id),
         getFirstExpenseSpentOn(activeLedger.id),
-        getExpensesByMonth(activeLedger.id, dateRange.comparisonStartDateString, dateRange.endDateString)
+        getExpensesByMonth(activeLedger.id, dateRange.comparisonStartDateString, dateRange.endDateString, { refreshFirst: true }),
+        getRecurringExpenseRules(activeLedger.id, { emitChange: false, refreshFirst: true }).catch((rulesError) => {
+          console.warn('Dashboard fixed expense rules reload failed:', rulesError instanceof Error ? rulesError.message : String(rulesError));
+          return null;
+        })
       ]);
 
       const nextOtherUserId = nextMembers.find((member) => member.user_id !== userId)?.user_id || null;
@@ -99,6 +120,9 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
       setLedger(activeLedger);
       setMembers(nextMembers);
       setExpenses(nextExpenses);
+      if (nextRecurringRules !== null) {
+        setRecurringRules(nextRecurringRules);
+      }
       setProfiles(nextProfiles);
       setCurrentUserId(userId);
       setOtherUserId(nextOtherUserId);
@@ -119,15 +143,20 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
         setLoading(false);
         setRefreshing(false);
       }
+      if (requestSequence.current === requestId) {
+        loadInFlightRef.current = false;
+      }
     }
   }, [ledgerLoading, monthKey, period, session?.user.id]);
 
   useEffect(() => {
     requestSequence.current += 1;
+    loadInFlightRef.current = false;
     hasLoadedData.current = false;
     setLedger(null);
     setMembers([]);
     setExpenses([]);
+    setRecurringRules(null);
     setProfiles({});
     setCurrentUserId(null);
     setOtherUserId(null);
@@ -150,19 +179,30 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
     }
 
     return subscribeToLedgerData(ledgerId, () => {
+      if (loadInFlightRef.current) {
+        return;
+      }
       void loadRef.current();
     });
   }, [ledgerId]);
 
+  const settledExpenses = useMemo(
+    // If rule refresh is unavailable, keep showing cached/raw expenses instead of hiding data.
+    () => recurringRules
+      ? filterCurrentMonthSettledExpenses({ expenses, recurringRules })
+      : expenses,
+    [expenses, recurringRules]
+  );
+
   const stats = useMemo(
     () => buildDashboardPeriodStats({
-      expenses,
+      expenses: settledExpenses,
       monthKey: loadedMonthKey || monthKey,
       period,
       currentUserId,
       otherUserId
     }),
-    [currentUserId, expenses, loadedMonthKey, monthKey, otherUserId, period]
+    [currentUserId, loadedMonthKey, monthKey, otherUserId, period, settledExpenses]
   );
 
   return {

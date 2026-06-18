@@ -186,11 +186,24 @@ export async function getLedgerCategories(ledgerId: string): Promise<LedgerCateg
   }, () => fetchRemoteLedgerCategories(ledgerId));
 }
 
-export async function getRecurringExpenseRules(ledgerId: string): Promise<RecurringExpenseRule[]> {
+export async function getRecurringExpenseRules(
+  ledgerId: string,
+  options: { emitChange?: boolean; refreshFirst?: boolean } = {}
+): Promise<RecurringExpenseRule[]> {
   return withLocalFallback(async () => {
+    if (options.refreshFirst) {
+      await ignoreOfflineError(() => refreshRecurringRules(ledgerId, { emitChange: options.emitChange }));
+    }
+
     const cachedRules = await getCachedRecurringRules(ledgerId);
+    if (cachedRules.length > 0) {
+      refreshRecurringRules(ledgerId, { emitChange: options.emitChange }).catch((refreshError) => {
+        console.warn('Background recurring rules refresh failed:', refreshError instanceof Error ? refreshError.message : String(refreshError));
+      });
+      return cachedRules;
+    }
     try {
-      await refreshRecurringRules(ledgerId);
+      await refreshRecurringRules(ledgerId, { emitChange: options.emitChange });
       return getCachedRecurringRules(ledgerId);
     } catch (error) {
       if (isOfflineError(error)) {
@@ -427,7 +440,7 @@ export async function generateRecurringExpenses(
     const rows = (data || []) as GenerateRecurringExpenseResult[];
     const generatedRowsMayAffectCache = rows.some((row) => row.status === 'inserted' || row.status === 'exists');
     if (generatedRowsMayAffectCache) {
-      await ignoreLocalCacheError(() => refreshExpenses(ledgerId));
+    await ignoreLocalCacheError(() => refreshExpenses(ledgerId, { force: true }));
     }
 
     return rows;
@@ -480,7 +493,7 @@ export async function deleteRecurringGeneratedExpense(ledgerId: string, ruleId: 
       throw deleteError;
     }
 
-    await ignoreLocalCacheError(() => refreshExpenses(ledgerId));
+      await ignoreLocalCacheError(() => refreshExpenses(ledgerId, { force: true }));
     return;
   }
 
@@ -535,7 +548,7 @@ export async function getExpensesByMonth(
 ): Promise<Expense[]> {
   return withLocalFallback(async () => {
     if (options.refreshFirst) {
-      await ignoreOfflineError(() => refreshExpenses(ledgerId));
+      await ignoreOfflineError(() => refreshExpenses(ledgerId, { force: true }));
     }
 
     const cachedExpenses = await getCachedExpensesByMonth(ledgerId, startDate, endDate);
