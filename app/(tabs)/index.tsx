@@ -213,9 +213,12 @@ export default function DashboardScreen() {
                 />
 
                 <View style={localStyles.comparisonRow}>
-                  <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.comparisonAmountText, { color: comparisonColor(stats.comparison.direction) }]}>
-                    {formatComparisonAmount(Math.abs(stats.comparison.deltaYen))}
-                  </Text>
+                  <SlidingValueText
+                    formatValue={formatComparisonAmount}
+                    textStyle={[localStyles.comparisonAmountText, { color: comparisonColor(stats.comparison.direction) }]}
+                    value={Math.abs(stats.comparison.deltaYen)}
+                    wrapperStyle={localStyles.comparisonAmountSlot}
+                  />
                   <Ionicons
                     color={comparisonColor(stats.comparison.direction)}
                     name={comparisonIcon(stats.comparison.direction)}
@@ -341,9 +344,13 @@ function MemberSplit({
         </Text>
       </View>
       <View style={localStyles.memberAmountRow}>
-        <Text adjustsFontSizeToFit numberOfLines={1} style={[localStyles.memberAmount, { color }]}>
-          {formatYen(amountYen)}
-        </Text>
+        <SlidingValueText
+          fitToWidth
+          formatValue={formatYen}
+          textStyle={[localStyles.memberAmount, { color }]}
+          value={amountYen}
+          wrapperStyle={localStyles.memberAmountSlot}
+        />
       </View>
     </View>
   );
@@ -438,6 +445,10 @@ const localStyles = StyleSheet.create({
     lineHeight: 20,
     flexShrink: 0
   },
+  comparisonAmountSlot: {
+    flexShrink: 0,
+    height: 20
+  },
   dashboardContent: {
     gap: 18
   },
@@ -491,12 +502,10 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between'
   },
   memberAmount: {
-    flex: 1,
     fontFamily: fontFamilies.bold,
     fontSize: 26,
     fontWeight: '700',
     lineHeight: 32,
-    minWidth: 0,
     textAlign: 'left'
   },
   memberAmountRow: {
@@ -504,6 +513,11 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     minHeight: 32,
     justifyContent: 'space-between'
+  },
+  memberAmountSlot: {
+    flex: 1,
+    height: 32,
+    minWidth: 0
   },
   memberDivider: {
     backgroundColor: colors.line,

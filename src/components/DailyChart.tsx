@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Pressable, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, Text, View } from 'react-native';
 import type { GestureResponderEvent } from 'react-native';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
@@ -19,6 +19,7 @@ type DailyChartProps = {
 };
 
 type BarTargetGroup = {
+  animationDelayMs: number;
   barWidth: number;
   currentKey: string | null;
   currentTargetHeight: number;
@@ -46,9 +47,11 @@ const tooltipDateFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
 });
-const BAR_ANIMATION_DURATION_MS = 220;
+const BAR_ANIMATION_DURATION_MS = 720;
+const BAR_COLUMN_STAGGER_MS = 14;
+const BAR_STAGGER_BUDGET_MS = 180;
+const BAR_ANIMATION_EASING = Easing.bezier(0.33, 1, 0.68, 1);
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
-const canAnimateSvgBars = process.env.EXPO_OS !== 'web';
 
 export function DailyChart({
   currentUserColor = CURRENT_COLOR,
@@ -68,7 +71,6 @@ export function DailyChart({
   const barHeights = useRef(new Map<string, Animated.Value>());
   const barGroupsRef = useRef<AnimatedBarGroup[]>([]);
   const barAnimationSequence = useRef(0);
-  const hasRenderedBars = useRef(false);
   const safeSelectedIndex = selectedIndex === null ? null : clamp(selectedIndex, 0, Math.max(0, series.length - 1));
   const labelIndexes = useMemo(() => labelIndexSet(series.length), [series.length]);
   const baseline = PADDING_TOP + PLOT_HEIGHT;
@@ -100,7 +102,8 @@ export function DailyChart({
     });
   }, [barSlotWidth, baseline, currentUserId, maxAmount, otherUserId, series]);
   const barTargetGroups = useMemo(() => (
-    points.map((point) => ({
+    points.map((point, index) => ({
+      animationDelayMs: barColumnDelay(index, points.length),
       barWidth,
       currentKey: currentUserId ? barKey(point.date, currentUserId) : null,
       currentTargetHeight: visualBarHeight(point.currentHeight),
@@ -131,8 +134,15 @@ export function DailyChart({
   // animated values. Cleanup also prunes when a new period/month interrupts.
   useEffect(() => {
     const barHeightValues = barHeights.current;
+    if (barTargetGroups.length === 0) {
+      barGroupsRef.current = [];
+      setAnimatedBarGroups([]);
+      pruneAnimatedBarValues([], barHeightValues);
+      return;
+    }
+
     const targetDates = new Set(barTargetGroups.map((group) => group.date));
-    const shouldAnimate = hasRenderedBars.current;
+    const shouldAnimate = true;
     const nextGroups: AnimatedBarGroup[] = barTargetGroups.map((group) => ({
       ...group,
       currentHeight: group.currentKey ? animatedBarValue(group.currentKey, group.currentTargetHeight, shouldAnimate, barHeightValues) : null,
@@ -155,7 +165,6 @@ export function DailyChart({
     setAnimatedBarGroups(nextGroups);
 
     if (!shouldAnimate) {
-      hasRenderedBars.current = true;
       pruneAnimatedBarValues(nextGroups, barHeightValues);
       return;
     }
@@ -169,6 +178,7 @@ export function DailyChart({
         group.currentHeight.stopAnimation();
         groupAnimations.push(Animated.timing(group.currentHeight, {
           duration: BAR_ANIMATION_DURATION_MS,
+          easing: BAR_ANIMATION_EASING,
           toValue: group.currentTargetHeight,
           useNativeDriver: false
         }));
@@ -178,12 +188,20 @@ export function DailyChart({
         group.otherHeight.stopAnimation();
         groupAnimations.push(Animated.timing(group.otherHeight, {
           duration: BAR_ANIMATION_DURATION_MS,
+          easing: BAR_ANIMATION_EASING,
           toValue: group.otherTargetHeight,
           useNativeDriver: false
         }));
       }
 
-      return groupAnimations;
+      if (groupAnimations.length === 0) {
+        return [];
+      }
+
+      return Animated.sequence([
+        Animated.delay(group.animationDelayMs),
+        Animated.parallel(groupAnimations)
+      ]);
     });
 
     if (animations.length === 0) {
@@ -276,59 +294,32 @@ export function DailyChart({
         </SvgText>
 
         {animatedBarGroups.map((group) => {
-          // Target heights already include the 2px visual minimum. Native uses
-          // animated values for y/height; web renders the same final geometry.
-          const currentY = baseline - group.currentTargetHeight;
-          const otherY = baseline - group.currentTargetHeight - group.otherTargetHeight;
-
           return (
             <Fragment key={group.date}>
               {group.currentHeight ? (
-                canAnimateSvgBars ? (
-                  <AnimatedRect
-                    fill={currentUserColor}
-                    height={group.currentHeight}
-                    rx={3}
-                    width={group.barWidth}
-                    x={group.x - group.barWidth / 2}
-                    y={Animated.subtract(baseline, group.currentHeight)}
-                  />
-                ) : (
-                  <Rect
-                    fill={currentUserColor}
-                    height={group.currentTargetHeight}
-                    rx={3}
-                    width={group.barWidth}
-                    x={group.x - group.barWidth / 2}
-                    y={currentY}
-                  />
-                )
+                <AnimatedRect
+                  fill={currentUserColor}
+                  height={group.currentHeight}
+                  rx={3}
+                  width={group.barWidth}
+                  x={group.x - group.barWidth / 2}
+                  y={Animated.subtract(baseline, group.currentHeight)}
+                />
               ) : null}
               {group.otherHeight ? (
-                canAnimateSvgBars ? (
-                  <AnimatedRect
-                    fill={otherUserColor}
-                    height={group.otherHeight}
-                    rx={3}
-                    width={group.barWidth}
-                    x={group.x - group.barWidth / 2}
-                    y={Animated.subtract(
-                      baseline,
-                      group.currentHeight
-                        ? Animated.add(group.currentHeight, group.otherHeight)
-                        : group.otherHeight
-                    )}
-                  />
-                ) : (
-                  <Rect
-                    fill={otherUserColor}
-                    height={group.otherTargetHeight}
-                    rx={3}
-                    width={group.barWidth}
-                    x={group.x - group.barWidth / 2}
-                    y={otherY}
-                  />
-                )
+                <AnimatedRect
+                  fill={otherUserColor}
+                  height={group.otherHeight}
+                  rx={3}
+                  width={group.barWidth}
+                  x={group.x - group.barWidth / 2}
+                  y={Animated.subtract(
+                    baseline,
+                    group.currentHeight
+                      ? Animated.add(group.currentHeight, group.otherHeight)
+                      : group.otherHeight
+                  )}
+                />
               ) : null}
             </Fragment>
           );
@@ -402,6 +393,14 @@ function barKey(date: string, userId: string) {
 
 function visualBarHeight(height: number) {
   return height > 0 ? Math.max(height, 2) : 0;
+}
+
+function barColumnDelay(index: number, count: number) {
+  if (count <= 1) {
+    return 0;
+  }
+
+  return index * Math.min(BAR_COLUMN_STAGGER_MS, BAR_STAGGER_BUDGET_MS / (count - 1));
 }
 
 function tooltipLayout(x: number) {

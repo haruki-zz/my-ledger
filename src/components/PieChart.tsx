@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
-import Svg, { Circle, Text as SvgText } from 'react-native-svg';
+import { useEffect, useMemo, useState } from 'react';
+import { Animated, Easing, Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import Svg, { Circle, Path, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { iconNameForExpenseCategory } from '@/src/lib/categories';
@@ -15,7 +16,7 @@ type PieChartProps = {
 };
 
 type PieSegment = CategoryStat & {
-  dashOffset: number;
+  path: string;
   segmentLength: number;
 };
 
@@ -25,6 +26,10 @@ type AnchorPoint = {
 };
 
 const SEGMENT_GAP_LENGTH = 2;
+const DONUT_ANIMATION_DURATION_MS = 720;
+const DONUT_ANIMATION_EASING = Easing.bezier(0.33, 1, 0.68, 1);
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 export function PieChart({
   categories,
@@ -32,14 +37,6 @@ export function PieChart({
   onCategoryPress,
   selectedCategoryName
 }: PieChartProps) {
-  if (totalYen <= 0 || categories.length === 0) {
-    return (
-      <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 180 }}>
-        <Text style={styles.muted}>No category expenses to chart yet</Text>
-      </View>
-    );
-  }
-
   const chartSize = 170;
   const center = chartSize / 2;
   const outerRadius = 68;
@@ -47,7 +44,37 @@ export function PieChart({
   const strokeWidth = outerRadius - innerRadius;
   const strokeRadius = (outerRadius + innerRadius) / 2;
   const circumference = 2 * Math.PI * strokeRadius;
-  const segments = buildSegments(categories, totalYen, circumference);
+  const segments = useMemo(() => (
+    totalYen > 0 ? buildSegments(categories, totalYen, center, strokeRadius, circumference) : []
+  ), [categories, center, circumference, strokeRadius, totalYen]);
+  const segmentSignature = useMemo(() => (
+    segments.map((segment) => `${segment.category}:${segment.amountYen}:${segment.color}`).join('|')
+  ), [segments]);
+  const [donutProgress] = useState(() => new Animated.Value(0));
+
+  useEffect(() => {
+    if (segments.length === 0) {
+      donutProgress.setValue(0);
+      return;
+    }
+
+    donutProgress.stopAnimation();
+    donutProgress.setValue(0);
+    Animated.timing(donutProgress, {
+      duration: DONUT_ANIMATION_DURATION_MS,
+      easing: DONUT_ANIMATION_EASING,
+      toValue: 1,
+      useNativeDriver: false
+    }).start();
+  }, [donutProgress, segmentSignature, segments.length]);
+
+  if (totalYen <= 0 || categories.length === 0) {
+    return (
+      <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 180 }}>
+        <Text style={styles.muted}>No category expenses to chart yet</Text>
+      </View>
+    );
+  }
 
   function handleCategoryPress(category: CategoryStat, event: GestureResponderEvent) {
     const { pageX, pageY } = event.nativeEvent;
@@ -64,25 +91,31 @@ export function PieChart({
         <Svg height={chartSize} viewBox={`0 0 ${chartSize} ${chartSize}`} width={chartSize}>
           <Circle cx={center} cy={center} fill="rgba(15,118,110,0.08)" r={outerRadius} />
           {segments.length === 1 ? (
-            <Circle
+            <AnimatedCircle
               cx={center}
               cy={center}
               fill="none"
               r={strokeRadius}
               stroke={segments[0].color}
+              strokeDasharray={`${circumference} ${circumference}`}
+              strokeDashoffset={donutProgress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [circumference, 0]
+              })}
               strokeWidth={strokeWidth}
             />
           ) : (
             segments.map((segment) => (
-              <Circle
-                cx={center}
-                cy={center}
+              <AnimatedPath
+                d={segment.path}
                 fill="none"
-                key={`${segment.category}-${segment.dashOffset}`}
-                r={strokeRadius}
+                key={`${segment.category}-${segment.path}`}
                 stroke={segment.color}
-                strokeDasharray={`${segment.segmentLength} ${circumference - segment.segmentLength}`}
-                strokeDashoffset={segment.dashOffset}
+                strokeDasharray={`${segment.segmentLength} ${segment.segmentLength}`}
+                strokeDashoffset={donutProgress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [segment.segmentLength, 0]
+                })}
                 strokeLinecap="round"
                 strokeWidth={strokeWidth}
               />
@@ -148,22 +181,51 @@ export function PieChart({
   );
 }
 
-function buildSegments(categories: CategoryStat[], totalYen: number, circumference: number): PieSegment[] {
+function buildSegments(
+  categories: CategoryStat[],
+  totalYen: number,
+  center: number,
+  strokeRadius: number,
+  circumference: number
+): PieSegment[] {
   const segments: PieSegment[] = [];
   const gapLength = categories.length > 1 ? SEGMENT_GAP_LENGTH : 0;
   let cumulativeLength = 0;
 
   for (const category of categories) {
     const rawSegmentLength = (category.amountYen / totalYen) * circumference;
+    const segmentLength = Math.max(0, rawSegmentLength - gapLength);
+    const startAngle = -90 + (cumulativeLength / circumference) * 360;
+    const endAngle = startAngle + (segmentLength / circumference) * 360;
     segments.push({
       ...category,
-      dashOffset: circumference / 4 - cumulativeLength,
-      segmentLength: Math.max(0, rawSegmentLength - gapLength)
+      path: describeArc(center, center, strokeRadius, startAngle, endAngle),
+      segmentLength
     });
     cumulativeLength += rawSegmentLength;
   }
 
   return segments;
+}
+
+function describeArc(cx: number, cy: number, radius: number, startAngle: number, endAngle: number) {
+  const start = polarToCartesian(cx, cy, radius, startAngle);
+  const end = polarToCartesian(cx, cy, radius, endAngle);
+  const largeArcFlag = endAngle - startAngle <= 180 ? 0 : 1;
+
+  return [
+    'M', start.x, start.y,
+    'A', radius, radius, 0, largeArcFlag, 1, end.x, end.y
+  ].join(' ');
+}
+
+function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
+  const angleInRadians = (angleInDegrees * Math.PI) / 180;
+
+  return {
+    x: cx + radius * Math.cos(angleInRadians),
+    y: cy + radius * Math.sin(angleInRadians)
+  };
 }
 
 const chartStyles = StyleSheet.create({
