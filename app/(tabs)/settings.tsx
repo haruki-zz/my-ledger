@@ -26,6 +26,7 @@ import { useSyncContext } from '@/src/context/SyncContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { categoryColor, categoryIconName, categoryLabel } from '@/src/lib/categorySystem';
 import { tintFromAccent } from '@/src/lib/color';
+import { DEFAULT_PARTNER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteRecurringGeneratedExpense,
@@ -53,7 +54,7 @@ type DashboardRowProps = {
   trailing?: ReactNode;
 };
 
-const LEDGER_COLORS = ['#0F766E', '#6366F1', '#2563EB', '#C2410C', '#8B5CF6', '#14B8A6'];
+const LEDGER_COLORS = ['#CB5F43', '#8AA248', '#4F77BE', '#8A6FB6', '#D2A032', '#4E97B5'];
 
 function preserveExistingRuleOrder(
   currentRules: RecurringExpenseRule[],
@@ -898,7 +899,7 @@ function colorForTone(tone: ActionTone) {
     return colors.accent;
   }
   if (tone === 'warm') {
-    return colors.warm;
+    return DEFAULT_PARTNER_COLOR;
   }
   if (tone === 'danger') {
     return colors.danger;
@@ -965,11 +966,11 @@ const localStyles = StyleSheet.create({
     minWidth: 0
   },
   activeLabel: {
-    color: colors.primaryDark,
+    color: colors.secondary,
     fontFamily: fontFamilies.extraBold,
     fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 1.4,
+    letterSpacing: 0.4,
     lineHeight: 13
   },
   activeLabelRow: {
@@ -1024,7 +1025,7 @@ const localStyles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     overflow: 'hidden',
-    shadowColor: '#0F172A',
+    shadowColor: '#2A2722',
     shadowOffset: { height: 8, width: 0 },
     shadowOpacity: 0.06,
     shadowRadius: 18,
@@ -1109,7 +1110,7 @@ const localStyles = StyleSheet.create({
   fixedRuleAmount: {
     color: colors.ink,
     flexShrink: 0,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 20,
@@ -1122,7 +1123,7 @@ const localStyles = StyleSheet.create({
     minWidth: 0
   },
   fixedRuleDivider: {
-    backgroundColor: 'rgba(100,116,139,0.15)',
+    backgroundColor: colors.line,
     height: 1,
     marginLeft: 74
   },
@@ -1152,7 +1153,7 @@ const localStyles = StyleSheet.create({
   },
   fixedRuleSegment: {
     backgroundColor: 'rgba(255,255,255,0.92)',
-    borderColor: 'rgba(100,116,139,0.08)',
+    borderColor: colors.line,
     borderLeftWidth: 0,
     borderRightWidth: 0,
     overflow: 'hidden'
@@ -1180,7 +1181,7 @@ const localStyles = StyleSheet.create({
   },
   footerText: {
     color: colors.subtle,
-    fontFamily: fontFamilies.regular,
+    fontFamily: fontFamilies.mono,
     fontSize: 12,
     lineHeight: 16
   },
@@ -1209,17 +1210,17 @@ const localStyles = StyleSheet.create({
     width: 6
   },
   infoPillText: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0,
+    letterSpacing: 0.5,
     lineHeight: 13,
     maxWidth: 150
   },
   inviteCode: {
     color: colors.ink,
     flex: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 1,
@@ -1254,7 +1255,7 @@ const localStyles = StyleSheet.create({
     paddingVertical: 5
   },
   memberChipText: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -1364,7 +1365,7 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.extraBold,
     fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 1.4,
+    letterSpacing: 0.4,
     lineHeight: 13,
     paddingBottom: 8,
     paddingHorizontal: 16,
@@ -1404,17 +1405,17 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 4
   },
   totalLabel: {
-    color: colors.primaryDark,
+    color: colors.secondary,
     fontFamily: fontFamilies.extraBold,
     fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 1.4,
+    letterSpacing: 0.4,
     lineHeight: 13,
     marginBottom: 8
   },
   totalValue: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.monoExtraBold,
     fontSize: 22,
     fontWeight: '800',
     lineHeight: 26

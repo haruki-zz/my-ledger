@@ -92,9 +92,9 @@ describe('entity colors', () => {
   it('assigns stable colors for current user and other ledger members', () => {
     const colorsById = buildUserColorMap([OTHER_USER_ID, CURRENT_USER_ID, 'user-c'], CURRENT_USER_ID);
 
-    expect(DEFAULT_USER_COLOR).toBe('#F4661B');
-    expect(colorsById.get(CURRENT_USER_ID)).toBe('#F4661B');
-    expect(colorsById.get(OTHER_USER_ID)).toBe('#00857C');
+    expect(DEFAULT_USER_COLOR).toBe('#B25A3C');
+    expect(colorsById.get(CURRENT_USER_ID)).toBe('#B25A3C');
+    expect(colorsById.get(OTHER_USER_ID)).toBe('#3F8A86');
     expect(colorsById.get(OTHER_USER_ID)).not.toBe(colorsById.get('user-c'));
   });
 
@@ -105,8 +105,8 @@ describe('entity colors', () => {
       CURRENT_USER_ID
     );
 
-    expect(categoryColors.has('#F4661B')).toBe(false);
-    expect(categoryColors.has('#00857C')).toBe(false);
+    expect(categoryColors.has('#B25A3C')).toBe(false);
+    expect(categoryColors.has('#3F8A86')).toBe(false);
     for (const userColor of colorsById.values()) {
       expect(categoryColors.has(userColor)).toBe(false);
     }

@@ -2,7 +2,7 @@ import type { ColorValue } from 'react-native';
 
 import { colors } from '@/src/components/styles';
 
-export function tintFromAccent(accent: ColorValue) {
+export function tintFromAccent(accent: ColorValue, alpha = 0.10) {
   if (typeof accent !== 'string') {
     return colors.tint;
   }
@@ -16,5 +16,5 @@ export function tintFromAccent(accent: ColorValue) {
   const red = Number.parseInt(hex.slice(0, 2), 16);
   const green = Number.parseInt(hex.slice(2, 4), 16);
   const blue = Number.parseInt(hex.slice(4, 6), 16);
-  return `rgba(${red},${green},${blue},0.10)`;
+  return `rgba(${red},${green},${blue},${alpha})`;
 }

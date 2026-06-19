@@ -4,10 +4,15 @@ import { CONTENT_BOTTOM_PADDING } from '@/src/components/layout';
 import { CHART_PALETTE } from '@/src/lib/chartPalette';
 
 export const fontFamilies = {
-  regular: 'JetBrainsMono_400Regular',
-  semiBold: 'JetBrainsMono_600SemiBold',
-  bold: 'JetBrainsMono_700Bold',
-  extraBold: 'JetBrainsMono_800ExtraBold',
+  mono: 'JetBrainsMono_400Regular',
+  monoSemiBold: 'JetBrainsMono_600SemiBold',
+  monoBold: 'JetBrainsMono_700Bold',
+  monoExtraBold: 'JetBrainsMono_800ExtraBold',
+  regular: 'HankenGrotesk_400Regular',
+  medium: 'HankenGrotesk_500Medium',
+  semiBold: 'HankenGrotesk_600SemiBold',
+  bold: 'HankenGrotesk_700Bold',
+  extraBold: 'HankenGrotesk_800ExtraBold',
   fallback: Platform.select({
     ios: 'Menlo',
     android: 'monospace',
@@ -17,20 +22,23 @@ export const fontFamilies = {
 
 export const theme = {
   colors: {
-    accent: '#6366F1',
-    bg: '#EBEFF7',
-    danger: '#DC2626',
+    accent: '#C0892E',
+    bg: '#F1ECE3',
+    danger: '#C0392B',
     glass: '#FFFFFF',
-    glassBorder: 'rgba(255,255,255,0.9)',
-    ink: '#111827',
-    line: 'rgba(17,24,39,0.08)',
-    muted: '#667085',
-    primary: '#0F766E',
-    primaryDark: '#115E59',
-    subtle: '#98A2B3',
+    glassBorder: 'rgba(42,39,34,0.06)',
+    info: '#3F6FA0',
+    ink: '#2A2722',
+    line: 'rgba(42,39,34,0.10)',
+    muted: '#5C544A',
+    primary: '#3A322A',
+    primaryDark: '#2A241E',
+    secondary: '#C0892E',
+    subtle: '#9A8F80',
+    success: '#3D8A5E',
     surface: '#FFFFFF',
-    tint: 'rgba(15,118,110,0.10)',
-    warm: '#C2410C'
+    tint: 'rgba(192,137,46,0.12)',
+    warning: '#D2741F'
   },
   radii: {
     pill: 999,
@@ -40,31 +48,31 @@ export const theme = {
   },
   shadow: {
     elevation: 3,
-    shadowColor: '#0F172A',
+    shadowColor: '#2A2722',
     shadowOffset: { height: 12, width: 0 },
     shadowOpacity: 0.08,
     shadowRadius: 24
   },
   glassShadow: {
-    boxShadow: '0 2px 5px rgba(15,23,42,0.05), 0 20px 36px -12px rgba(15,23,42,0.24)',
+    boxShadow: '0 2px 5px rgba(42,39,34,0.05), 0 20px 36px -12px rgba(42,39,34,0.24)',
     elevation: 4,
-    shadowColor: '#0F172A',
+    shadowColor: '#2A2722',
     shadowOffset: { height: 18, width: 0 },
     shadowOpacity: 0.18,
     shadowRadius: 28
   },
   daySectionShadow: {
-    boxShadow: '0 14px 30px -14px rgba(15,23,42,0.20)',
+    boxShadow: '0 14px 30px -14px rgba(42,39,34,0.20)',
     elevation: 3,
-    shadowColor: '#0F172A',
+    shadowColor: '#2A2722',
     shadowOffset: { height: 14, width: 0 },
     shadowOpacity: 0.12,
     shadowRadius: 22
   },
   chart: {
-    grid: 'rgba(17,24,39,0.08)',
+    grid: 'rgba(42,39,34,0.10)',
     palette: CHART_PALETTE,
-    primary: '#0F766E',
+    primary: '#B25A3C',
     donutCenter: 'rgba(255,255,255,0.92)'
   }
 };
@@ -159,7 +167,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 10
   },
   dropdownTriggerActive: {
-    borderColor: colors.primary
+    borderColor: colors.secondary
   },
   dropdownValue: {
     color: colors.ink,
@@ -207,7 +215,7 @@ export const styles = StyleSheet.create({
     lineHeight: 23
   },
   dropdownOptionTextActive: {
-    color: colors.primaryDark,
+    color: colors.secondary,
     fontFamily: fontFamilies.bold,
     fontWeight: '700'
   },
@@ -218,11 +226,11 @@ export const styles = StyleSheet.create({
     fontWeight: '600'
   },
   upperLabel: {
-    color: colors.muted,
+    color: '#7A6F60',
     fontFamily: fontFamilies.bold,
-    fontSize: 10,
+    fontSize: 11.5,
     fontWeight: '700',
-    letterSpacing: 1.4,
+    letterSpacing: 0.4,
     lineHeight: 14,
     textTransform: 'uppercase'
   },
@@ -276,7 +284,7 @@ export const styles = StyleSheet.create({
   },
   chipActive: {
     backgroundColor: colors.tint,
-    borderColor: colors.primary
+    borderColor: colors.secondary
   },
   chipText: {
     color: colors.ink,

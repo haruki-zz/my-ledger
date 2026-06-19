@@ -647,7 +647,7 @@ const uiStyles = StyleSheet.create({
     padding: 18
   },
   cardTopCap: {
-    borderBottomColor: 'rgba(17,24,39,0.05)',
+    borderBottomColor: colors.line,
     borderBottomWidth: 1,
     justifyContent: 'flex-end',
     overflow: 'hidden'
@@ -672,7 +672,7 @@ const uiStyles = StyleSheet.create({
   },
   filterChipActive: {
     backgroundColor: colors.tint,
-    borderColor: colors.primary
+    borderColor: colors.secondary
   },
   filterChipText: {
     color: colors.ink,
@@ -682,7 +682,7 @@ const uiStyles = StyleSheet.create({
     lineHeight: 18
   },
   filterChipTextActive: {
-    color: colors.primaryDark
+    color: colors.secondary
   },
   bentoCard_list: {
     gap: 12
@@ -728,7 +728,7 @@ const uiStyles = StyleSheet.create({
     width: 38
   },
   iconButton_primary: {
-    borderColor: 'rgba(15,118,110,0.18)'
+    borderColor: colors.secondary
   },
   iconButton_sm: {
     borderRadius: 14,
@@ -765,7 +765,7 @@ const uiStyles = StyleSheet.create({
   },
   metricValue: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 34,
     fontWeight: '700',
     letterSpacing: 0,
@@ -815,7 +815,7 @@ const uiStyles = StyleSheet.create({
     lineHeight: 14
   },
   pillTrack: {
-    backgroundColor: 'rgba(15,118,110,0.08)',
+    backgroundColor: colors.tint,
     borderColor: colors.line,
     borderRadius: theme.radii.pill,
     borderWidth: 1,
@@ -891,7 +891,7 @@ const uiStyles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderRadius: 11,
     height: 22,
-    shadowColor: '#0F172A',
+    shadowColor: '#2A2722',
     shadowOffset: { height: 2, width: 0 },
     shadowOpacity: 0.18,
     shadowRadius: 5,
@@ -901,7 +901,7 @@ const uiStyles = StyleSheet.create({
     transform: [{ translateX: 20 }]
   },
   toggleSwitchTrack: {
-    backgroundColor: 'rgba(17,24,39,0.16)',
+    backgroundColor: 'rgba(42,39,34,0.16)',
     borderRadius: 15,
     height: 30,
     justifyContent: 'center',
@@ -909,7 +909,7 @@ const uiStyles = StyleSheet.create({
     width: 50
   },
   toggleSwitchTrackActive: {
-    backgroundColor: colors.primary
+    backgroundColor: colors.secondary
   }
 });
 

@@ -243,7 +243,7 @@ export default function TabsLayout() {
           headerShadowVisible: false,
           headerTitleStyle: { color: colors.ink, fontFamily: fontFamilies.bold, fontWeight: '700' },
           sceneStyle,
-          tabBarActiveTintColor: colors.primary,
+          tabBarActiveTintColor: colors.secondary,
           tabBarInactiveTintColor: colors.muted,
           tabBarLabelStyle: {
             fontFamily: fontFamilies.semiBold,
@@ -298,7 +298,7 @@ function ResponsiveTabBar({
       const tabBarIcon = options.tabBarIcon as
         | ((props: { color: ColorValue; focused: boolean; size: number }) => ReactNode)
         | undefined;
-      const color = focused ? colors.primaryDark : colors.muted;
+      const color = focused ? colors.secondary : colors.muted;
 
       function onPress() {
         const event = navigation.emit({
@@ -484,6 +484,6 @@ const localStyles = StyleSheet.create({
     transform: [{ scale: 0.97 }]
   },
   tabItemTextActive: {
-    color: colors.primaryDark
+    color: colors.secondary
   }
 });

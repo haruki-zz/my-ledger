@@ -193,7 +193,7 @@ const modalStyles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1.1,
+    letterSpacing: 0.4,
     lineHeight: 14,
     textTransform: 'uppercase'
   },
@@ -220,7 +220,7 @@ const modalStyles = StyleSheet.create({
   modalAmount: {
     color: colors.ink,
     flex: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 32,
     fontWeight: '700',
     lineHeight: 40,
@@ -262,13 +262,13 @@ const modalStyles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 1.2,
+    letterSpacing: 0.4,
     lineHeight: 15,
     textTransform: 'uppercase'
   },
   modalOwnershipBadge: {
     backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.16)',
+    borderColor: colors.secondary,
     borderRadius: 10,
     borderWidth: 1,
     paddingHorizontal: 10,
@@ -295,7 +295,7 @@ const modalStyles = StyleSheet.create({
   },
   splitAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 16,
     fontWeight: '700',
     lineHeight: 22,
@@ -304,13 +304,13 @@ const modalStyles = StyleSheet.create({
   },
   splitPercent: {
     color: colors.muted,
-    fontFamily: fontFamilies.regular,
+    fontFamily: fontFamilies.mono,
     fontSize: 12,
     lineHeight: 17
   },
   splitRow: {
     alignItems: 'center',
-    backgroundColor: 'rgba(15,118,110,0.06)',
+    backgroundColor: colors.tint,
     borderRadius: 14,
     flexDirection: 'row',
     gap: 12,
@@ -324,7 +324,7 @@ const modalStyles = StyleSheet.create({
   },
   splitTotalAmount: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 22,
     fontWeight: '700',
     lineHeight: 28,
@@ -336,7 +336,7 @@ const modalStyles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 1.1,
+    letterSpacing: 0.4,
     lineHeight: 16,
     textTransform: 'uppercase'
   },

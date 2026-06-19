@@ -29,7 +29,7 @@ import {
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { categoryColor, categoryIconName, categoryWithSubcategory, resolveCategory } from '@/src/lib/categorySystem';
-import { buildUserColorMap } from '@/src/lib/entityColors';
+import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteExpense,
@@ -419,7 +419,7 @@ export default function HistoryScreen() {
       : [expense.paid_by];
 
     return participantIds.map((userId) => ({
-      accent: userColorById.get(userId) || colors.primary,
+      accent: userColorById.get(userId) || DEFAULT_USER_COLOR,
       id: `participant-${expense.id}-${userId}`,
       label: profileDisplayName(userId)
     }));
@@ -814,7 +814,7 @@ const localStyles = StyleSheet.create({
   monthTitle: {
     color: colors.primaryDark,
     flexShrink: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 24,
     fontWeight: '700',
     lineHeight: 31
@@ -833,7 +833,7 @@ const localStyles = StyleSheet.create({
   },
   sectionDate: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 14,
     fontWeight: '700',
     lineHeight: 20
@@ -844,7 +844,7 @@ const localStyles = StyleSheet.create({
     minWidth: 0
   },
   detailDivider: {
-    backgroundColor: 'rgba(100,116,139,0.15)',
+    backgroundColor: colors.line,
     height: 1,
     marginLeft: 82
   },
@@ -890,7 +890,7 @@ const localStyles = StyleSheet.create({
   },
   sectionTotal: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 18,
     fontWeight: '700',
     lineHeight: 24,
@@ -911,7 +911,7 @@ const localStyles = StyleSheet.create({
   },
   summaryAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 42,
     fontWeight: '700',
     letterSpacing: 0,
@@ -927,7 +927,7 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 1.3,
+    letterSpacing: 0.4,
     lineHeight: 17,
     textTransform: 'uppercase'
   },

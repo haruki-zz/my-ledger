@@ -29,11 +29,11 @@ export function FilterControlButton({
         pressed && filterStyles.pressed
       ]}
     >
-      <Ionicons color={active ? colors.primaryDark : colors.ink} name={icon} size={19} />
+      <Ionicons color={active ? colors.secondary : colors.ink} name={icon} size={19} />
       <Text ellipsizeMode="tail" numberOfLines={1} style={[filterStyles.filterControlText, active && filterStyles.filterControlTextActive]}>
         {label}
       </Text>
-      <Ionicons color={active ? colors.primaryDark : colors.muted} name="chevron-down" size={16} />
+      <Ionicons color={active ? colors.secondary : colors.muted} name="chevron-down" size={16} />
     </Pressable>
   );
 }
@@ -64,7 +64,7 @@ export function OptionList({
             <Text ellipsizeMode="tail" numberOfLines={1} style={[filterStyles.optionText, selected && filterStyles.optionTextActive]}>
               {option.label}
             </Text>
-            {selected ? <Ionicons color={colors.primaryDark} name="checkmark" size={19} /> : null}
+            {selected ? <Ionicons color={colors.secondary} name="checkmark" size={19} /> : null}
           </Pressable>
         );
       })}
@@ -89,7 +89,7 @@ export function CategoryList({
     <View style={filterStyles.categoryDropdown}>
       <View style={filterStyles.categoryDropdownHeader}>
         <Pressable onPress={onClear} style={filterStyles.categoryAllRow}>
-          <Ionicons color={colors.primaryDark} name={selectedCategories.size === 0 ? 'remove' : 'close'} size={19} />
+          <Ionicons color={colors.secondary} name={selectedCategories.size === 0 ? 'remove' : 'close'} size={19} />
           <Text style={filterStyles.categoryAllText}>All Categories</Text>
         </Pressable>
         <Text style={filterStyles.categorySelectedText}>{selectedCategories.size} selected</Text>
@@ -125,7 +125,7 @@ const filterStyles = StyleSheet.create({
     justifyContent: 'center'
   },
   applyButtonText: {
-    color: colors.primaryDark,
+    color: colors.secondary,
     fontFamily: fontFamilies.bold,
     fontSize: 14,
     fontWeight: '700'
@@ -180,8 +180,8 @@ const filterStyles = StyleSheet.create({
     width: 20
   },
   checkboxActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary
   },
   dropdownMenuScroll: {
     maxHeight: 248
@@ -202,7 +202,7 @@ const filterStyles = StyleSheet.create({
   },
   filterControlActive: {
     backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.18)'
+    borderColor: colors.secondary
   },
   filterControlText: {
     color: colors.ink,
@@ -213,7 +213,7 @@ const filterStyles = StyleSheet.create({
     lineHeight: 18
   },
   filterControlTextActive: {
-    color: colors.primaryDark
+    color: colors.secondary
   },
   optionRow: {
     alignItems: 'center',
@@ -236,7 +236,7 @@ const filterStyles = StyleSheet.create({
     minWidth: 0
   },
   optionTextActive: {
-    color: colors.primaryDark,
+    color: colors.secondary,
     fontFamily: fontFamilies.bold,
     fontWeight: '700'
   },

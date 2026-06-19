@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { colors, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useSyncContext } from '@/src/context/SyncContext';
 import {
@@ -181,10 +181,10 @@ function pillStyle(status: string) {
   }
 
   if (status === 'failed') {
-    return { backgroundColor: colors.accent };
+    return { backgroundColor: colors.warning };
   }
 
-  return { backgroundColor: colors.primaryDark };
+  return { backgroundColor: colors.success };
 }
 
 const syncStyles = StyleSheet.create({
@@ -199,7 +199,7 @@ const syncStyles = StyleSheet.create({
   },
   statusText: {
     color: '#fff',
-    fontFamily: 'System',
+    fontFamily: fontFamilies.monoSemiBold,
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase'

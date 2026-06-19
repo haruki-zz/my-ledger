@@ -218,7 +218,7 @@ function BadgeRow({ badges, compact }: { badges: ExpenseBadge[]; compact?: boole
 const rowCardStyles = StyleSheet.create({
   amount: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 22,
     fontWeight: '700',
     letterSpacing: 0,
@@ -240,7 +240,7 @@ const rowCardStyles = StyleSheet.create({
     maxWidth: 118
   },
   badge: {
-    backgroundColor: 'rgba(15,118,110,0.10)',
+    backgroundColor: colors.tint,
     borderRadius: theme.radii.pill,
     flexShrink: 1,
     maxWidth: 116,
@@ -266,9 +266,10 @@ const rowCardStyles = StyleSheet.create({
   },
   badgeText: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.5,
     lineHeight: 15
   },
   badgeTextCompact: {
@@ -301,14 +302,14 @@ const rowCardStyles = StyleSheet.create({
   date: {
     color: colors.muted,
     flexShrink: 0,
-    fontFamily: fontFamilies.semiBold,
+    fontFamily: fontFamilies.monoSemiBold,
     fontSize: 13,
     fontWeight: '600',
     lineHeight: 18
   },
   dateSeparator: {
     color: colors.muted,
-    fontFamily: fontFamilies.semiBold,
+    fontFamily: fontFamilies.monoSemiBold,
     fontSize: 14,
     fontWeight: '600',
     lineHeight: 18
@@ -344,7 +345,7 @@ const rowCardStyles = StyleSheet.create({
   time: {
     color: colors.muted,
     flexShrink: 0,
-    fontFamily: fontFamilies.semiBold,
+    fontFamily: fontFamilies.monoSemiBold,
     fontSize: 13,
     fontWeight: '600',
     lineHeight: 18,

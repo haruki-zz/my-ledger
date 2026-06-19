@@ -34,7 +34,7 @@ type LedgerMemberState = {
 type LedgerAction = 'create' | 'join' | `switch:${string}` | `delete:${string}` | `leave:${string}`;
 
 const DEFAULT_LEDGER_NAME = 'Shared Ledger';
-const LEDGER_COLORS = ['#0F766E', '#6366F1', '#2563EB', '#C2410C', '#8B5CF6', '#14B8A6'];
+const LEDGER_COLORS = ['#CB5F43', '#8AA248', '#4F77BE', '#8A6FB6', '#D2A032', '#4E97B5'];
 
 export default function LedgerManagementScreen() {
   const { session } = useAuth();
@@ -320,7 +320,7 @@ export default function LedgerManagementScreen() {
           onChangeText={setInviteCode}
           placeholder="Example: A1B2C3D4"
           returnKeyType="done"
-          style={styles.input}
+          style={[styles.input, { fontFamily: fontFamilies.mono }]}
           submitBehavior="blurAndSubmit"
           value={inviteCode}
         />
@@ -683,7 +683,7 @@ const localStyles = StyleSheet.create({
   },
   activeCard: {
     backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.18)'
+    borderColor: colors.secondary
   },
   card: {
     backgroundColor: colors.surface,
@@ -693,7 +693,7 @@ const localStyles = StyleSheet.create({
     gap: 15,
     overflow: 'hidden',
     padding: 16,
-    shadowColor: '#0F172A',
+    shadowColor: '#2A2722',
     shadowOffset: { height: 8, width: 0 },
     shadowOpacity: 0.06,
     shadowRadius: 18,
@@ -785,16 +785,16 @@ const localStyles = StyleSheet.create({
     width: 6
   },
   infoPillText: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0,
+    letterSpacing: 0.5,
     lineHeight: 13,
     maxWidth: 170
   },
   inviteCode: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 1,
@@ -817,7 +817,7 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.extraBold,
     fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 1.2,
+    letterSpacing: 0.4,
     lineHeight: 12
   },
   inviteTextBlock: {
@@ -863,7 +863,7 @@ const localStyles = StyleSheet.create({
     gap: 8
   },
   memberChipText: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,
@@ -913,7 +913,7 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.extraBold,
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 1.3,
+    letterSpacing: 0.4,
     lineHeight: 15,
     textTransform: 'uppercase'
   },

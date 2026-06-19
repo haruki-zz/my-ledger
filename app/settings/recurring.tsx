@@ -25,6 +25,7 @@ import { BentoCard, ToggleSwitch } from '@/src/components/ui';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
 import { PRIMARY_CATEGORIES, categoryColor, categoryIconName, categoryLabel, subcategoryPresets } from '@/src/lib/categorySystem';
 import { tintFromAccent } from '@/src/lib/color';
+import { DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import {
@@ -58,7 +59,7 @@ type Draft = {
 
 type LoadMode = 'background' | 'initial' | 'refresh';
 
-const MEMBER_COLORS = [colors.primaryDark, colors.warm] as const;
+const MEMBER_COLORS = [DEFAULT_USER_COLOR, DEFAULT_PARTNER_COLOR] as const;
 const RULE_NOT_FOUND_MESSAGE = 'Fixed expense rule was not found';
 
 function sanitizeWholeNumber(value: string) {
@@ -696,7 +697,7 @@ export default function RecurringExpenseRulesScreen() {
           <View style={localStyles.memberOptionRow}>
             {members.slice(0, 2).map((member, index) => {
               const selected = member.user_id === draft.paidBy;
-              const accent = MEMBER_COLORS[index] || colors.primaryDark;
+              const accent = MEMBER_COLORS[index] || DEFAULT_PARTNER_COLOR;
               return (
                 <MemberOption
                   accent={accent}
@@ -716,7 +717,7 @@ export default function RecurringExpenseRulesScreen() {
               <Text style={localStyles.fieldLabel}>Each person&apos;s share</Text>
               <View style={localStyles.splitQuickRow}>
                 <Pressable onPress={splitEvenly} style={[localStyles.splitQuick, splitEvenlySelected && localStyles.splitQuickActive]}>
-                  <Ionicons color={splitEvenlySelected ? colors.primaryDark : colors.muted} name="checkmark" size={13} />
+                  <Ionicons color={splitEvenlySelected ? colors.secondary : colors.muted} name="checkmark" size={13} />
                   <Text style={[localStyles.splitQuickText, splitEvenlySelected && localStyles.splitQuickTextActive]}>Split evenly</Text>
                 </Pressable>
                 <Pressable onPress={clearSplit} style={localStyles.splitQuick}>
@@ -939,7 +940,7 @@ const localStyles = StyleSheet.create({
   amountInput: {
     color: colors.primaryDark,
     flex: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 18,
     fontWeight: '700',
     minHeight: 48,
@@ -961,7 +962,7 @@ const localStyles = StyleSheet.create({
   },
   balanceAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 15,
     fontWeight: '700',
     lineHeight: 20
@@ -1034,7 +1035,7 @@ const localStyles = StyleSheet.create({
   },
   clearInlineButton: {
     alignItems: 'center',
-    backgroundColor: 'rgba(17,24,39,0.05)',
+    backgroundColor: 'rgba(42,39,34,0.05)',
     borderRadius: 15,
     height: 30,
     justifyContent: 'center',
@@ -1061,12 +1062,12 @@ const localStyles = StyleSheet.create({
     width: 42
   },
   dayOptionActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary
   },
   dayOptionText: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 13,
     fontWeight: '700'
   },
@@ -1091,12 +1092,12 @@ const localStyles = StyleSheet.create({
     width: 42
   },
   dayRailItemActive: {
-    backgroundColor: colors.primaryDark,
-    borderColor: colors.primaryDark
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary
   },
   dayRailText: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 13,
     fontWeight: '700'
   },
@@ -1124,7 +1125,7 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0,
+    letterSpacing: 0.4,
     lineHeight: 15
   },
   groupCard: {
@@ -1210,7 +1211,7 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between'
   },
   modalOverlay: {
-    backgroundColor: 'rgba(15,23,42,0.24)',
+    backgroundColor: 'rgba(42,39,34,0.24)',
     flex: 1,
     justifyContent: 'flex-end',
     padding: 16
@@ -1244,14 +1245,14 @@ const localStyles = StyleSheet.create({
   },
   ownershipOptionActive: {
     backgroundColor: colors.surface,
-    shadowColor: '#0F172A',
+    shadowColor: '#2A2722',
     shadowOffset: { height: 4, width: 0 },
     shadowOpacity: 0.08,
     shadowRadius: 10,
     elevation: 2
   },
   ownershipSelector: {
-    backgroundColor: 'rgba(15,118,110,0.08)',
+    backgroundColor: colors.tint,
     borderColor: colors.line,
     borderRadius: theme.radii.pill,
     borderWidth: 1,
@@ -1332,7 +1333,7 @@ const localStyles = StyleSheet.create({
     minWidth: 0
   },
   shareInput: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 17,
     fontWeight: '700',
     minHeight: 36,
@@ -1362,7 +1363,7 @@ const localStyles = StyleSheet.create({
   },
   splitQuickActive: {
     backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.18)'
+    borderColor: colors.secondary
   },
   splitQuickRow: {
     flexDirection: 'row',
@@ -1371,12 +1372,12 @@ const localStyles = StyleSheet.create({
   },
   splitQuickText: {
     color: colors.muted,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 11,
     fontWeight: '700'
   },
   splitQuickTextActive: {
-    color: colors.primaryDark
+    color: colors.secondary
   },
   subcategoryChip: {
     backgroundColor: 'rgba(255,255,255,0.66)',
@@ -1389,8 +1390,8 @@ const localStyles = StyleSheet.create({
     paddingVertical: 7
   },
   subcategoryChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary
   },
   subcategoryChipText: {
     color: colors.muted,

@@ -143,7 +143,7 @@ function defaultUserColor() {
 const sharedStyles = StyleSheet.create({
   itemAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     flexShrink: 0,
     fontSize: 20,
     fontWeight: '700',
@@ -177,8 +177,8 @@ const sharedStyles = StyleSheet.create({
     width: 28
   },
   toggleChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary
+    backgroundColor: colors.secondary,
+    borderColor: colors.secondary
   },
   toggleDisabled: {
     opacity: 0.58
@@ -215,10 +215,10 @@ const sharedStyles = StyleSheet.create({
     paddingVertical: 3
   },
   transferUserPillText: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0,
+    letterSpacing: 0.5,
     lineHeight: 15
   },
   transferUsersRow: {

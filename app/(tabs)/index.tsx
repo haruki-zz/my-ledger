@@ -12,7 +12,7 @@ import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/compo
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { tintFromAccent } from '@/src/lib/color';
-import { buildUserColorMap } from '@/src/lib/entityColors';
+import { buildUserColorMap, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
   addMonths,
@@ -80,8 +80,8 @@ export default function DashboardScreen() {
   const userColorById = useMemo(() => (
     buildUserColorMap(userIds, currentUserId)
   ), [currentUserId, userIds]);
-  const currentUserColor = currentUserId ? userColorById.get(currentUserId) || colors.primaryDark : colors.primaryDark;
-  const otherUserColor = otherUserId ? userColorById.get(otherUserId) || colors.warm : colors.warm;
+  const currentUserColor = currentUserId ? userColorById.get(currentUserId) || DEFAULT_USER_COLOR : DEFAULT_USER_COLOR;
+  const otherUserColor = otherUserId ? userColorById.get(otherUserId) || DEFAULT_PARTNER_COLOR : DEFAULT_PARTNER_COLOR;
 
   const moveMonth = useCallback((amount: number) => {
     if (period !== 'month') {
@@ -215,7 +215,7 @@ export default function DashboardScreen() {
                 <View style={localStyles.comparisonRow}>
                   <SlidingValueText
                     formatValue={formatComparisonAmount}
-                    textStyle={[localStyles.comparisonAmountText, { color: comparisonColor(stats.comparison.direction) }]}
+                    textStyle={localStyles.comparisonAmountText}
                     value={Math.abs(stats.comparison.deltaYen)}
                     wrapperStyle={localStyles.comparisonAmountSlot}
                   />
@@ -224,11 +224,11 @@ export default function DashboardScreen() {
                     name={comparisonIcon(stats.comparison.direction)}
                     size={18}
                   />
-                  <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.comparisonText, { color: comparisonColor(stats.comparison.direction) }]}>
+                  <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
                     {stats.comparison.label}
                   </Text>
-                  <View style={localStyles.percentBadge}>
-                    <Text style={localStyles.percentBadgeText}>
+                  <View style={[localStyles.percentBadge, { backgroundColor: tintFromAccent(comparisonColor(stats.comparison.direction), 0.12) }]}>
+                    <Text style={[localStyles.percentBadgeText, { color: comparisonColor(stats.comparison.direction) }]}>
                       {formatComparisonPercentage(stats.comparison.percentage)}
                     </Text>
                   </View>
@@ -386,10 +386,14 @@ function formatComparisonPercentage(percentage: number | null) {
 
 function comparisonColor(direction: 'under' | 'over' | 'same') {
   if (direction === 'over') {
-    return '#C2410C';
+    return colors.danger;
   }
 
-  return colors.primaryDark;
+  if (direction === 'under') {
+    return colors.success;
+  }
+
+  return colors.muted;
 }
 
 function comparisonIcon(direction: 'under' | 'over' | 'same') {
@@ -431,6 +435,7 @@ const localStyles = StyleSheet.create({
     minHeight: 32
   },
   comparisonText: {
+    color: colors.ink,
     flex: 1,
     fontFamily: fontFamilies.bold,
     fontSize: 14,
@@ -439,7 +444,8 @@ const localStyles = StyleSheet.create({
     minWidth: 0
   },
   comparisonAmountText: {
-    fontFamily: fontFamilies.bold,
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 14,
     fontWeight: '700',
     lineHeight: 20,
@@ -469,7 +475,7 @@ const localStyles = StyleSheet.create({
   },
   heroAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 52,
     fontWeight: '700',
     letterSpacing: 0,
@@ -502,7 +508,7 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between'
   },
   memberAmount: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 26,
     fontWeight: '700',
     lineHeight: 32,
@@ -533,10 +539,10 @@ const localStyles = StyleSheet.create({
     paddingVertical: 3
   },
   memberNamePillText: {
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.7,
+    letterSpacing: 0.5,
     lineHeight: 14
   },
   memberSplit: {
@@ -557,7 +563,7 @@ const localStyles = StyleSheet.create({
   },
   monthLabel: {
     color: colors.ink,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 30,
     fontWeight: '700',
     lineHeight: 38,
@@ -568,7 +574,7 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 1.1,
+    letterSpacing: 0.4,
     lineHeight: 20,
     textTransform: 'uppercase'
   },
@@ -576,14 +582,12 @@ const localStyles = StyleSheet.create({
     gap: 18
   },
   percentBadge: {
-    backgroundColor: colors.tint,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4
   },
   percentBadgeText: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 13,
     fontWeight: '700',
     lineHeight: 18
@@ -637,7 +641,7 @@ const localStyles = StyleSheet.create({
   },
   userLegendText: {
     flexShrink: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,

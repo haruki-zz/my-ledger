@@ -33,7 +33,7 @@ import {
   resolveCategory,
   subcategoryPresets
 } from '@/src/lib/categorySystem';
-import { buildUserColorMap } from '@/src/lib/entityColors';
+import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, todayDateString } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { saveExpense } from '@/src/lib/ledger';
@@ -668,7 +668,7 @@ export function ExpenseForm({
               {sortedMembers.map((member) => {
                 const selected = member.user_id === paidBy;
                 const name = displayName(member.profile.display_name);
-                const accent = memberColorById.get(member.user_id) || colors.primaryDark;
+                const accent = memberColorById.get(member.user_id) || DEFAULT_USER_COLOR;
                 return (
                   <Pressable
                     accessibilityLabel={`Paid by ${name}`}
@@ -737,7 +737,7 @@ export function ExpenseForm({
             <View style={localStyles.splitRows}>
               {sortedMembers.map((member) => {
                 const name = displayName(member.profile.display_name);
-                const accent = memberColorById.get(member.user_id) || colors.primaryDark;
+                const accent = memberColorById.get(member.user_id) || DEFAULT_USER_COLOR;
                 const inputValue = formatNumberInput(amountSplitValues[member.user_id] || '');
                 return (
                   <View key={member.user_id} style={localStyles.splitRow}>
@@ -872,7 +872,7 @@ const webDateInputStyle = {
   border: `1px solid ${colors.line}`,
   borderRadius: theme.radii.control,
   color: colors.ink,
-  fontFamily: `${fontFamilies.regular}, ${fontFamilies.fallback}`,
+  fontFamily: `${fontFamilies.mono}, ${fontFamilies.fallback}`,
   fontSize: 16,
   minHeight: 48,
   outline: 'none',
@@ -895,7 +895,7 @@ const localStyles = StyleSheet.create({
   },
   amountInput: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 40,
     fontWeight: '700',
     letterSpacing: 0,
@@ -987,7 +987,7 @@ const localStyles = StyleSheet.create({
   },
   clearButton: {
     alignItems: 'center',
-    backgroundColor: 'rgba(17,24,39,0.05)',
+    backgroundColor: 'rgba(42,39,34,0.05)',
     borderRadius: 18,
     height: 36,
     justifyContent: 'center',
@@ -1001,12 +1001,12 @@ const localStyles = StyleSheet.create({
     maxWidth: 760
   },
   controlActive: {
-    borderColor: colors.primary
+    borderColor: colors.secondary
   },
   dateText: {
     color: colors.ink,
     flex: 1,
-    fontFamily: fontFamilies.semiBold,
+    fontFamily: fontFamilies.monoSemiBold,
     fontSize: 16,
     fontWeight: '600'
   },
@@ -1059,7 +1059,7 @@ const localStyles = StyleSheet.create({
   generatedNotice: {
     alignItems: 'center',
     backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.14)',
+    borderColor: colors.secondary,
     borderRadius: 10,
     borderWidth: 1,
     flexDirection: 'row',
@@ -1080,7 +1080,7 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.bold,
     fontSize: 14,
     fontWeight: '700',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
     textTransform: 'uppercase'
   },
   memberName: {
@@ -1108,7 +1108,7 @@ const localStyles = StyleSheet.create({
   },
   memberSelector: {
     alignItems: 'center',
-    backgroundColor: 'rgba(17,24,39,0.03)',
+    backgroundColor: 'rgba(42,39,34,0.03)',
     borderColor: colors.line,
     borderRadius: theme.radii.pill,
     borderWidth: 1,
@@ -1143,7 +1143,7 @@ const localStyles = StyleSheet.create({
   },
   ownershipSelector: {
     alignItems: 'center',
-    backgroundColor: 'rgba(15,118,110,0.08)',
+    backgroundColor: colors.tint,
     borderColor: colors.line,
     borderRadius: theme.radii.pill,
     borderWidth: 1,
@@ -1183,7 +1183,7 @@ const localStyles = StyleSheet.create({
   },
   subcategoryChipActive: {
     backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.22)'
+    borderColor: colors.secondary
   },
   subcategoryChipRow: {
     flexDirection: 'row',
@@ -1244,7 +1244,7 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 18
   },
   saveButtonDisabled: {
-    backgroundColor: 'rgba(17,24,39,0.18)'
+    backgroundColor: 'rgba(42,39,34,0.18)'
   },
   saveButtonText: {
     color: '#FFFFFF',
@@ -1279,7 +1279,7 @@ const localStyles = StyleSheet.create({
   },
   splitInput: {
     flex: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 22,
     fontWeight: '700',
     letterSpacing: 0,
@@ -1289,7 +1289,7 @@ const localStyles = StyleSheet.create({
   },
   splitInputPrefix: {
     color: colors.ink,
-    fontFamily: fontFamilies.semiBold,
+    fontFamily: fontFamilies.monoSemiBold,
     fontSize: 17,
     fontWeight: '600'
   },
@@ -1338,7 +1338,7 @@ const localStyles = StyleSheet.create({
   },
   totalAmount: {
     color: colors.ink,
-    fontFamily: fontFamilies.semiBold,
+    fontFamily: fontFamilies.monoSemiBold,
     fontSize: 19,
     fontWeight: '600'
   },

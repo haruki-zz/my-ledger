@@ -89,7 +89,7 @@ export function PieChart({
     <View style={chartStyles.chart}>
       <View style={chartStyles.donutWrap}>
         <Svg height={chartSize} viewBox={`0 0 ${chartSize} ${chartSize}`} width={chartSize}>
-          <Circle cx={center} cy={center} fill="rgba(15,118,110,0.08)" r={outerRadius} />
+          <Circle cx={center} cy={center} fill={colors.tint} r={outerRadius} />
           {segments.length === 1 ? (
             <AnimatedCircle
               cx={center}
@@ -124,7 +124,7 @@ export function PieChart({
           <Circle cx={center} cy={center} fill={theme.chart.donutCenter} r={innerRadius} />
           <SvgText
             fill={colors.ink}
-            fontFamily={fontFamilies.bold}
+            fontFamily={fontFamilies.monoBold}
             fontSize={16}
             fontWeight="600"
             textAnchor="middle"
@@ -231,7 +231,7 @@ function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees
 const chartStyles = StyleSheet.create({
   amountText: {
     color: colors.muted,
-    fontFamily: fontFamilies.regular,
+    fontFamily: fontFamilies.mono,
     fontSize: 12,
     lineHeight: 18,
     maxWidth: 92,
@@ -252,7 +252,7 @@ const chartStyles = StyleSheet.create({
     backgroundColor: colors.tint
   },
   categoryRowSelected: {
-    backgroundColor: 'rgba(15,118,110,0.08)'
+    backgroundColor: colors.tint
   },
   chart: {
     alignItems: 'center',
@@ -291,7 +291,7 @@ const chartStyles = StyleSheet.create({
   },
   percentageText: {
     color: colors.muted,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 18,

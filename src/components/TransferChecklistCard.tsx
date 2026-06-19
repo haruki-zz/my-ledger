@@ -292,7 +292,7 @@ const localStyles = StyleSheet.create({
   },
   amountText: {
     color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 26,
     fontWeight: '700',
     lineHeight: 32,
@@ -327,7 +327,7 @@ const localStyles = StyleSheet.create({
   netRadio: {
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderColor: colors.primaryDark,
+    borderColor: colors.secondary,
     borderRadius: 14,
     borderWidth: 2,
     height: 27,
@@ -342,7 +342,7 @@ const localStyles = StyleSheet.create({
     opacity: 0.62
   },
   netRadioDot: {
-    backgroundColor: colors.primaryDark,
+    backgroundColor: colors.secondary,
     borderRadius: 6,
     height: 12,
     width: 12
@@ -390,10 +390,10 @@ const localStyles = StyleSheet.create({
   },
   userPillText: {
     flexShrink: 1,
-    fontFamily: fontFamilies.bold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.7,
+    letterSpacing: 0.5,
     lineHeight: 14
   }
 });

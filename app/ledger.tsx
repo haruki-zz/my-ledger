@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, RefreshControl, Text, TextInput, View } f
 
 import { KEYBOARD_DONE_ACCESSORY_ID } from '@/src/components/KeyboardDoneAccessory';
 import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
-import { styles } from '@/src/components/styles';
+import { fontFamilies, styles } from '@/src/components/styles';
 import { BentoCard } from '@/src/components/ui';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
@@ -116,7 +116,7 @@ export default function LedgerScreen() {
           onChangeText={setInviteCode}
           placeholder="Example: A1B2C3D4"
           returnKeyType="done"
-          style={styles.input}
+          style={[styles.input, { fontFamily: fontFamilies.mono }]}
           submitBehavior="blurAndSubmit"
           value={inviteCode}
         />

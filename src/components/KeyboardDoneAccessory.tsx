@@ -49,7 +49,7 @@ const accessoryStyles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-end',
     backgroundColor: colors.tint,
-    borderColor: 'rgba(15,118,110,0.18)',
+    borderColor: colors.secondary,
     borderRadius: theme.radii.compact,
     borderWidth: 1,
     flexDirection: 'row',

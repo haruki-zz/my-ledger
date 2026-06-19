@@ -1,23 +1,18 @@
 import { CHART_PALETTE } from './chartPalette';
 import { categoryColor, isPrimaryCategoryId, mapLegacyCategoryToId, PRIMARY_CATEGORIES } from './categorySystem';
 
-export const DEFAULT_USER_COLOR = '#F4661B';
-export const OTHER_CATEGORY_COLOR = '#98A2B3';
+export const DEFAULT_USER_COLOR = '#B25A3C';
+export const OTHER_CATEGORY_COLOR = '#9A8F84';
 
 const USER_FALLBACK_PALETTE = [
-  '#00857C',
+  '#3F8A86',
+  '#7C4A66',
   '#4338CA',
-  '#0E7490',
   '#A16207',
   '#7F1D1D',
-  '#581C87',
-  '#14532D',
-  '#9D174D',
-  '#075985',
-  '#365314',
-  '#BE123C',
-  '#334155'
+  '#581C87'
 ] as const;
+export const DEFAULT_PARTNER_COLOR = USER_FALLBACK_PALETTE[0];
 
 const defaultCategoryColorByKey = new Map(
   PRIMARY_CATEGORIES.map((category) => [

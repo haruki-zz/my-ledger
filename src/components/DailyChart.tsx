@@ -283,13 +283,13 @@ export function DailyChart({
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={baseline} y2={baseline} />
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={midline} y2={midline} />
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={PADDING_TOP} y2={PADDING_TOP} />
-        <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} x={4} y={PADDING_TOP + 4}>
+        <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} x={4} y={PADDING_TOP + 4}>
           {formatCompactYen(maxAmount)}
         </SvgText>
-        <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} x={4} y={midline + 4}>
+        <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} x={4} y={midline + 4}>
           {formatCompactYen(maxAmount / 2)}
         </SvgText>
-        <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} x={4} y={baseline + 4}>
+        <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} x={4} y={baseline + 4}>
           ¥0
         </SvgText>
 
@@ -327,21 +327,21 @@ export function DailyChart({
 
         {selectedPoint && tooltip ? (
           <>
-            <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={7} stroke="rgba(15,118,110,0.26)" strokeWidth={4} />
+            <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={7} stroke={colors.secondary} strokeWidth={4} />
             <Circle cx={selectedPoint.x} cy={selectedPoint.topY} fill={colors.surface} r={3} stroke={currentUserColor} strokeWidth={2} />
             <Path d={`M ${selectedPoint.x - 6} ${tooltip.y + tooltip.height} L ${selectedPoint.x} ${tooltip.y + tooltip.height + 7} L ${selectedPoint.x + 6} ${tooltip.y + tooltip.height} Z`} fill="#172033" />
             <Rect fill="#172033" height={tooltip.height} rx={8} width={tooltip.width} x={tooltip.x} y={tooltip.y} />
-            <SvgText fill="rgba(255,255,255,0.72)" fontFamily={fontFamilies.regular} fontSize={10} x={tooltip.x + 10} y={tooltip.y + 16}>
+            <SvgText fill="rgba(255,255,255,0.72)" fontFamily={fontFamilies.mono} fontSize={10} x={tooltip.x + 10} y={tooltip.y + 16}>
               {formatTooltipDate(selectedPoint.date)}
             </SvgText>
-            <SvgText fill="#FFFFFF" fontFamily={fontFamilies.bold} fontSize={15} fontWeight="700" x={tooltip.x + 10} y={tooltip.y + 36}>
+            <SvgText fill="#FFFFFF" fontFamily={fontFamilies.monoBold} fontSize={15} fontWeight="700" x={tooltip.x + 10} y={tooltip.y + 36}>
               {formatYen(selectedPoint.totalAmountYen)}
             </SvgText>
-            <SvgText fill="rgba(255,255,255,0.76)" fontFamily={fontFamilies.regular} fontSize={9} x={tooltip.x + 10} y={tooltip.y + 53}>
+            <SvgText fill="rgba(255,255,255,0.76)" fontFamily={fontFamilies.mono} fontSize={9} x={tooltip.x + 10} y={tooltip.y + 53}>
               {displayName(currentUserName)} {formatCompactYen(selectedPoint.currentAmount)}
             </SvgText>
             {otherUserId ? (
-              <SvgText fill="rgba(255,255,255,0.76)" fontFamily={fontFamilies.regular} fontSize={9} x={tooltip.x + 10} y={tooltip.y + 66}>
+              <SvgText fill="rgba(255,255,255,0.76)" fontFamily={fontFamilies.mono} fontSize={9} x={tooltip.x + 10} y={tooltip.y + 66}>
                 {displayName(otherUserName)} {formatCompactYen(selectedPoint.otherAmount)}
               </SvgText>
             ) : null}
@@ -349,7 +349,7 @@ export function DailyChart({
         ) : null}
 
         {labelIndexes.map((index) => (
-          <SvgText fill={colors.muted} fontFamily={fontFamilies.regular} fontSize={10} key={series[index].date} textAnchor="middle" x={points[index].x} y={HEIGHT - 10}>
+          <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} key={series[index].date} textAnchor="middle" x={points[index].x} y={HEIGHT - 10}>
             {series[index].label}
           </SvgText>
         ))}
