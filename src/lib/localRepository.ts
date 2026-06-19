@@ -353,6 +353,14 @@ export async function refreshProfiles(userIds: string[]) {
   return profiles;
 }
 
+export async function cacheProfile(profile: Profile) {
+  const db = await getLocalDb();
+  await withLocalTransaction(async () => {
+    await upsertProfile(db, profile);
+  });
+  emitLedgerDataChanged();
+}
+
 export async function getCachedExpenses(ledgerId: string): Promise<Expense[]> {
   const db = await getLocalDb();
   const rows = await db.getAllAsync<LocalExpenseRow>(

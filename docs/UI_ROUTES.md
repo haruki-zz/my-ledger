@@ -15,8 +15,7 @@
 | Settings | `/(tabs)/settings` | `app/(tabs)/settings.tsx` | Tab 3 | 账户、账本、固定支出、同步状态入口 |
 | New expense | `/expenses/new` | `app/expenses/new.tsx` | Floating `+` button；modal presentation | 新增支出 |
 | Edit expense | `/expenses/[id]` | `app/expenses/[id].tsx` | History row tap/swipe/context menu | 编辑指定支出 |
-| Account settings | `/settings/account` | `app/settings/account.tsx` | Settings account card | 修改 display name、查看邮箱、退出登录 |
-| Ledger management | `/settings/ledgers` | `app/settings/ledgers.tsx` | Settings ledgers panel / Account page | 创建、加入、切换、删除或退出账本 |
+| Ledger management | `/settings/ledgers` | `app/settings/ledgers.tsx` | Settings ledgers panel | 创建、加入、切换、删除或退出账本 |
 | Fixed expense | `/settings/recurring` | `app/settings/recurring.tsx` | Settings Fixed Expense panel | 新建固定支出规则 |
 | Edit fixed expense | `/settings/recurring?ruleId=<id>` | `app/settings/recurring.tsx` | Settings fixed expense rule row | 编辑/删除指定固定支出规则 |
 | Sync status | `/settings/sync` | `app/settings/sync.tsx` | Settings sync row；conflict banner | 查看和处理离线同步队列 |
@@ -51,7 +50,6 @@ Guarded detail pages redirect to:
 | History expense row tap | `/expenses/[id]` |
 | History swipe right | `/expenses/[id]` |
 | History long-press menu "Edit" | `/expenses/[id]` |
-| Settings account card | `/settings/account` |
 | Settings Manage ledgers row | `/settings/ledgers` |
 | Settings Add fixed expense row | `/settings/recurring` |
 | Settings fixed expense rule row | `/settings/recurring?ruleId=<id>` |
@@ -98,7 +96,7 @@ Guarded detail pages redirect to:
 
 ### `/(tabs)/settings`
 
-- Account card with sign out.
+- Account card with inline display name editing and sign out.
 - Active ledger panel with invite code sharing and quick switch rows.
 - Fixed Expense panel with active/paused counts, expandable rules, rule toggles.
 - Sync Status row showing pending/failed/conflict counts.
@@ -114,13 +112,6 @@ Both render `ExpenseForm`:
 - Shared split amount controls.
 - Date and note inputs.
 - Save action; edit page loads existing expense.
-
-### `/settings/account`
-
-- Display name edit and save.
-- Read-only email display.
-- Sign out with unsynced-change protection.
-- Link to `/settings/ledgers`.
 
 ### `/settings/ledgers`
 

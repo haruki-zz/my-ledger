@@ -96,7 +96,6 @@ export default function RootLayout() {
             <Stack.Screen name="ledger" options={{ title: 'Shared Ledger' }} />
             <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             {/* Settings detail screens */}
-            <Stack.Screen name="settings/account" options={{ headerLeft: settingsHeaderLeft, title: 'Account' }} />
             <Stack.Screen name="settings/ledgers" options={{ headerLeft: settingsHeaderLeft, title: 'Ledgers' }} />
             <Stack.Screen
               name="settings/recurring"

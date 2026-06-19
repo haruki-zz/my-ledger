@@ -1,6 +1,7 @@
 import { supabase } from '@/src/lib/supabase';
 import { isLocalDbUnavailableError } from '@/src/lib/localDb';
 import {
+  cacheProfile,
   cacheTransferItems,
   deleteLocalExpense,
   deleteLocalRecurringRule,
@@ -50,13 +51,24 @@ export async function updateMyProfile(displayName: string) {
     throw new Error('Please sign in first');
   }
 
-  const { error } = await supabase
+  const normalizedDisplayName = displayName.trim() || 'User';
+  const { data, error } = await supabase
     .from('profiles')
-    .update({ display_name: displayName.trim() || 'User' })
-    .eq('id', userId);
+    .update({ display_name: normalizedDisplayName })
+    .eq('id', userId)
+    .select('*')
+    .single();
 
   if (error) {
     throw error;
+  }
+
+  try {
+    await cacheProfile(data as Profile);
+  } catch (cacheError) {
+    if (!isLocalDbUnavailableError(cacheError)) {
+      throw cacheError;
+    }
   }
 }
 

@@ -11,7 +11,6 @@
     "app/(tabs)/settings.tsx",
     "app/expenses/new.tsx",
     "app/expenses/[id].tsx",
-    "app/settings/account.tsx",
     "app/settings/ledgers.tsx",
     "app/settings/recurring.tsx",
     "app/settings/sync.tsx",

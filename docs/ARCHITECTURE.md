@@ -75,7 +75,7 @@ Root stack:
 - `/(tabs)` authenticated main app.
 - `/expenses/new` modal-style new expense screen.
 - `/expenses/[id]` edit expense screen.
-- `/settings/account`, `/settings/ledgers`, `/settings/recurring`, `/settings/sync` settings detail screens.
+- `/settings/ledgers`, `/settings/recurring`, `/settings/sync` settings detail screens.
 
 Main tabs:
 

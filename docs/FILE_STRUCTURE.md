@@ -31,7 +31,6 @@
 | `app/(tabs)/settings.tsx` | Settings hub：账户、当前账本、固定支出摘要、同步状态入口、退出登录。 | `ui`, auth/ledger/sync contexts, `useRequiredLedger`, category/color/format/ledger helpers |
 | `app/expenses/new.tsx` | 新增支出页面；加载账本、成员、固定支出规则、profiles 后渲染 `ExpenseForm`。 | `ExpenseForm`, `styles`, auth/ledger contexts, `ledger` APIs, database types |
 | `app/expenses/[id].tsx` | 编辑支出页面；校验 expense 属于当前账本后渲染 `ExpenseForm`。 | `ExpenseForm`, `styles`, auth/ledger contexts, `ledger` APIs, database types |
-| `app/settings/account.tsx` | 账户设置：展示邮箱、更新 display name、退出登录、跳到账本管理。 | keyboard helpers, `styles`, `ui`, auth/sync contexts, `useRequiredLedger`, `keyboard`, `ledger` APIs |
 | `app/settings/ledgers.tsx` | 账本管理：当前/其他账本、成员预览、创建、加入、切换、删除或退出。 | keyboard helpers, `styles`, auth/ledger contexts, `color`, `format`, `keyboard`, `ledger` APIs, database types |
 | `app/settings/recurring.tsx` | Fixed Expense 编辑器；新建/编辑/删除每月固定支出规则，生成当月支出。 | keyboard helpers, `styles`, `ui`, `useRequiredLedger`, category/color/format/keyboard/ledger/localEvents/recurring helpers, database types |
 | `app/settings/sync.tsx` | Sync Status：展示本地同步队列、retry/use local/discard、SQLite retry。 | `styles`, `ui`, `SyncContext`, `localDb`, `localRepository`, `syncQueue` types |

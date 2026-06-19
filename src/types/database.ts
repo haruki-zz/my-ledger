@@ -1,8 +1,8 @@
-export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type ExpenseOwnership = 'personal' | 'shared';
 
-export type Database = {
+type Database = {
   public: {
     Tables: {
       profiles: {
@@ -436,7 +436,6 @@ export type LedgerCategory = Database['public']['Tables']['ledger_categories']['
 export type RecurringExpenseRule = Database['public']['Tables']['recurring_expense_rules']['Row'];
 export type ExpenseRow = Database['public']['Tables']['expenses']['Row'];
 export type ExpenseSplitRow = Database['public']['Tables']['expense_splits']['Row'];
-export type TransferChecklistCompletionRow = Database['public']['Tables']['transfer_checklist_completions']['Row'];
 export type TransferChecklistItemRow = Database['public']['Functions']['get_open_transfer_items']['Returns'][number];
 
 export type LedgerMemberProfile = LedgerMember & {

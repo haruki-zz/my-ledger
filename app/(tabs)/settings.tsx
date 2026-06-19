@@ -10,6 +10,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type ColorValue,
   type StyleProp,
@@ -18,7 +19,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { ToggleSwitch } from '@/src/components/ui';
+import { IconButton, ToggleSwitch } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { useSyncContext } from '@/src/context/SyncContext';
@@ -33,6 +34,7 @@ import {
   getLedgerMembers,
   getRecurringExpenseRules,
   saveRecurringExpenseRule,
+  updateMyProfile,
   type LedgerMembership
 } from '@/src/lib/ledger';
 import type { LedgerMemberProfile, RecurringExpenseRule } from '@/src/types/database';
@@ -168,6 +170,28 @@ export default function SettingsScreen() {
     }
   }
 
+  async function saveDisplayName(nextName: string) {
+    if (!currentUserId || !currentMember) {
+      Alert.alert('Save Failed', 'Please wait for your account details to load.');
+      return false;
+    }
+
+    const normalizedDisplayName = nextName.trim() || 'User';
+
+    try {
+      await updateMyProfile(nextName);
+      setMembers((current) => current.map((member) => (
+        member.user_id === currentUserId
+          ? { ...member, profile: { ...member.profile, display_name: normalizedDisplayName } }
+          : member
+      )));
+      return true;
+    } catch (saveError) {
+      Alert.alert('Save Failed', getErrorMessage(saveError));
+      return false;
+    }
+  }
+
   async function toggleRecurringRule(rule: RecurringExpenseRule) {
     if (!ledgerId || togglingRuleIds.has(rule.id)) {
       return;
@@ -264,6 +288,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       style={localStyles.page}
       contentContainerStyle={[localStyles.content, { paddingTop: insets.top + 28 }]}
@@ -273,10 +298,12 @@ export default function SettingsScreen() {
       {error || detailsError ? <Text style={styles.error}>{error || detailsError}</Text> : null}
 
       <AccountCard
+        editableName={currentMember?.profile.display_name ?? ''}
         email={accountEmail}
+        editingDisabled={!currentMember}
         initials={initials}
         name={accountName}
-        onEdit={() => router.push('/settings/account')}
+        onSaveName={saveDisplayName}
         onSignOut={signOut}
       />
 
@@ -322,35 +349,125 @@ export default function SettingsScreen() {
 }
 
 function AccountCard({
+  editableName,
+  editingDisabled,
   email,
   initials,
   name,
-  onEdit,
+  onSaveName,
   onSignOut
 }: {
+  editableName: string;
+  editingDisabled: boolean;
   email: string;
   initials: string;
   name: string;
-  onEdit: () => void;
+  onSaveName: (nextName: string) => Promise<boolean>;
   onSignOut: () => void;
 }) {
+  const [draft, setDraft] = useState(editableName);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  function startEditing() {
+    if (editingDisabled) {
+      return;
+    }
+    setDraft(editableName);
+    setEditing(true);
+  }
+
+  async function saveName() {
+    if (saving) {
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const saved = await onSaveName(draft);
+      if (saved) {
+        setEditing(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelEditing() {
+    if (saving) {
+      return;
+    }
+    setDraft(editableName);
+    setEditing(false);
+  }
+
   return (
     <Card>
       <View style={localStyles.accountRow}>
-        <Pressable onPress={onEdit} style={({ pressed }) => [localStyles.accountPressable, pressed && localStyles.pressed]}>
+        <Pressable
+          disabled={editing || editingDisabled}
+          onPress={startEditing}
+          style={({ pressed }) => [
+            localStyles.accountPressable,
+            editingDisabled && localStyles.disabled,
+            pressed && !editingDisabled && localStyles.pressed
+          ]}
+        >
           <Avatar initials={initials} />
           <View style={localStyles.accountText}>
-            <Text numberOfLines={1} style={localStyles.accountName}>{name}</Text>
+            {editing ? (
+              <TextInput
+                autoFocus
+                editable={!saving}
+                onChangeText={setDraft}
+                onSubmitEditing={() => {
+                  void saveName();
+                }}
+                returnKeyType="done"
+                style={localStyles.accountNameInput}
+                submitBehavior="blurAndSubmit"
+                value={draft}
+              />
+            ) : (
+              <View style={localStyles.accountNameRow}>
+                <Text numberOfLines={1} style={localStyles.accountName}>{name}</Text>
+                {!editingDisabled ? <Ionicons color={colors.subtle} name="pencil-outline" size={14} /> : null}
+              </View>
+            )}
             <Text numberOfLines={1} style={localStyles.accountEmail}>{email}</Text>
           </View>
         </Pressable>
 
-        <Pressable onPress={onSignOut} style={({ pressed }) => [localStyles.signOutButton, pressed && localStyles.pressed]}>
-          <View style={localStyles.signOutIcon}>
-            <Ionicons color={colors.danger} name="log-out-outline" size={14} />
+        {editing ? (
+          <View style={localStyles.accountEditActions}>
+            <IconButton
+              accessibilityLabel="Save display name"
+              disabled={saving}
+              icon="checkmark"
+              onPress={() => {
+                void saveName();
+              }}
+              size="sm"
+              tone="primary"
+              variant="solid"
+            />
+            <IconButton
+              accessibilityLabel="Cancel display name edit"
+              disabled={saving}
+              icon="close"
+              onPress={cancelEditing}
+              size="sm"
+              tone="neutral"
+            />
           </View>
-          <Text style={localStyles.signOutText}>Sign out</Text>
-        </Pressable>
+        ) : (
+          <Pressable onPress={onSignOut} style={({ pressed }) => [localStyles.signOutButton, pressed && localStyles.pressed]}>
+            <View style={localStyles.signOutIcon}>
+              <Ionicons color={colors.danger} name="log-out-outline" size={14} />
+            </View>
+            <Text style={localStyles.signOutText}>Sign out</Text>
+          </Pressable>
+        )}
       </View>
     </Card>
   );
@@ -801,10 +918,34 @@ const localStyles = StyleSheet.create({
   },
   accountName: {
     color: colors.ink,
+    flexShrink: 1,
     fontFamily: fontFamilies.bold,
     fontSize: 17,
     fontWeight: '700',
     lineHeight: 22
+  },
+  accountNameInput: {
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.control,
+    borderWidth: 1,
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 16,
+    fontWeight: '700',
+    minHeight: 38,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
+  accountNameRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0
+  },
+  accountEditActions: {
+    flexDirection: 'row',
+    gap: 8
   },
   accountPressable: {
     alignItems: 'center',
