@@ -1,6 +1,6 @@
 export type SyncEntityType = 'expense' | 'category' | 'recurring_rule';
 export type SyncAction = 'create' | 'edit' | 'delete';
-export type SyncStatus = 'queued' | 'syncing' | 'failed' | 'conflict';
+type SyncStatus = 'queued' | 'syncing' | 'failed' | 'conflict';
 
 export type SyncQueueRecord<TPayload = unknown> = {
   sequence: number;
@@ -23,7 +23,7 @@ export type QueueMergeDecision =
   | { kind: 'update'; sequence: number; action: SyncAction }
   | { kind: 'drop'; sequence: number | null };
 
-export const MAX_SYNC_RETRIES = 5;
+const MAX_SYNC_RETRIES = 5;
 
 export function mergeQueueAction(
   existing: Pick<SyncQueueRecord, 'sequence' | 'action'> | null,
@@ -56,7 +56,7 @@ export function mergeQueueAction(
   return { kind: 'update', sequence: existing.sequence, action: nextAction };
 }
 
-export function retryDelayMs(retryCount: number) {
+function retryDelayMs(retryCount: number) {
   const baseDelay = Math.min(60_000, 1_000 * 2 ** Math.max(0, retryCount));
   const jitter = Math.floor(Math.random() * 400);
   return baseDelay + jitter;

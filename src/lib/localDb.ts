@@ -13,7 +13,7 @@ let localDbUnavailableError: LocalDbUnavailableError | null = null;
 // only one BEGIN…COMMIT runs at a time on the single db connection.
 let txQueue: Promise<void> = Promise.resolve();
 
-export class LocalDbUnavailableError extends Error {
+class LocalDbUnavailableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'LocalDbUnavailableError';

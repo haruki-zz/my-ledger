@@ -41,6 +41,7 @@
     "@types/react": "~19.2.2",
     "eslint": "^9.39.1",
     "eslint-config-expo": "^56.0.4",
+    "knip": "^6.17.1",
     "typescript": "~6.0.3",
     "vitest": "^4.1.8"
   }

@@ -2,7 +2,6 @@ import { buildUserColorMap, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './e
 import { categoryColor, categoryLabel, resolveCategory } from './categorySystem';
 import type { Expense, RecurringExpenseRule } from '../types/database';
 
-export type DashboardRange = 'all' | 'current' | 'other';
 export type DashboardPeriod = 'today' | 'week' | 'month';
 
 export type CategoryStat = {
@@ -13,7 +12,7 @@ export type CategoryStat = {
   sourceCategories?: string[];
 };
 
-export type DailyStat = {
+type DailyStat = {
   date: string;
   label: string;
   amountYen: number;
@@ -26,14 +25,14 @@ export type DailyUserStat = {
   totalAmountYen: number;
 };
 
-export type MemberPeriodStat = {
+type MemberPeriodStat = {
   userId: string;
   amountYen: number;
   percentage: number;
   color: string;
 };
 
-export type ComparisonStat = {
+type ComparisonStat = {
   previousTotalYen: number;
   deltaYen: number;
   percentage: number | null;
@@ -52,13 +51,7 @@ export type DashboardDateRange = {
   comparisonLabel: string;
 };
 
-export type MonthlyCategoryTrendStat = {
-  monthKey: string;
-  label: string;
-  amountYen: number;
-};
-
-export type DashboardStats = {
+type DashboardStats = {
   totalYen: number;
   count: number;
   categories: CategoryStat[];
@@ -72,8 +65,8 @@ export type DashboardPeriodStats = DashboardStats & {
   memberTotals: MemberPeriodStat[];
 };
 
-export const DASHBOARD_CATEGORY_LIMIT = 5;
-export const DASHBOARD_OTHER_CATEGORY_COLOR = OTHER_CATEGORY_COLOR;
+const DASHBOARD_CATEGORY_LIMIT = 5;
+const DASHBOARD_OTHER_CATEGORY_COLOR = OTHER_CATEGORY_COLOR;
 
 const monthFormatter = new Intl.DateTimeFormat('en', {
   month: 'short',
@@ -92,7 +85,7 @@ function padDatePart(value: number) {
   return String(value).padStart(2, '0');
 }
 
-export function toMonthKey(date: Date) {
+function toMonthKey(date: Date) {
   return [date.getFullYear(), padDatePart(date.getMonth() + 1)].join('-');
 }
 
@@ -154,18 +147,10 @@ export function monthStartDateString(monthKey: string) {
   return `${monthKey}-01`;
 }
 
-export function monthEndDateString(monthKey: string) {
+function monthEndDateString(monthKey: string) {
   const [year, month] = parseMonthKey(monthKey);
   const date = new Date(year, month, 0);
   return formatDateString(date);
-}
-
-export function dashboardEndDateString(monthKey: string) {
-  if (monthKey === currentMonthKey()) {
-    return formatDateString(new Date());
-  }
-
-  return monthEndDateString(monthKey);
 }
 
 export function resolveDashboardDateRange(
@@ -293,107 +278,7 @@ export function buildDashboardPeriodStats(input: {
   };
 }
 
-export function buildDashboardStats(input: {
-  expenses: Expense[];
-  monthKey: string;
-  endDateString: string;
-  range: DashboardRange;
-  currentUserId: string | null;
-  otherUserId: string | null;
-}): DashboardStats {
-  const amountsByCategory = new Map<string, number>();
-  const amountsByDate = new Map<string, number>();
-  let totalYen = 0;
-  let count = 0;
-
-  for (const expense of input.expenses) {
-    const amountYen = amountForRange(expense, input.range, input.currentUserId, input.otherUserId);
-    if (amountYen <= 0) {
-      continue;
-    }
-
-    totalYen += amountYen;
-    count += 1;
-    const categoryId = expenseCategoryId(expense);
-    amountsByCategory.set(categoryId, (amountsByCategory.get(categoryId) || 0) + amountYen);
-    amountsByDate.set(expense.spent_on, (amountsByDate.get(expense.spent_on) || 0) + amountYen);
-  }
-
-  const categories = [...amountsByCategory.entries()]
-    .sort(compareCategoryEntries)
-    .map(([categoryId, amountYen]) => ({
-      category: categoryLabel(categoryId),
-      amountYen,
-      percentage: totalYen > 0 ? (amountYen / totalYen) * 100 : 0,
-      color: categoryColor(categoryId),
-      sourceCategories: [categoryId]
-    }));
-
-  return {
-    totalYen,
-    count,
-    categories,
-    dailySeries: buildDailySeries(input.monthKey, input.endDateString, amountsByDate)
-  };
-}
-
-export function buildCategoryMonthlyTrend(input: {
-  expenses: Expense[];
-  category: string;
-  endMonthKey: string;
-  months: number;
-  range: DashboardRange;
-  currentUserId: string | null;
-  otherUserId: string | null;
-}): MonthlyCategoryTrendStat[] {
-  return buildCategoryMonthlyTrendForCategories({
-    ...input,
-    categories: [resolveCategory({ category: input.category }).categoryId]
-  });
-}
-
-export function buildCategoryMonthlyTrendForCategories(input: {
-  expenses: Expense[];
-  categories: string[];
-  endMonthKey: string;
-  months: number;
-  range: DashboardRange;
-  currentUserId: string | null;
-  otherUserId: string | null;
-}): MonthlyCategoryTrendStat[] {
-  const monthCount = Math.max(1, input.months);
-  const monthKeys = Array.from({ length: monthCount }, (_, index) => (
-    addMonths(input.endMonthKey, index - monthCount + 1)
-  ));
-  const amountsByMonth = new Map(monthKeys.map((monthKey) => [monthKey, 0]));
-  const categorySet = new Set(input.categories);
-
-  for (const expense of input.expenses) {
-    if (!categorySet.has(expenseCategoryId(expense))) {
-      continue;
-    }
-
-    const monthKey = monthKeyFromDateString(expense.spent_on);
-    if (!amountsByMonth.has(monthKey)) {
-      continue;
-    }
-
-    const amountYen = amountForRange(expense, input.range, input.currentUserId, input.otherUserId);
-    if (amountYen <= 0) {
-      continue;
-    }
-
-    amountsByMonth.set(monthKey, (amountsByMonth.get(monthKey) || 0) + amountYen);
-  }
-
-  return monthKeys.map((monthKey) => ({
-    monthKey,
-    label: formatShortMonthLabel(monthKey),
-    amountYen: amountsByMonth.get(monthKey) || 0
-  }));
-}
-
-export function buildDashboardCategoryStats(input: {
+function buildDashboardCategoryStats(input: {
   expenses: Expense[];
   totalYen: number;
 }): CategoryStat[] {
@@ -470,7 +355,7 @@ export function buildDashboardDailyUserSeriesForCategories(input: {
   });
 }
 
-export function buildDashboardDailyUserSeries(input: {
+function buildDashboardDailyUserSeries(input: {
   expenses: Expense[];
   startDateString: string;
   endDateString: string;
@@ -503,24 +388,6 @@ export function buildDashboardDailyUserSeries(input: {
     amountsByUserId: amountsByDate.get(date) || {},
     totalAmountYen: totalsByDate.get(date) || 0
   }));
-}
-
-export function amountForRange(
-  expense: Expense,
-  range: DashboardRange,
-  currentUserId: string | null,
-  otherUserId: string | null
-) {
-  if (range === 'all') {
-    return expense.amount_yen;
-  }
-
-  const userId = range === 'current' ? currentUserId : otherUserId;
-  if (!userId) {
-    return 0;
-  }
-
-  return amountForUser(expense, userId);
 }
 
 export function amountForUser(expense: Expense, userId: string) {

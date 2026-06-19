@@ -107,7 +107,7 @@ export type PrimaryCategory = (typeof PRIMARY_CATEGORIES)[number];
 export type PrimaryCategoryId = PrimaryCategory['id'];
 export type CategoryIconName = ComponentProps<typeof Ionicons>['name'];
 
-export const DEFAULT_CATEGORY_ID: PrimaryCategoryId = 'other';
+const DEFAULT_CATEGORY_ID: PrimaryCategoryId = 'other';
 export const DEFAULT_CATEGORY_SPLIT_RATIO = [50, 50] as const;
 
 const CATEGORY_BY_ID = new Map<PrimaryCategoryId, PrimaryCategory>(
@@ -175,22 +175,8 @@ export function categoryColor(categoryId: string | null | undefined) {
   return getPrimaryCategory(categoryId).color;
 }
 
-export function categorySplitRatio(categoryId: string | null | undefined): readonly [number, number] {
-  return getPrimaryCategory(categoryId).splitRatio;
-}
-
 export function subcategoryPresets(categoryId: string | null | undefined) {
   return [...getPrimaryCategory(categoryId).subcategories];
-}
-
-export function getDefaultCategorySettings() {
-  return PRIMARY_CATEGORIES.map((category) => ({
-    categoryId: category.id,
-    categoryName: category.label,
-    splitRatioA: category.splitRatio[0],
-    splitRatioB: category.splitRatio[1],
-    sortOrder: category.sortOrder
-  }));
 }
 
 export function resolveCategory(input: {
@@ -247,14 +233,6 @@ export function mapLegacyCategoryToId(category: string | null | undefined): Prim
   return DEFAULT_CATEGORY_ID;
 }
 
-export function categoryDisplayName(input: {
-  categoryId?: string | null;
-  category?: string | null;
-  subcategory?: string | null;
-}) {
-  return resolveCategory(input).label;
-}
-
 export function categoryWithSubcategory(input: {
   categoryId?: string | null;
   category?: string | null;
@@ -264,7 +242,7 @@ export function categoryWithSubcategory(input: {
   return resolved.subcategory ? `${resolved.label} · ${resolved.subcategory}` : resolved.label;
 }
 
-export function normalizeOptionalText(value: string | null | undefined) {
+function normalizeOptionalText(value: string | null | undefined) {
   const trimmed = value?.trim() || '';
   return trimmed || null;
 }

@@ -36,11 +36,6 @@ export function todayDateString() {
   ].join('-');
 }
 
-export function currentMonthPrefix() {
-  const date = new Date();
-  return [date.getFullYear(), padDatePart(date.getMonth() + 1)].join('-');
-}
-
 export function displayName(name: string | null | undefined) {
   const value = name?.trim();
   return value || 'Unnamed user';

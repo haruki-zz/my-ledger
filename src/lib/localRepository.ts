@@ -120,7 +120,7 @@ export function isLocalRepositoryOnline() {
   return online;
 }
 
-export function requestSyncDrain() {
+function requestSyncDrain() {
   drainRequester?.();
 }
 
@@ -596,17 +596,6 @@ export async function deleteLocalExpense(expenseId: string) {
   requestSyncDrain();
 }
 
-export async function getCachedLedgerCategories(ledgerId: string): Promise<LedgerCategory[]> {
-  const db = await getLocalDb();
-  return db.getAllAsync<LedgerCategory>(
-    `SELECT id, ledger_id, category_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at
-     FROM ledger_categories
-     WHERE ledger_id = ? AND deleted_locally = 0
-     ORDER BY sort_order ASC, category_id ASC`,
-    ledgerId
-  );
-}
-
 export async function refreshLedgerCategories(ledgerId: string) {
   if (!online) {
     return;
@@ -846,94 +835,6 @@ export async function deleteLocalRecurringRule(ruleId: string) {
   });
 
   emitLedgerDataChanged(rule.ledger_id);
-  requestSyncDrain();
-}
-
-export async function saveLocalLedgerCategory(input: {
-  ledgerId: string;
-  categoryId: string;
-  categoryName?: string | null;
-  splitRatioA: number;
-  splitRatioB: number;
-  sortOrder: number;
-}) {
-  const db = await getLocalDb();
-  const now = new Date().toISOString();
-  const primaryCategory = getPrimaryCategory(input.categoryId);
-  const categoryName = input.categoryName || primaryCategory.label;
-  const existing = await db.getFirstAsync<LocalCategoryRow>(
-    'SELECT * FROM ledger_categories WHERE ledger_id = ? AND category_id = ?',
-    input.ledgerId,
-    primaryCategory.id
-  );
-  const categoryId = existing?.id || createUuid();
-  const action: SyncAction = existing && existing.deleted_locally === 0 ? 'edit' : 'create';
-  const baseUpdatedAt = syncedBaseUpdatedAt(existing);
-  const payload: SaveCategoryPayload = {
-    id: categoryId,
-    ledgerId: input.ledgerId,
-    categoryId: primaryCategory.id,
-    categoryName,
-    splitRatioA: input.splitRatioA,
-    splitRatioB: input.splitRatioB,
-    sortOrder: input.sortOrder
-  };
-
-  await withLocalTransaction(async () => {
-    await db.runAsync(
-      `INSERT OR REPLACE INTO ledger_categories (
-         id, ledger_id, category_id, category_name, split_ratio_a, split_ratio_b, sort_order, created_at, updated_at,
-         local_status, deleted_locally, base_updated_at, last_synced_updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
-      categoryId,
-      input.ledgerId,
-      primaryCategory.id,
-      categoryName,
-      input.splitRatioA,
-      input.splitRatioB,
-      input.sortOrder,
-      existing?.created_at || now,
-      now,
-      baseUpdatedAt,
-      syncedBaseUpdatedAt(existing)
-    );
-    await enqueueMutation(db, 'category', categoryId, input.ledgerId, action, payload, baseUpdatedAt);
-  });
-
-  emitLedgerDataChanged(input.ledgerId);
-  requestSyncDrain();
-  return (await getCachedLedgerCategories(input.ledgerId)).find((category) => category.id === categoryId);
-}
-
-export async function deleteLocalLedgerCategory(ledgerId: string, categoryName: string) {
-  const db = await getLocalDb();
-  const category = await db.getFirstAsync<LocalCategoryRow>(
-    'SELECT * FROM ledger_categories WHERE ledger_id = ? AND category_name = ? AND deleted_locally = 0',
-    ledgerId,
-    categoryName
-  );
-  if (!category) {
-    throw new Error('Category is not available locally');
-  }
-
-  const now = new Date().toISOString();
-  await withLocalTransaction(async () => {
-    await db.runAsync(
-      `UPDATE ledger_categories
-       SET local_status = 'pending', deleted_locally = 1, updated_at = ?, base_updated_at = ?
-       WHERE id = ?`,
-      now,
-      syncedBaseUpdatedAt(category),
-      category.id
-    );
-    await enqueueMutation(db, 'category', category.id, ledgerId, 'delete', {
-      id: category.id,
-      ledgerId,
-      categoryName
-    }, syncedBaseUpdatedAt(category));
-  });
-
-  emitLedgerDataChanged(ledgerId);
   requestSyncDrain();
 }
 

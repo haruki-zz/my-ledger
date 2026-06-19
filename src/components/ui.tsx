@@ -29,8 +29,7 @@ import {
   ExpenseRowCardContent,
   type ExpenseRowCardContentData
 } from '@/src/components/ExpenseRowCardContent';
-import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { tintFromAccent } from '@/src/lib/color';
+import { colors, fontFamilies, theme } from '@/src/components/styles';
 
 export type { ExpenseBadge } from '@/src/components/ExpenseRowCardContent';
 
@@ -45,14 +44,6 @@ type BentoVariant = 'default' | 'hero' | 'chart' | 'list' | 'form' | 'danger';
 
 type BentoCardProps = GlassSurfaceProps & {
   variant?: BentoVariant;
-};
-
-type CardTopCapProps = {
-  accent?: string;
-  height?: number;
-  insetHorizontal?: number;
-  insetTop?: number;
-  spacing?: number;
 };
 
 export type PillTabOption<T extends string> = {
@@ -78,41 +69,6 @@ type IconButtonProps = {
   size?: 'sm' | 'md' | 'lg';
   tone?: 'primary' | 'neutral' | 'danger';
   variant?: 'glass' | 'solid' | 'ghost';
-};
-
-type MetricTileProps = {
-  accent?: string;
-  helper?: string;
-  icon?: IoniconName;
-  label: string;
-  style?: StyleProp<ViewStyle>;
-  value: string;
-};
-
-type SettingsActionRowProps = {
-  accent?: string;
-  description?: string;
-  disabled?: boolean;
-  icon: IoniconName;
-  onPress?: () => void;
-  title: string;
-  trailing?: ReactNode;
-  tone?: 'primary' | 'neutral' | 'danger' | 'accent' | 'warm';
-};
-
-type SettingsSectionProps = {
-  children: ReactNode;
-  style?: StyleProp<ViewStyle>;
-};
-
-type InsetActionRowProps = SettingsActionRowProps & {
-  showDivider?: boolean;
-};
-
-type FilterChipProps = {
-  active?: boolean;
-  label: string;
-  onPress: () => void;
 };
 
 type ToggleSwitchProps = {
@@ -164,7 +120,7 @@ function useLatestRef<T>(value: T) {
   return valueRef;
 }
 
-export function GlassSurface({ children, style, ...viewProps }: GlassSurfaceProps) {
+function GlassSurface({ children, style, ...viewProps }: GlassSurfaceProps) {
   return (
     <View {...viewProps} style={[uiStyles.glassSurface, style]}>
       {children}
@@ -177,32 +133,6 @@ export function BentoCard({ children, style, variant = 'default', ...viewProps }
     <GlassSurface {...viewProps} style={[uiStyles.bentoCard, bentoVariantStyles[variant], style]}>
       {children}
     </GlassSurface>
-  );
-}
-
-export function CardTopCap({
-  accent = colors.primary,
-  height = 18,
-  insetHorizontal = 16,
-  insetTop = 16,
-  spacing = 14
-}: CardTopCapProps) {
-  return (
-    <View
-      pointerEvents="none"
-      style={[
-        uiStyles.cardTopCap,
-        {
-          backgroundColor: tintFromAccent(accent),
-          height,
-          marginBottom: spacing,
-          marginHorizontal: -insetHorizontal,
-          marginTop: -insetTop
-        }
-      ]}
-    >
-      <View style={[uiStyles.cardTopCapLine, { backgroundColor: accent }]} />
-    </View>
   );
 }
 
@@ -322,101 +252,6 @@ export function IconButton({
       ]}
     >
       <Ionicons color={iconColor} name={icon} size={size === 'sm' ? 17 : size === 'lg' ? 26 : 21} />
-    </Pressable>
-  );
-}
-
-export function MetricTile({ accent = colors.primary, helper, icon, label, style, value }: MetricTileProps) {
-  return (
-    <View style={[uiStyles.metricTile, style]}>
-      <View style={uiStyles.metricHeader}>
-        {icon ? (
-          <View style={[uiStyles.metricIcon, { backgroundColor: tintFromAccent(accent) }]}>
-            <Ionicons color={accent} name={icon} size={18} />
-          </View>
-        ) : null}
-        <Text style={styles.label}>{label}</Text>
-      </View>
-      <Text adjustsFontSizeToFit numberOfLines={1} style={uiStyles.metricValue}>
-        {value}
-      </Text>
-      {helper ? <Text style={[styles.muted, uiStyles.metricHelper]}>{helper}</Text> : null}
-    </View>
-  );
-}
-
-export function SettingsActionRow({
-  accent,
-  description,
-  disabled,
-  icon,
-  onPress,
-  title,
-  trailing,
-  tone = 'primary'
-}: SettingsActionRowProps) {
-  const iconColor = accent || actionColorFor(tone);
-  return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        uiStyles.actionRow,
-        pressed && !disabled && uiStyles.actionRowPressed,
-        disabled && uiStyles.disabled
-      ]}
-    >
-      <View style={[uiStyles.actionIcon, { backgroundColor: tintFromAccent(iconColor) }]}>
-        <Ionicons color={iconColor} name={icon} size={20} />
-      </View>
-      <View style={uiStyles.actionText}>
-        <Text style={[uiStyles.actionTitle, tone === 'danger' && uiStyles.actionTitleDanger]}>{title}</Text>
-        {description ? <Text style={styles.muted}>{description}</Text> : null}
-      </View>
-      {trailing || <Ionicons color={colors.subtle} name="chevron-forward" size={18} />}
-    </Pressable>
-  );
-}
-
-export function SettingsSection({ children, style }: SettingsSectionProps) {
-  return <BentoCard style={[uiStyles.settingsSection, style]}>{children}</BentoCard>;
-}
-
-export function InsetActionRow({
-  showDivider,
-  ...props
-}: InsetActionRowProps) {
-  return (
-    <View>
-      <SettingsActionRow {...props} />
-      {showDivider ? <View style={uiStyles.insetDivider} /> : null}
-    </View>
-  );
-}
-
-export function FilterChip({ active, label, onPress }: FilterChipProps) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        uiStyles.filterChip,
-        active && uiStyles.filterChipActive,
-        pressed && uiStyles.pressed
-      ]}
-    >
-      <Ionicons
-        color={active ? colors.primaryDark : colors.ink}
-        name={active ? 'close' : 'chevron-down'}
-        size={16}
-      />
-      <Text
-        ellipsizeMode="tail"
-        numberOfLines={1}
-        style={[uiStyles.filterChipText, active && uiStyles.filterChipTextActive]}
-      >
-        {label}
-      </Text>
     </Pressable>
   );
 }
@@ -698,26 +533,6 @@ function iconColorFor(tone: IconButtonProps['tone'], variant: IconButtonProps['v
   }
 
   return colors.ink;
-}
-
-function actionColorFor(tone: SettingsActionRowProps['tone']) {
-  if (tone === 'danger') {
-    return colors.danger;
-  }
-
-  if (tone === 'accent') {
-    return colors.accent;
-  }
-
-  if (tone === 'warm') {
-    return colors.warm;
-  }
-
-  if (tone === 'neutral') {
-    return colors.muted;
-  }
-
-  return colors.primaryDark;
 }
 
 function isIntentionalHorizontalSwipe(dx: number, dy: number, vx: number, vy: number) {

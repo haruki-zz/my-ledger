@@ -1,0 +1,33 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "app/_layout.tsx",
+    "app/index.tsx",
+    "app/auth.tsx",
+    "app/ledger.tsx",
+    "app/(tabs)/_layout.tsx",
+    "app/(tabs)/index.tsx",
+    "app/(tabs)/history.tsx",
+    "app/(tabs)/settings.tsx",
+    "app/expenses/new.tsx",
+    "app/expenses/[id].tsx",
+    "app/settings/account.tsx",
+    "app/settings/ledgers.tsx",
+    "app/settings/recurring.tsx",
+    "app/settings/sync.tsx",
+    "scripts/fix-supabase.cjs",
+    "src/**/*.test.ts"
+  ],
+  "project": ["**/*.{ts,tsx,cjs}", "!node_modules/**", "!.expo/**", "!dist/**"],
+  "ignore": ["assets/**", "supabase/**"],
+  "ignoreDependencies": [
+    "expo-router",
+    "expo-updates",
+    "expo-system-ui",
+    "react-dom",
+    "react-native-web",
+    "react-native-screens",
+    "react-native-safe-area-context",
+    "@react-native-community/datetimepicker"
+  ]
+}

@@ -31,7 +31,7 @@ export function isValidMonthKey(value: string) {
   return month >= 1 && month <= 12 && year >= 1900 && year <= 9999;
 }
 
-export function clampGenerateDayForMonth(monthKey: string, generateDay: number) {
+function clampGenerateDayForMonth(monthKey: string, generateDay: number) {
   if (!isValidMonthKey(monthKey)) {
     throw new Error('Month must use YYYY-MM format');
   }
@@ -45,7 +45,7 @@ export function generatedSpentOnDate(monthKey: string, generateDay: number) {
   return `${monthKey}-${String(clampGenerateDayForMonth(monthKey, generateDay)).padStart(2, '0')}`;
 }
 
-export function normalizeRecurringSubcategory(value: string | null | undefined) {
+function normalizeRecurringSubcategory(value: string | null | undefined) {
   return value?.trim().toLowerCase() || '';
 }
 

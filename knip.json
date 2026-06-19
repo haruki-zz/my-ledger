@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "app/**/*.{ts,tsx}",
+    "src/**/*.test.ts"
+  ],
+  "project": ["**/*.{ts,tsx,cjs}", "!node_modules/**", "!.expo/**", "!dist/**"],
+  "ignoreDependencies": [
+    "expo-updates",
+    "expo-system-ui"
+  ]
+}

@@ -67,18 +67,6 @@ export function buildUserColorMap(userIds: string[], currentUserId: string | nul
   return colorsById;
 }
 
-export function colorForUserId(
-  userId: string | null | undefined,
-  currentUserId: string | null | undefined,
-  orderedUserIds: string[]
-) {
-  if (!userId) {
-    return DEFAULT_USER_COLOR;
-  }
-
-  return buildUserColorMap(orderedUserIds, currentUserId).get(userId) || DEFAULT_USER_COLOR;
-}
-
 function normalizeEntityKey(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }

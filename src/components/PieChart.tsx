@@ -19,7 +19,7 @@ type PieSegment = CategoryStat & {
   segmentLength: number;
 };
 
-export type AnchorPoint = {
+type AnchorPoint = {
   x: number;
   y: number;
 };

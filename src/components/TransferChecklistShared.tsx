@@ -8,7 +8,7 @@ import { DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { formatYen } from '@/src/lib/format';
 import type { TransferChecklistItemRow } from '@/src/types/database';
 
-export const STACK_CARD_MIN_HEIGHT = 112;
+const STACK_CARD_MIN_HEIGHT = 112;
 export const TRANSFER_OVERLAY_MAX_WIDTH = 1040;
 const noop = () => undefined;
 
@@ -81,7 +81,7 @@ function TransferUserPill({ color, label }: { color: string; label: string }) {
   );
 }
 
-export function ChecklistToggle({
+function ChecklistToggle({
   checked,
   disabled,
   onPress,
@@ -127,18 +127,6 @@ export function completedAtForUser(item: TransferChecklistItemRow, userId: strin
   return null;
 }
 
-export function counterpartyForUser(item: TransferChecklistItemRow, userId: string | null) {
-  if (item.payer_user_id === userId) {
-    return item.payee_user_id;
-  }
-
-  if (item.payee_user_id === userId) {
-    return item.payer_user_id;
-  }
-
-  return item.payer_user_id;
-}
-
 export function isParticipant(item: TransferChecklistItemRow, userId: string | null) {
   return Boolean(userId && (item.payer_user_id === userId || item.payee_user_id === userId));
 }
@@ -152,7 +140,7 @@ function defaultUserColor() {
   return DEFAULT_USER_COLOR;
 }
 
-export const sharedStyles = StyleSheet.create({
+const sharedStyles = StyleSheet.create({
   itemAmount: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
