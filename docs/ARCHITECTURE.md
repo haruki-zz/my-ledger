@@ -1,232 +1,128 @@
-# Architecture
+# Architecture Overview
 
-Source code reference for My Ledger v1.0. This document describes the project structure, each file's responsibility, and the features implemented in this release.
+本文档只描述整体架构和数据流。文件级说明见 `docs/FILE_STRUCTURE.md`，可达 UI 见 `docs/UI_ROUTES.md`，API 和可复用模块见 `docs/API_REFERENCE.md`、`docs/COMPONENTS.md`。
 
-## Tech Stack
+## App Summary
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Expo 56 + React Native 0.85 |
+`my-ledger` 是一个面向两人共享账本的 Expo React Native App。核心能力包括：
+
+- Supabase Auth 邮箱密码登录/注册。
+- 多账本创建、加入、切换、退出、删除。
+- 日常支出新增、编辑、删除，支持个人/共享支出和按金额拆分。
+- Dashboard 展示 today/week/month 总额、成员分摊、分类占比、每日趋势。
+- History 按月份、成员、分类筛选支出，并支持详情、拆分明细、滑动/长按操作。
+- Fixed Expense 管理每月固定支出规则，并按规则生成当月支出。
+- Transfer Checklist 计算两人间待确认转账项。
+- 本地 SQLite 缓存和离线写入队列，网络恢复后同步到 Supabase。
+
+## Runtime Stack
+
+| Layer | Current choice |
+| --- | --- |
+| App framework | Expo 56 + React Native 0.85 |
+| Router | Expo Router file-based routes |
 | Language | TypeScript 6 |
-| Router | Expo Router (file-based) |
-| Backend | Supabase (PostgreSQL, Auth, Realtime) |
-| State | React Context + AsyncStorage |
-| Charts | Custom SVG (react-native-svg) |
-| Typography | JetBrains Mono |
-| JS Engine | JSC (explicit; Hermes disabled due to OTEL dynamic import issue) |
+| Backend | Supabase Auth, PostgreSQL, Realtime |
+| Local cache | `expo-sqlite` |
+| Network state | `@react-native-community/netinfo` |
+| Persistence | AsyncStorage for active ledger id; SQLite for business data |
+| Icons | `@expo/vector-icons` Ionicons |
+| Charts | Custom `react-native-svg` charts |
+| Font | JetBrains Mono |
 
-## Directory Structure
+## Provider Tree
 
-```
-my-ledger/
-├── app/                        # Expo Router pages
-│   ├── _layout.tsx             # Root layout: font loading, providers, stack config
-│   ├── index.tsx               # Splash / auth-gate: redirects to auth, ledger, or tabs
-│   ├── auth.tsx                # Sign-in / sign-up form
-│   ├── ledger.tsx              # Create or join a ledger (shown on first login)
-│   ├── (tabs)/                 # Main tab navigation group
-│   │   ├── _layout.tsx         # Custom tab bar (floating bottom / sidebar)
-│   │   ├── index.tsx           # Dashboard screen
-│   │   ├── history.tsx         # Expense history with filters
-│   │   └── settings.tsx        # Settings hub
-│   ├── expenses/
-│   │   ├── new.tsx             # Create new expense
-│   │   └── [id].tsx            # Edit existing expense
-│   └── settings/
-│       ├── account.tsx         # Profile name, email, sign-out
-│       ├── categories.tsx      # Category management & split ratios
-│       ├── ledgers.tsx         # Create / join / switch ledgers
-│       └── ledger/[id].tsx     # Ledger details, members, invite code
-├── src/
-│   ├── components/
-│   │   ├── styles.ts           # Design tokens: colors, typography, radii, shadows
-│   │   ├── layout.ts           # Layout constants: breakpoints, bar heights
-│   │   ├── ui.tsx              # Shared UI primitives (BentoCard, PillTabs, etc.)
-│   │   ├── ExpenseForm.tsx     # Expense create/edit form with split logic
-│   │   ├── PieChart.tsx        # Category breakdown donut chart
-│   │   ├── DailyChart.tsx      # Daily spending line/bar chart
-│   │   ├── CategoryTrendModal.tsx        # Modal for per-category trends
-│   │   ├── CategoryMonthlyTrendChart.tsx # Monthly trend chart component
-│   │   ├── KeyboardDoneAccessory.tsx     # iOS keyboard "Done" toolbar
-│   │   └── KeyboardAwareScrollView.tsx   # Keyboard-reactive scroll wrapper
-│   ├── context/
-│   │   ├── AuthContext.tsx     # Supabase session, auth state listener
-│   │   └── LedgerContext.tsx   # Active ledger selection, CRUD, persistence
-│   ├── hooks/
-│   │   ├── useDashboardData.ts # Dashboard data loading + realtime subscriptions
-│   │   ├── useCategoryTrend.ts # Category trend data loading
-│   │   └── useRequiredLedger.ts # Auth + ledger guard with redirect
-│   ├── lib/
-│   │   ├── supabase.ts        # Supabase client initialization
-│   │   ├── ledger.ts          # All Supabase RPC wrappers and query functions
-│   │   ├── stats.ts           # Dashboard stat computation (totals, categories, daily)
-│   │   ├── format.ts          # Formatting: currency (JPY), dates, display names
-│   │   ├── categories.ts     # Default category list and split ratio defaults
-│   │   ├── keyboard.ts       # runAfterKeyboardDismiss helper
-│   │   └── chartPalette.ts   # Color array for chart series
-│   └── types/
-│       └── database.ts       # TypeScript types mirroring Supabase schema
-├── supabase/migrations/       # PostgreSQL migration files
-│   ├── 20260523000000_initial_ledger_schema.sql
-│   ├── 20260523100000_ledger_categories.sql
-│   ├── 20260526111054_ledger_management.sql
-│   └── 20260528073153_english_defaults.sql
-├── assets/                    # App icons, splash, favicon
-├── scripts/
-│   └── fix-supabase.cjs       # Postinstall: removes OTEL dynamic import
-├── package.json
-├── app.json
-└── tsconfig.json
-```
+Root layout `app/_layout.tsx` wraps the entire stack in:
 
-## Navigation
+1. `AuthProvider`
+2. `SyncProvider`
+3. `LedgerProvider`
 
-```
-Root Stack (_layout.tsx)
-├── index           → auth gate → redirects based on session / ledger state
-├── auth            → email/password sign-in or sign-up
-├── ledger          → create or join a ledger
-├── (tabs)          → main app
-│   ├── Dashboard   → monthly totals, pie chart, daily trend
-│   ├── History     → filtered expense list with swipe actions
-│   └── Settings    → links to sub-screens
-├── expenses/new    → new expense form (modal)
-├── expenses/[id]   → edit expense form
-├── settings/account
-├── settings/categories
-└── settings/ledgers → create, join, switch, delete, and leave ledgers
-```
+Provider responsibilities:
 
-Mobile uses a floating bottom tab bar; screens wider than 768px switch to a left sidebar.
+- `AuthProvider`: Supabase session, auth state subscription, sign out, local business data cleanup.
+- `SyncProvider`: network state, sync queue summary, sync conflict banner, queue draining.
+- `LedgerProvider`: active ledger selection, ledger membership loading, ledger-level realtime refresh, recurring generation on ledger activation.
 
-## Database Schema
+## Data Flow
 
-Six tables with RLS enabled:
+Read path:
 
-### profiles
-Auto-created on Supabase Auth sign-up via trigger.
+1. Screens call hooks or API wrappers from `src/lib/ledger.ts`.
+2. `ledger.ts` first attempts local SQLite-backed reads through `src/lib/localRepository.ts`.
+3. If SQLite is unavailable, it falls back to direct Supabase reads.
+4. Realtime changes update local cache through `LedgerProvider` and notify screens via `src/lib/localEvents.ts`.
+5. UI derives display state with pure helpers in `src/lib/stats.ts`, `src/lib/categorySystem.ts`, and `src/lib/format.ts`.
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | uuid PK | References auth.users |
-| display_name | text | |
-| created_at | timestamptz | |
-| updated_at | timestamptz | Auto-updated via trigger |
+Write path:
 
-### ledgers
+1. Expense and recurring-rule writes go through `src/lib/ledger.ts`.
+2. `ledger.ts` delegates to local repository write functions.
+3. Local write updates SQLite immediately and enqueues a `sync_queue` mutation.
+4. `SyncProvider` drains the queue when online.
+5. Queue rows call Supabase RPCs with `base_updated_at` conflict checks.
+6. Success updates local cache; failure becomes `failed` or `conflict` and is visible at `/settings/sync`.
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | uuid PK | |
-| name | text | |
-| invite_code | char(8) | Unique, auto-generated |
-| created_by | uuid FK | References profiles |
-| created_at / updated_at | timestamptz | |
+Some online-only actions still call Supabase directly, for example ledger create/join/delete/leave and transfer confirmations.
 
-### ledger_members
-Composite PK: (ledger_id, user_id). Max 2 members enforced in RPC.
+## Navigation Shape
 
-### expenses
+Root stack:
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | uuid PK | |
-| ledger_id | uuid FK | |
-| amount_yen | int | > 0 |
-| category | text | Free-form |
-| paid_by | uuid FK | Who paid |
-| recorded_by | uuid FK | Immutable after insert (trigger-enforced) |
-| ownership | enum | 'personal' or 'shared' |
-| spent_on | date | |
-| note | text | Optional |
+- `/` auth/ledger gate.
+- `/auth` authentication screen.
+- `/ledger` first-ledger create/join screen.
+- `/(tabs)` authenticated main app.
+- `/expenses/new` modal-style new expense screen.
+- `/expenses/[id]` edit expense screen.
+- `/settings/account`, `/settings/ledgers`, `/settings/recurring`, `/settings/sync` settings detail screens.
 
-Indexed on `(ledger_id, spent_on DESC, created_at DESC)`.
+Main tabs:
 
-### expense_splits
-Composite PK: (expense_id, user_id). Stores each member's JPY portion for shared expenses.
+- `/(tabs)` or `/(tabs)/index`: Dashboard.
+- `/(tabs)/history`: History.
+- `/(tabs)/settings`: Settings.
 
-### ledger_categories
-Per-ledger custom categories with `split_ratio_a` / `split_ratio_b` (0-100) and `sort_order`.
+Full route inventory is in `docs/UI_ROUTES.md`.
 
-### RPC Functions
-- `create_ledger(name)` - creates ledger + adds creator as member
-- `join_ledger_by_invite(code)` - joins existing ledger (max 2 members)
-- `leave_ledger(ledger_id)` - removes membership
-- `delete_ledger(ledger_id)` - owner-only, cascading delete
-- `seed_default_categories(ledger_id)` - seeds 11 default categories
-- `save_ledger_category(...)` - upsert category with split ratios
-- `delete_ledger_category(...)` - delete category
-- `save_expense(...)` - create or update expense with splits
-- `delete_expense(id)` - hard delete
+## Data Model
 
-## State Management
+Supabase public tables represented by `src/types/database.ts`:
 
-### Contexts (global)
-- **AuthContext** - Supabase session, `loading`, `signOut()`
-- **LedgerContext** - active ledger ID (persisted to AsyncStorage), memberships list, CRUD operations
+- `profiles`: app profile row for each auth user.
+- `ledgers`: shared ledger metadata and invite code.
+- `ledger_members`: ledger membership join table.
+- `ledger_categories`: older/custom category storage, still cached locally and supported by RPCs.
+- `expenses`: expense rows, including category id/subcategory and recurring metadata.
+- `expense_splits`: per-user split amounts.
+- `recurring_expense_rules`: fixed monthly expense rules.
+- `transfer_checklist_completions`: confirmation state for generated transfer checklist items.
 
-### Realtime Subscriptions
-Dashboard, history, and categories screens subscribe to Supabase Postgres Changes for automatic cross-device sync. Subscriptions are scoped to the active ledger and cleaned up on unmount.
+Local SQLite mirrors the business tables and adds:
 
-### Data Flow
-1. Screens call hooks (`useDashboardData`, `useCategoryTrend`) to load data
-2. Hooks query Supabase and subscribe to realtime changes
-3. `useMemo` derives computed stats (monthly totals, category breakdowns, daily series)
-4. Write operations go through `src/lib/ledger.ts` RPC wrappers
+- `local_meta`: schema version and refresh markers.
+- `sync_queue`: offline mutation queue.
+- `sync_dedupe`: synced mutation dedupe.
+- `transfer_checklist_snapshot`: cached transfer checklist RPC result.
 
-## Features (v1.0)
+## Realtime And Local Events
 
-### Authentication
-- Email/password sign-up with display name
-- Email/password sign-in
-- Session persistence via AsyncStorage
-- Sign-out
+`LedgerProvider` subscribes to Supabase postgres changes for:
 
-### Ledger Management
-- Create shared ledger (generates 8-char invite code)
-- Join ledger by invite code
-- Switch between multiple ledgers
-- Leave ledger / delete ledger (owner only)
-- Max 2 members per ledger
+- `expenses`
+- `expense_splits`
+- `ledger_categories`
+- `recurring_expense_rules`
+- `transfer_checklist_completions`
 
-### Expense Tracking
-- Create expense: amount (JPY), category, paid-by, ownership (personal/shared), date, note
-- Edit expense (preserves original recorder)
-- Delete expense (hard delete)
-- Split modes for shared expenses: by amount or by ratio
-- Split validation: sum of parts must equal total
+Those subscriptions refresh local SQLite snapshots and/or emit in-process ledger events. Screens and hooks subscribe through `subscribeToLedgerData(ledgerId, listener)`.
 
-### Dashboard
-- Monthly total with expense count
-- Range filter: Both / Me / Partner
-- Category breakdown pie chart (tap category for trend)
-- Daily spending line or bar chart
-- Month navigation (swipe or buttons)
+## Key Constraints
 
-### History
-- Chronological expense list with swipe-to-edit / swipe-to-delete
-- Filters: user, category, date range
-- Summary card with total and record count
-- Realtime refresh
-
-### Categories
-- Per-ledger category list with custom split ratios
-- Add / edit / delete categories
-- Default seed of 11 categories for new ledgers
-- Realtime sync across members
-
-### Settings
-- Profile name editing
-- Current ledger info with member count
-- Share invite code (native share sheet)
-- Navigation to account, ledgers, categories sub-screens
-
-## Key Design Decisions
-
-1. **JPY only** - all amounts are integers, no decimal handling needed
-2. **Max 2 members** - enforced at the database RPC level
-3. **Hard deletes** - no soft-delete / trash; expenses and categories are permanently removed
-4. **Immutable recorder** - `recorded_by` is set on insert and protected by a database trigger
-5. **JSC engine** - Hermes disabled to work around a Supabase OTEL dynamic import issue; `postinstall` script patches the affected file as an additional safeguard
-6. **No external state library** - React Context + local state + Supabase realtime is sufficient for this app's complexity
-7. **Custom charts** - SVG-based charts built with react-native-svg; no chart library dependency
+- Currency is JPY only; amounts are integers.
+- Ledgers are designed for up to two members. Database RPCs enforce the key membership behavior.
+- Expense deletes are hard deletes remotely; local deletes are queued as tombstone-like pending changes until synced.
+- `recorded_by` is owned by the database/app insert path and should not be changed during edits.
+- `category_id` is the current canonical category field; `category` remains for legacy labels.
+- Fixed expenses use `Asia/Tokyo` by default in the UI.
+- Offline write support exists for expenses and recurring rules; ledger management requires network.

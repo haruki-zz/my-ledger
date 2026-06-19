@@ -1,353 +1,131 @@
 # Design System
 
-Visual design language for My Ledger v1.0. All values referenced here are defined in `src/components/styles.ts` and `src/components/layout.ts`. Future UI/UX work should maintain consistency with this system.
+本文档只记录视觉与交互规范。可复用组件 API 见 `docs/COMPONENTS.md`。
 
-## Design Principles
+## Source Files
 
-- **Monospace-first typography** - JetBrains Mono throughout, giving the app a technical, precise aesthetic
-- **Glassmorphism** - semi-transparent surfaces with subtle borders and soft shadows create depth
-- **Teal primary** - a calm, professional teal anchors the color system
-- **Spring animations** - physics-based springs for all interactive motion (swipe, drag, tab transitions)
-- **Light mode only** - clean, bright backgrounds; no dark mode in v1.0
+- `src/components/styles.ts`: color, typography, shared React Native styles, shadows, radii.
+- `src/components/layout.ts`: responsive breakpoints and navigation dimensions.
+- `src/lib/chartPalette.ts`: chart color sequence.
 
-## Color Palette
+## Principles
 
-### Core Colors
+- Light mode only.
+- JetBrains Mono as the primary typeface.
+- Glass/surface cards with restrained borders and shadows.
+- Teal primary color, with indigo and warm orange accents.
+- Minimum 44 px touch targets for main controls.
+- Responsive navigation: mobile bottom floating bar, wide left sidebar.
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `primary` | `#0F766E` | Buttons, navigation, active states, charts |
-| `primaryDark` | `#115E59` | Button text on secondary surfaces, selected text |
-| `accent` | `#6366F1` | Secondary actions, personal expense badge |
-| `warm` | `#C2410C` | Tertiary accent |
-| `danger` | `#DC2626` | Destructive actions, errors, delete buttons |
+## Colors
 
-### Surfaces & Backgrounds
+| Token | Value | Use |
+| --- | --- | --- |
+| `primary` | `#0F766E` | primary buttons, active controls, key chart color |
+| `primaryDark` | `#115E59` | selected text, darker primary labels |
+| `accent` | `#6366F1` | secondary accent |
+| `warm` | `#C2410C` | warm accent and over-budget comparison |
+| `danger` | `#DC2626` | destructive actions and errors |
+| `bg` | `#F6F8FB` | page background |
+| `surface` | `#FFFFFF` | solid cards, sheets, rows |
+| `glass` | `rgba(255,255,255,0.76)` | glass cards and nav bars |
+| `glassBorder` | `rgba(255,255,255,0.72)` | glass borders |
+| `tint` | `rgba(15,118,110,0.10)` | active tinted backgrounds |
+| `ink` | `#111827` | primary text |
+| `muted` | `#667085` | secondary text |
+| `subtle` | `#98A2B3` | tertiary text |
+| `line` | `rgba(17,24,39,0.08)` | dividers and borders |
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `bg` | `#F6F8FB` | Page background |
-| `surface` | `#FFFFFF` | Card backgrounds, solid surfaces |
-| `glass` | `rgba(255,255,255,0.76)` | Glassmorphic cards and panels |
-| `glassBorder` | `rgba(255,255,255,0.72)` | Borders on glass surfaces |
-| `tint` | `rgba(15,118,110,0.10)` | Active/selected state backgrounds |
+Chart sequence from `src/lib/chartPalette.ts`:
 
-### Text
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| `ink` | `#111827` | Primary text |
-| `muted` | `#667085` | Secondary text, labels |
-| `subtle` | `#98A2B3` | Tertiary text, placeholders |
-| `line` | `rgba(17,24,39,0.08)` | Dividers, borders |
-
-### Chart Palette
-
-14 colors used for chart series, in order:
-
-```
-#0F766E  #6366F1  #14B8A6  #F59E0B  #EF4444  #8B5CF6  #22C55E
-#2563EB  #D946EF  #F97316  #06B6D4  #84CC16  #E11D48  #64748B
+```text
+#0F766E #6366F1 #14B8A6 #F59E0B #EF4444 #8B5CF6 #22C55E
+#2563EB #D946EF #F97316 #06B6D4 #84CC16 #E11D48 #64748B
 ```
 
 ## Typography
 
-**Font family**: JetBrains Mono (monospace)
-- Fallback: Menlo (iOS), monospace (Android)
-
-### Type Scale
-
-| Style | Size | Weight | Family | Extra |
-|-------|------|--------|--------|-------|
-| `title` | 30px | 900 | ExtraBold | - |
-| `h1` | 24px | 900 | ExtraBold | - |
-| `h2` | 18px | 700 | Bold | - |
-| `body` | 16px | 400 | Regular | lineHeight: 23 |
-| `muted` | 14px | 400 | Regular | lineHeight: 20, color: muted |
-| `label` | 14px | 700 | Bold | - |
-| `upperLabel` | 10px | 800 | ExtraBold | letterSpacing: 1.4, uppercase |
-| `buttonText` | 16px | 800 | ExtraBold | - |
-| `error` | 14px | 400 | Regular | color: danger |
-
-### Contextual Sizes
-
-| Context | Size | Weight |
-|---------|------|--------|
-| Hero amount (dashboard) | 38px | 900 |
-| Metric value | 34px | 900 |
-| Month label | 30px | 900 |
-| Amount input (form) | 28px | 900 |
-| Swipe row amount | 23px | 900 |
-| Swipe row category | 20px | 900 |
-| Chart axis labels | 10px | - |
-
-## Spacing
-
-### Layout Constants
-
-| Constant | Value |
-|----------|-------|
-| Floating tab bar height | 72px |
-| Floating tab margin | 20px |
-| Content bottom padding | 104px (72 + 20 + 12) |
-| Sidebar width (wide layout) | 96px |
-| Wide layout breakpoint | 768px |
-| Max content width | 1040px |
-
-### Standard Spacing
-
-| Usage | Value |
-|-------|-------|
-| Page content padding | 20px |
-| Section gap (between cards) | 18px |
-| Card internal padding | 16px |
-| Form card padding | 20px |
-| Input padding | 12px horizontal, 10px vertical |
-| Button padding | 14px horizontal, 12px vertical |
-| Row gap (within sections) | 10-12px |
-
-## Border Radius
-
-| Token | Value | Usage |
-|-------|-------|-------|
-| `control` | 16px | Buttons, inputs, dropdowns, tabs |
-| `compact` | 12px | Keyboard accessories, small controls |
-| `surface` | 20px | Cards, modals, glass panels |
-
-### Component-Specific
-
-| Component | Radius |
-|-----------|--------|
-| Floating tab bar | 28px |
-| Sidebar items | 22px |
-| Pill tabs | 18px |
-| Filter chips | 18px |
-| Icon button (lg) | 22px |
-| Icon button (md) | 18px |
-| Icon button (sm) | 14px |
-| Expense badges | 9px |
-| Legend dots | 4px |
-
-## Shadows
-
-Single shadow definition applied to all elevated surfaces:
-
-```
-shadowColor: #0F172A
-shadowOffset: { width: 0, height: 12 }
-shadowOpacity: 0.08
-shadowRadius: 24
-elevation: 3 (Android)
-```
-
-Floating button uses a stronger shadow:
-```
-shadowOffset: { width: 0, height: 6 }
-shadowOpacity: 0.18
-shadowRadius: 14
-```
-
-## Component Patterns
-
-### Glass Surface (base pattern)
-
-The foundational card/panel pattern used throughout the app:
-
-```
-background: rgba(255,255,255,0.76)
-border: 1px solid rgba(255,255,255,0.72)
-borderRadius: 20px
-shadow: standard elevation
-```
-
-### BentoCard Variants
-
-Built on the glass surface pattern with variant-specific overrides:
+Font families from `fontFamilies`:
 
-| Variant | Modifications |
-|---------|--------------|
-| `default` | Standard glass surface |
-| `hero` | minHeight: 320px, padding: 18px |
-| `chart` | minHeight: 268px |
-| `list` | gap: 12px |
-| `form` | gap: 14px |
-| `danger` | border: rgba(220,38,38,0.18) |
-
-### Buttons
-
-| Type | Background | Text Color | Min Height |
-|------|-----------|------------|------------|
-| Primary | `#0F766E` | white | 48px |
-| Secondary | `rgba(255,255,255,0.72)` + 1px border | primaryDark | 48px |
-| Danger | `#DC2626` | white | 48px |
-
-### Input Fields
-
-```
-background: rgba(255,255,255,0.86)
-border: 1px solid line
-borderRadius: 16px (control)
-minHeight: 48px
-padding: 12px horizontal, 10px vertical
-fontSize: 16px
-```
-
-### PillTabs
-
-```
-track: rgba(15,118,110,0.08), border 1px line, borderRadius 18px, height 38px
-indicator: white bg, 1px line border, borderRadius 14px, spring-animated
-```
-
-### Expense Badges
-
-| Type | Background | Text Color |
-|------|-----------|------------|
-| Shared | `rgba(15,118,110,0.10)` | primaryDark |
-| Personal | `rgba(99,102,241,0.12)` | `#4F46E5` |
-
-### Filter Chips
-
-```
-background: rgba(255,255,255,0.82)
-active background: tint
-border: 1px line (inactive), 1px primary (active)
-height: 44px, borderRadius: 18px, padding: 16px horizontal
-```
-
-### Icon Buttons
+- `regular`: `JetBrainsMono_400Regular`
+- `semiBold`: `JetBrainsMono_600SemiBold`
+- `bold`: `JetBrainsMono_700Bold`
+- `extraBold`: `JetBrainsMono_800ExtraBold`
+- `fallback`: `Menlo`
 
-| Size | Dimensions | Radius |
-|------|-----------|--------|
-| sm | 30x30 | 14px |
-| md | 38x38 | 18px |
-| lg | 48x48 | 22px |
+Shared text styles from `styles`:
 
-Variants: glass, solid, ghost. Tones: primary, neutral, danger.
+| Style | Size | Weight | Use |
+| --- | ---: | --- | --- |
+| `title` | 30 | 800 | screen titles |
+| `h1` | 24 | 700 | major headings |
+| `h2` | 18 | 700 | card headings |
+| `body` | 16 | 400 | normal body text |
+| `muted` | 14 | 400 | supporting copy |
+| `label` | 14 | 700 | form labels |
+| `upperLabel` | 10 | 800 | uppercase section labels |
+| `buttonText` | 16 | 700 | primary buttons |
+| `error` | 14 | 400 | error text |
 
-### Swipe Expense Row
-
-```
-card: surface bg, 1px glassBorder, borderRadius 20px, minHeight 122px
-edit action: primary bg (#0F766E), width 96px
-delete action: #EF4444, width 96px
-```
+## Layout
 
-### Settings Rows
-
-```
-minHeight: 84px, padding: 20px horizontal / 14px vertical
-icon container: 40x40, borderRadius 14px, background tint
-gap: 12px between icon and text
-```
+| Constant | Value | Defined in |
+| --- | ---: | --- |
+| `FLOATING_TAB_BAR_HEIGHT` | 72 | `layout.ts` |
+| `FLOATING_TAB_MARGIN` | 20 | `layout.ts` |
+| `CONTENT_BOTTOM_PADDING` | 104 | `layout.ts` |
+| `SIDEBAR_WIDTH` | 96 | `layout.ts` |
+| `WIDE_LAYOUT_BREAKPOINT` | 768 | `layout.ts` |
 
-### Modals
+Common page styling:
 
-```
-overlay: rgba(23,32,42,0.36)
-panel: glass surface, borderRadius 20px, max-width 440px
-padding: 18px, gap: 16px
-```
+- `styles.page`: full-screen background.
+- `styles.content`: max width 1040, centered, 20 px padding, bottom padding for nav.
+- Settings detail screens often use max width 720 for form-like layouts.
 
-### Dropdowns
+## Radius And Shadows
 
-```
-trigger: same as input styling
-menu: rgba(255,255,255,0.96), 1px line border, borderRadius 16px, shadow
-option: minHeight 44px, padding 12px/10px
-active option: tint bg, primaryDark text, weight 800
-```
+| Token | Value |
+| --- | ---: |
+| `theme.radii.control` | 16 |
+| `theme.radii.compact` | 12 |
+| `theme.radii.surface` | 20 |
+| `theme.radii.pill` | 999 |
 
-## Navigation Bars
+Main shadows:
 
-### Floating Tab Bar (mobile)
+- `theme.shadow`: base elevated shadow.
+- `theme.glassShadow`: glass card shadow.
+- `theme.daySectionShadow`: History grouped day rows.
 
-```
-background: glass
-border: 1px glassBorder
-height: 72px
-borderRadius: 28px
-position: absolute bottom, left/right 20px
-gap: 4px between tabs, 8px padding
-```
+## Reusable Patterns
 
-### Sidebar (wide layout, >= 768px)
+Use these existing primitives before adding new one-off UI:
 
-```
-width: 96px
-background: glass
-border: 1px right glassBorder
-items: 72x66px, borderRadius 22px
-logo mark: primary bg, 44x44, borderRadius 20px
-```
+- `BentoCard`: base glass/surface card; variants `default`, `hero`, `chart`, `list`, `form`, `danger`.
+- `PillTabs`: segmented control with animated indicator.
+- `IconButton`: icon-only button with `sm`, `md`, `lg` sizes and tone/variant support.
+- `ToggleSwitch`: binary switch.
+- `SwipeExpenseRow`: expense row with swipe, press, long-press context menu, and accessibility actions.
+- `KeyboardAwareScrollView`, `KeyboardDoneAccessory`, `AndroidKeyboardDoneButton`: keyboard handling helpers.
 
-## Animations
+## Navigation UI
 
-### Spring Parameters
+`app/(tabs)/_layout.tsx` implements:
 
-All gesture-driven animations use spring physics:
+- Mobile: floating bottom bar, 72 px height, bottom safe-area aware.
+- Wide layout: 96 px left sidebar at widths `>= 768`.
+- Draggable add button: floating `+` button that opens `/expenses/new`; it docks left/right and is constrained by viewport and safe areas.
 
-| Context | Damping | Mass | Stiffness |
-|---------|---------|------|-----------|
-| PillTabs indicator | 18 | 0.72 | 190 |
-| SwipeExpenseRow | 18 | 0.8 | 180 |
-| Draggable button | 18 | 0.8 | 180 |
+## Chart UI
 
-### Timing Animations
+- `PieChart` uses category stats and shows category rows; pressing rows can select categories.
+- `DailyChart` draws member-specific daily line/bar style data using `react-native-svg`.
+- User/member colors come from `src/lib/entityColors.ts`.
 
-| Context | Duration | Properties |
-|---------|----------|-----------|
-| Modal open | 260ms | scale: 0.94 -> 1, opacity: 0 -> 1 |
-| Modal close | 200ms | opacity: 1 -> 0 |
-| Dashboard drill | 240ms | translateY: 10, scale: 0.985 -> 1 |
+## Interaction Conventions
 
-### Press Feedback
-
-| Context | Opacity | Scale |
-|---------|---------|-------|
-| Icon buttons | 0.78 | 0.96 |
-| Tab items | 0.76 | 0.97 |
-| Action rows | 0.78 | 0.995 |
-
-### Gesture Thresholds
-
-| Gesture | Trigger Distance | Notes |
-|---------|-----------------|-------|
-| Month swipe | 36px | direction ratio 2.5x, velocity 0.35 |
-| Expense swipe | 86px (90% of 96px action width) | max translate 116px |
-
-## Charts
-
-### Daily Chart
-
-```
-canvas: 320x190px
-grid: 1px, grid color
-bars: width 3-18px (calculated), borderRadius 3px
-curve: strokeWidth 3px, strokeLinecap round
-area fill: rgba(15,118,110,0.10)
-axis labels: 10px
-```
-
-### Pie Chart
-
-```
-donut center: rgba(255,255,255,0.92)
-legend dots: 12x12, borderRadius 4px
-category rows: borderRadius 8px, pressable -> tint bg
-```
-
-## Responsive Design
-
-Two layout modes based on window width:
-
-| Mode | Breakpoint | Navigation | Content |
-|------|-----------|-----------|---------|
-| Mobile | < 768px | Floating bottom tab bar | Full width, 20px padding |
-| Wide | >= 768px | Left sidebar (96px) | Max 1040px, centered |
-
-The draggable "add expense" button appears on mobile only, docking to left or right edge.
-
-## Minimum Touch Targets
-
-All interactive elements maintain a minimum of 44px touch target (following Apple HIG), enforced via `minHeight` on buttons, inputs, dropdown options, and filter chips.
+- Month navigation uses chevron icon buttons and horizontal swipe gestures.
+- Expense rows support tap-to-edit, swipe right to edit, swipe left to delete, and long press for context actions.
+- Fixed expense and account screens use form cards with direct save buttons.
+- Destructive actions use `Alert` confirmation before deleting/leaving/signing out with unsynced data.

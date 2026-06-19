@@ -85,8 +85,14 @@ npm run lint
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) - project structure, database schema, features, and design decisions
-- [Design System](docs/DESIGN_SYSTEM.md) - color palette, typography, spacing, component patterns, and animation specs
+- [Documentation Index](docs/README.md) - current docs split by scope
+- [Architecture](docs/ARCHITECTURE.md) - app architecture, provider tree, data flow, and constraints
+- [File Structure](docs/FILE_STRUCTURE.md) - file responsibilities and local dependencies
+- [UI Routes](docs/UI_ROUTES.md) - reachable UI and route paths
+- [API Reference](docs/API_REFERENCE.md) - app APIs, Supabase tables/RPCs, local sync APIs
+- [Components](docs/COMPONENTS.md) - reusable components, hooks, helper modules, external libraries
+- [Design System](docs/DESIGN_SYSTEM.md) - visual tokens, layout, and interaction conventions
+- [Development Notes](docs/DEVELOPMENT_NOTES.md) - setup, offline sync, fixed expenses, and implementation notes
 
 ## Notes
 
