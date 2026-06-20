@@ -25,6 +25,7 @@ export const theme = {
     accent: '#C0892E',
     bg: '#F1ECE3',
     danger: '#C0392B',
+    dangerOnDark: '#E8957B',
     glass: '#FFFFFF',
     glassBorder: 'rgba(42,39,34,0.06)',
     info: '#3F6FA0',
@@ -36,6 +37,7 @@ export const theme = {
     secondary: '#C0892E',
     subtle: '#9A8F80',
     success: '#3D8A5E',
+    successOnDark: '#86C9A1',
     surface: '#FFFFFF',
     tint: 'rgba(192,137,46,0.12)',
     warning: '#D2741F'

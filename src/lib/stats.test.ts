@@ -4,9 +4,13 @@ import {
   buildDashboardHeatDays,
   buildDashboardDailyUserSeriesForCategories,
   buildDashboardPeriodStats,
+  buildHistorySummary,
+  buildMonthlyReceipts,
+  closedMonthKeys,
   filterCurrentMonthSettledExpenses,
   heatLevelForAmount,
   resolveDashboardDateRange,
+  resolveDashboardPeriodNavigation,
   type DashboardPeriod
 } from './stats';
 import { EXPENSE_CATEGORIES, iconNameForExpenseCategory } from './categories';
@@ -164,6 +168,47 @@ describe('resolveDashboardDateRange', () => {
       comparisonEndDateString: '2026-03-31'
     });
   });
+
+  it('applies period offsets by day, week, and month', () => {
+    expect(resolveDashboardDateRange('today', '2026-06', '2026-06-03', -1)).toMatchObject({
+      startDateString: '2026-06-02',
+      endDateString: '2026-06-02',
+      comparisonStartDateString: '2026-06-01'
+    });
+    expect(resolveDashboardDateRange('week', '2026-06', '2026-06-17', -1)).toMatchObject({
+      startDateString: '2026-06-08',
+      endDateString: '2026-06-10',
+      comparisonStartDateString: '2026-06-01',
+      comparisonEndDateString: '2026-06-03'
+    });
+    expect(resolveDashboardDateRange('month', '2026-06', '2026-06-17', -1)).toMatchObject({
+      startDateString: '2026-05-01',
+      endDateString: '2026-05-31',
+      comparisonStartDateString: '2026-04-01'
+    });
+  });
+
+  it('disables future dashboard navigation at the current period', () => {
+    expect(resolveDashboardPeriodNavigation({
+      minimumMonthKey: '2026-01',
+      monthKey: '2026-06',
+      offset: 0,
+      period: 'week',
+      today: '2026-06-17'
+    })).toMatchObject({
+      canGoNext: false,
+      canGoPrevious: true
+    });
+    expect(resolveDashboardPeriodNavigation({
+      minimumMonthKey: '2026-01',
+      monthKey: '2026-06',
+      offset: -1,
+      period: 'week',
+      today: '2026-06-17'
+    })).toMatchObject({
+      canGoNext: true
+    });
+  });
 });
 
 describe('buildDashboardPeriodStats', () => {
@@ -314,6 +359,93 @@ describe('buildDashboardPeriodStats', () => {
       'Transport',
       'Other'
     ]);
+  });
+});
+
+describe('buildHistorySummary', () => {
+  it('builds count-led current-month summary stats from filtered records', () => {
+    const summary = buildHistorySummary({
+      activeFilterCount: 2,
+      expenses: [
+        { displayAmountYen: 1000, expense: expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-06-01' }) },
+        { displayAmountYen: 500, expense: expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }) },
+        { displayAmountYen: 2000, expense: expense({ amountYen: 2000, category: 'Food & Dining', spentOn: '2026-06-02' }) }
+      ],
+      monthKey: '2026-06',
+      today: '2026-06-04'
+    });
+
+    expect(summary).toMatchObject({
+      activeFilterCount: 2,
+      averagePerDayYen: 875,
+      count: 3,
+      totalYen: 3500
+    });
+    expect(summary.peakDay).toMatchObject({ amountYen: 2000, date: '2026-06-02' });
+    expect(summary.categoryMix.map((category) => category.categoryId)).toEqual(['food_dining', 'transport']);
+    expect(summary.topCategoryCaption).toBe('Food & Dining · 86% top category');
+  });
+});
+
+describe('monthly receipts', () => {
+  it('enumerates closed months only and includes zero-record closed months', () => {
+    expect(closedMonthKeys({ startMonthKey: '2026-03', endBeforeMonthKey: '2026-06' })).toEqual([
+      '2026-05',
+      '2026-04',
+      '2026-03'
+    ]);
+
+    const receipts = buildMonthlyReceipts({
+      currentUserId: CURRENT_USER_ID,
+      endBeforeMonthKey: '2026-06',
+      expenses: [
+        expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-03-10' }),
+        expense({ amountYen: 2000, category: 'Food & Dining', spentOn: '2026-05-10' })
+      ],
+      otherUserId: OTHER_USER_ID,
+      startMonthKey: '2026-03'
+    });
+
+    expect(receipts.map((receipt) => receipt.monthKey)).toEqual(['2026-05', '2026-04', '2026-03']);
+    expect(receipts[1]).toMatchObject({
+      records: 0,
+      totalYen: 0
+    });
+    expect(receipts[1].lines).toHaveLength(11);
+    expect(receipts[1].lines.every((line) => line.amountYen === 0)).toBe(true);
+  });
+
+  it('builds receipt MoM states, active categories, daily average, and split totals', () => {
+    const receipts = buildMonthlyReceipts({
+      currentUserId: CURRENT_USER_ID,
+      endBeforeMonthKey: '2026-06',
+      expenses: [
+        expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-04-10', splits: [700, 300] }),
+        expense({ amountYen: 400, category: 'Transport', spentOn: '2026-04-11', splits: [200, 200] }),
+        expense({ amountYen: 2000, category: 'Food & Dining', spentOn: '2026-05-10', splits: [1400, 600] }),
+        expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-05-12', splits: [100, 200] })
+      ],
+      otherUserId: OTHER_USER_ID,
+      startMonthKey: '2026-04'
+    });
+    const may = receipts[0];
+    const food = may.lines.find((line) => line.categoryId === 'food_dining');
+    const transport = may.lines.find((line) => line.categoryId === 'transport');
+    const shopping = may.lines.find((line) => line.categoryId === 'shopping');
+    const housing = may.lines.find((line) => line.categoryId === 'housing');
+
+    expect(may).toMatchObject({
+      activeCategoryCount: 2,
+      alexAmountYen: 1500,
+      dailyAverageYen: 74,
+      minaAmountYen: 800,
+      records: 2,
+      totalYen: 2300
+    });
+    expect(food).toMatchObject({ momDirection: 'up', momLabel: '+100%' });
+    expect(transport).toMatchObject({ momDirection: 'down', momLabel: '−100%' });
+    expect(shopping).toMatchObject({ momDirection: 'new', momLabel: 'NEW' });
+    expect(housing).toMatchObject({ momDirection: 'flat', momLabel: '—' });
   });
 });
 

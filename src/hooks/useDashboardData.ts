@@ -24,7 +24,7 @@ import {
 } from '@/src/lib/stats';
 import type { Expense, Ledger, LedgerMemberProfile, Profile, RecurringExpenseRule } from '@/src/types/database';
 
-export function useDashboardData(monthKey: string, period: DashboardPeriod) {
+export function useDashboardData(monthKey: string, period: DashboardPeriod, periodOffset = 0) {
   const { session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const currentLedger = activeLedger?.ledger || null;
@@ -51,8 +51,8 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
   const periodRef = useRef(period);
 
   const requestedDateRange = useMemo(
-    () => resolveDashboardDateRange(period, monthKey),
-    [monthKey, period]
+    () => resolveDashboardDateRange(period, monthKey, undefined, periodOffset),
+    [monthKey, period, periodOffset]
   );
   const coverageMonthKey = requestedDateRange.effectiveMonthKey;
   const coverageDateRange = useMemo(
@@ -219,7 +219,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
 
   const hasCurrentCoverage = loadedMonthKey === coverageMonthKey;
   const statsMonthKey = hasCurrentCoverage
-    ? requestedDateRange.effectiveMonthKey
+    ? monthKey
     : loadedMonthKey || requestedDateRange.effectiveMonthKey;
   const statsPeriod = hasCurrentCoverage
     ? period
@@ -229,10 +229,11 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
       expenses: settledExpenses,
       monthKey: statsMonthKey,
       period: statsPeriod,
+      offset: hasCurrentCoverage ? periodOffset : 0,
       currentUserId,
       otherUserId
     }),
-    [currentUserId, otherUserId, settledExpenses, statsMonthKey, statsPeriod]
+    [currentUserId, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
   );
 
   return {

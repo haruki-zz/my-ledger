@@ -1,5 +1,5 @@
 import { buildUserColorMap, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './entityColors';
-import { categoryColor, categoryLabel, resolveCategory } from './categorySystem';
+import { categoryColor, categoryLabel, PRIMARY_CATEGORIES, resolveCategory, type PrimaryCategoryId } from './categorySystem';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, todayDateString } from './format';
 import type { Expense, LedgerMemberProfile, RecurringExpenseRule } from '../types/database';
 
@@ -49,6 +49,72 @@ type ComparisonStat = {
   label: string;
 };
 
+export type DashboardPeriodNavigation = {
+  canGoNext: boolean;
+  canGoPrevious: boolean;
+  label: string;
+};
+
+export type HistoryCategoryMixSegment = {
+  amountYen: number;
+  categoryId: PrimaryCategoryId;
+  color: string;
+  label: string;
+  percentage: number;
+};
+
+export type HistorySummaryStat = {
+  activeFilterCount: number;
+  averagePerDayYen: number;
+  categoryMix: HistoryCategoryMixSegment[];
+  count: number;
+  dateSpanLabel: string;
+  peakDay: {
+    amountYen: number;
+    date: string | null;
+    label: string;
+  };
+  topCategoryCaption: string;
+  totalYen: number;
+};
+
+export type ReceiptMomDirection = 'down' | 'flat' | 'new' | 'up';
+
+export type ReceiptCategoryLine = {
+  amountYen: number;
+  categoryId: PrimaryCategoryId;
+  color: string;
+  label: string;
+  momDirection: ReceiptMomDirection;
+  momLabel: string;
+  previousAmountYen: number;
+};
+
+export type MonthlyReceiptStat = {
+  activeCategoryCount: number;
+  alexAmountYen: number;
+  alexPercentage: number;
+  categoryAmounts: Record<PrimaryCategoryId, number>;
+  code: string;
+  comparison: {
+    direction: 'over' | 'under' | 'same';
+    label: string;
+    percentage: number | null;
+    previousTotalYen: number;
+  };
+  dailyAverageYen: number;
+  days: number;
+  label: string;
+  lines: ReceiptCategoryLine[];
+  minaAmountYen: number;
+  minaPercentage: number;
+  monthKey: string;
+  previousMonthKey: string;
+  records: number;
+  span: string;
+  totalYen: number;
+};
+
 export type DashboardDateRange = {
   period: DashboardPeriod;
   effectiveMonthKey: string;
@@ -87,6 +153,15 @@ const shortMonthFormatter = new Intl.DateTimeFormat('en', {
 const dayFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
+});
+const longDayFormatter = new Intl.DateTimeFormat('en-US', {
+  day: 'numeric',
+  month: 'short',
+  weekday: 'short'
+});
+const receiptMonthFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  year: 'numeric'
 });
 function padDatePart(value: number) {
   return String(value).padStart(2, '0');
@@ -154,7 +229,7 @@ export function monthStartDateString(monthKey: string) {
   return `${monthKey}-01`;
 }
 
-function monthEndDateString(monthKey: string) {
+export function monthEndDateString(monthKey: string) {
   const [year, month] = parseMonthKey(monthKey);
   const date = new Date(year, month, 0);
   return formatDateString(date);
@@ -163,19 +238,20 @@ function monthEndDateString(monthKey: string) {
 export function resolveDashboardDateRange(
   period: DashboardPeriod,
   monthKey: string,
-  today: Date | string = new Date()
+  today: Date | string = new Date(),
+  offset = 0
 ): DashboardDateRange {
   const todayDate = typeof today === 'string' ? parseDateString(today) : startOfDay(today);
 
   if (period === 'today') {
-    return resolveTodayDateRange(todayDate);
+    return resolveTodayDateRange(addDays(todayDate, offset));
   }
 
   if (period === 'week') {
-    return resolveWeekDateRange(todayDate);
+    return resolveWeekDateRange(addDays(todayDate, offset * 7));
   }
 
-  return resolveMonthDateRange(monthKey);
+  return resolveMonthDateRange(addMonths(monthKey, offset));
 }
 
 function resolveTodayDateRange(todayDate: Date): DashboardDateRange {
@@ -190,7 +266,7 @@ function resolveTodayDateRange(todayDate: Date): DashboardDateRange {
     endDateString: todayString,
     comparisonStartDateString: yesterdayString,
     comparisonEndDateString: yesterdayString,
-    label: formatRangeLabel(todayString, todayString),
+    label: formatDashboardDayLabel(todayString),
     comparisonLabel: 'vs yesterday'
   };
 }
@@ -231,7 +307,23 @@ function resolveMonthDateRange(monthKey: string): DashboardDateRange {
     comparisonStartDateString: comparisonStartString,
     comparisonEndDateString: comparisonEndString,
     label: formatMonthLabel(effectiveMonthKey),
-    comparisonLabel: `vs ${formatShortMonthLabel(comparisonMonthKey)}`
+    comparisonLabel: `less than ${formatShortMonthLabel(comparisonMonthKey)}`
+  };
+}
+
+export function resolveDashboardPeriodNavigation(input: {
+  minimumMonthKey?: string | null;
+  monthKey: string;
+  offset: number;
+  period: DashboardPeriod;
+  today?: Date | string;
+}): DashboardPeriodNavigation {
+  const dateRange = resolveDashboardDateRange(input.period, input.monthKey, input.today, input.offset);
+  const minimumDateString = input.minimumMonthKey ? monthStartDateString(input.minimumMonthKey) : null;
+  return {
+    canGoNext: input.offset < 0,
+    canGoPrevious: minimumDateString ? dateRange.comparisonStartDateString > minimumDateString : true,
+    label: dateRange.label
   };
 }
 
@@ -241,9 +333,10 @@ export function buildDashboardPeriodStats(input: {
   period: DashboardPeriod;
   currentUserId: string | null;
   otherUserId: string | null;
+  offset?: number;
   today?: Date | string;
 }): DashboardPeriodStats {
-  const dateRange = resolveDashboardDateRange(input.period, input.monthKey, input.today);
+  const dateRange = resolveDashboardDateRange(input.period, input.monthKey, input.today, input.offset || 0);
   const userIds = [input.currentUserId, input.otherUserId].filter((userId): userId is string => Boolean(userId));
   const periodExpenses = expensesInRange(input.expenses, dateRange.startDateString, dateRange.endDateString);
   const comparisonExpenses = expensesInRange(
@@ -370,6 +463,147 @@ export function heatLevelForAmount(amount: number, maxAmount: number) {
   return Math.min(4, Math.max(1, Math.ceil((amount / maxAmount) * 4)));
 }
 
+export function buildHistorySummary(input: {
+  activeFilterCount: number;
+  expenses: { displayAmountYen: number; expense: Pick<Expense, 'category' | 'category_id' | 'spent_on' | 'subcategory'> }[];
+  monthKey: string;
+  today?: Date | string;
+}): HistorySummaryStat {
+  const totalYen = input.expenses.reduce((sum, item) => sum + item.displayAmountYen, 0);
+  const amountsByDate = new Map<string, number>();
+  const amountsByCategory = createEmptyCategoryAmounts();
+  const monthStartString = monthStartDateString(input.monthKey);
+  const todayString = typeof input.today === 'string'
+    ? input.today
+    : input.today
+      ? formatDateString(startOfDay(input.today))
+      : todayDateString(DEFAULT_LEDGER_TIME_ZONE);
+  const endDateString = input.monthKey === monthKeyFromDateString(todayString)
+    ? todayString
+    : monthEndDateString(input.monthKey);
+
+  for (const item of input.expenses) {
+    amountsByDate.set(item.expense.spent_on, (amountsByDate.get(item.expense.spent_on) || 0) + item.displayAmountYen);
+    const categoryId = expenseCategoryId(item.expense);
+    amountsByCategory[categoryId] += item.displayAmountYen;
+  }
+
+  const peakEntry = [...amountsByDate.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  const categoryMix = categoryAmountEntries(amountsByCategory)
+    .filter((entry) => entry.amountYen > 0)
+    .sort((a, b) => b.amountYen - a.amountYen || a.label.localeCompare(b.label))
+    .map((entry) => ({
+      ...entry,
+      percentage: totalYen > 0 ? (entry.amountYen / totalYen) * 100 : 0
+    }));
+  const topCategory = categoryMix[0] || null;
+  const elapsedDays = Math.max(1, daysBetween(parseDateString(monthStartString), parseDateString(endDateString)) + 1);
+
+  return {
+    activeFilterCount: input.activeFilterCount,
+    averagePerDayYen: Math.round(totalYen / elapsedDays),
+    categoryMix,
+    count: input.expenses.length,
+    dateSpanLabel: `${formatRangeLabel(monthStartString, endDateString)} · ${input.activeFilterCount} filters`,
+    peakDay: {
+      amountYen: peakEntry?.[1] || 0,
+      date: peakEntry?.[0] || null,
+      label: peakEntry ? formatDashboardDayLabel(peakEntry[0]) : '--'
+    },
+    topCategoryCaption: topCategory ? `${topCategory.label} · ${Math.round(topCategory.percentage)}% top category` : 'No category spend',
+    totalYen
+  };
+}
+
+export function closedMonthKeys(input: {
+  endBeforeMonthKey?: string;
+  startMonthKey: string;
+}): string[] {
+  const lastClosedMonthKey = addMonths(input.endBeforeMonthKey || currentMonthKey(), -1);
+  if (compareMonthKeys(input.startMonthKey, lastClosedMonthKey) > 0) {
+    return [];
+  }
+
+  const keys: string[] = [];
+  for (let monthKey = lastClosedMonthKey; compareMonthKeys(monthKey, input.startMonthKey) >= 0; monthKey = addMonths(monthKey, -1)) {
+    keys.push(monthKey);
+  }
+  return keys;
+}
+
+export function buildMonthlyReceipts(input: {
+  currentUserId: string | null;
+  endBeforeMonthKey?: string;
+  expenses: Expense[];
+  otherUserId: string | null;
+  startMonthKey: string;
+}): MonthlyReceiptStat[] {
+  const monthKeys = closedMonthKeys({
+    endBeforeMonthKey: input.endBeforeMonthKey,
+    startMonthKey: input.startMonthKey
+  });
+  const totalsByMonth = new Map<string, number>();
+  const recordsByMonth = new Map<string, number>();
+  const currentUserAmountsByMonth = new Map<string, number>();
+  const categoryAmountsByMonth = new Map<string, Record<PrimaryCategoryId, number>>();
+
+  for (const expense of input.expenses) {
+    const monthKey = monthKeyFromDateString(expense.spent_on);
+    totalsByMonth.set(monthKey, (totalsByMonth.get(monthKey) || 0) + expense.amount_yen);
+    recordsByMonth.set(monthKey, (recordsByMonth.get(monthKey) || 0) + 1);
+
+    if (input.currentUserId) {
+      currentUserAmountsByMonth.set(
+        monthKey,
+        (currentUserAmountsByMonth.get(monthKey) || 0) + amountForUser(expense, input.currentUserId)
+      );
+    }
+
+    const categoryAmounts = categoryAmountsByMonth.get(monthKey) || createEmptyCategoryAmounts();
+    categoryAmounts[expenseCategoryId(expense)] += expense.amount_yen;
+    categoryAmountsByMonth.set(monthKey, categoryAmounts);
+  }
+
+  return monthKeys.map((monthKey) => {
+    const previousMonthKey = addMonths(monthKey, -1);
+    const totalYen = totalsByMonth.get(monthKey) || 0;
+    const previousTotalYen = totalsByMonth.get(previousMonthKey) || 0;
+    const currentUserAmount = currentUserAmountsByMonth.get(monthKey) || 0;
+    const alexPercentage = totalYen > 0 ? Math.round((currentUserAmount / totalYen) * 100) : 50;
+    const alexAmountYen = totalYen > 0 ? currentUserAmount : 0;
+    const categoryAmounts = categoryAmountsByMonth.get(monthKey) || createEmptyCategoryAmounts();
+    const previousCategoryAmounts = categoryAmountsByMonth.get(previousMonthKey) || createEmptyCategoryAmounts();
+    const days = daysInMonth(monthKey);
+    const activeCategoryCount = categoryAmountEntries(categoryAmounts).filter((entry) => entry.amountYen > 0).length;
+    const comparisonPercentage = previousTotalYen > 0 ? ((totalYen - previousTotalYen) / previousTotalYen) * 100 : null;
+
+    return {
+      activeCategoryCount,
+      alexAmountYen,
+      alexPercentage,
+      categoryAmounts,
+      code: monthKey,
+      comparison: {
+        direction: totalYen > previousTotalYen ? 'over' : totalYen < previousTotalYen ? 'under' : 'same',
+        label: formatShortMonthLabel(previousMonthKey),
+        percentage: comparisonPercentage,
+        previousTotalYen
+      },
+      dailyAverageYen: Math.round(totalYen / days),
+      days,
+      label: formatReceiptMonthLabel(monthKey).toUpperCase(),
+      lines: PRIMARY_CATEGORIES.map((category) => buildReceiptLine(category.id, categoryAmounts, previousCategoryAmounts)),
+      minaAmountYen: totalYen - alexAmountYen,
+      minaPercentage: 100 - alexPercentage,
+      monthKey,
+      previousMonthKey,
+      records: recordsByMonth.get(monthKey) || 0,
+      span: formatReceiptSpan(monthKey),
+      totalYen
+    };
+  });
+}
+
 function buildDashboardCategoryStats(input: {
   expenses: Expense[];
   totalYen: number;
@@ -417,6 +651,78 @@ function buildDashboardCategoryStats(input: {
       sourceCategories
     };
   });
+}
+
+function buildReceiptLine(
+  categoryId: PrimaryCategoryId,
+  categoryAmounts: Record<PrimaryCategoryId, number>,
+  previousCategoryAmounts: Record<PrimaryCategoryId, number>
+): ReceiptCategoryLine {
+  const category = PRIMARY_CATEGORIES.find((item) => item.id === categoryId)!;
+  const amountYen = categoryAmounts[categoryId] || 0;
+  const previousAmountYen = previousCategoryAmounts[categoryId] || 0;
+  const mom = receiptMom(amountYen, previousAmountYen);
+
+  return {
+    amountYen,
+    categoryId,
+    color: category.color,
+    label: category.label,
+    momDirection: mom.direction,
+    momLabel: mom.label,
+    previousAmountYen
+  };
+}
+
+function receiptMom(amountYen: number, previousAmountYen: number): { direction: ReceiptMomDirection; label: string } {
+  if (previousAmountYen === 0 && amountYen === 0) {
+    return { direction: 'flat', label: '—' };
+  }
+
+  if (previousAmountYen === 0) {
+    return { direction: 'new', label: 'NEW' };
+  }
+
+  const percentage = Math.round(((amountYen - previousAmountYen) / previousAmountYen) * 100);
+  if (percentage > 0) {
+    return { direction: 'up', label: `+${percentage}%` };
+  }
+
+  if (percentage < 0) {
+    return { direction: 'down', label: `−${Math.abs(percentage)}%` };
+  }
+
+  return { direction: 'flat', label: '0%' };
+}
+
+function createEmptyCategoryAmounts(): Record<PrimaryCategoryId, number> {
+  return Object.fromEntries(PRIMARY_CATEGORIES.map((category) => [category.id, 0])) as Record<PrimaryCategoryId, number>;
+}
+
+function categoryAmountEntries(categoryAmounts: Record<PrimaryCategoryId, number>) {
+  return PRIMARY_CATEGORIES.map((category) => ({
+    amountYen: categoryAmounts[category.id] || 0,
+    categoryId: category.id,
+    color: category.color,
+    label: category.label
+  }));
+}
+
+function daysInMonth(monthKey: string) {
+  return Number(monthEndDateString(monthKey).slice(8, 10));
+}
+
+function formatReceiptMonthLabel(monthKey: string) {
+  const [year, month] = parseMonthKey(monthKey);
+  return receiptMonthFormatter.format(new Date(year, month - 1, 1));
+}
+
+function formatReceiptSpan(monthKey: string) {
+  const [year, month] = parseMonthKey(monthKey);
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+  const monthLabel = shortMonthFormatter.format(start);
+  return `${monthLabel} 1-${end.getDate()}`;
 }
 
 function compareCategoryEntries(a: [string, number], b: [string, number]) {
@@ -595,6 +901,10 @@ function formatRangeLabel(startDateString: string, endDateString: string) {
   }
 
   return `${dayFormatter.format(start)}-${dayFormatter.format(end)}`;
+}
+
+function formatDashboardDayLabel(dateString: string) {
+  return longDayFormatter.format(parseDateString(dateString));
 }
 
 function parseMonthKey(monthKey: string) {

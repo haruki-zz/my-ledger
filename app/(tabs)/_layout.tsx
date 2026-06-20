@@ -265,6 +265,13 @@ export default function TabsLayout() {
           name="history"
           options={{
             title: 'History',
+            tabBarIcon: tabIcon('time-outline', 'time')
+          }}
+        />
+        <Tabs.Screen
+          name="receipts"
+          options={{
+            title: 'Receipts',
             tabBarIcon: tabIcon('receipt-outline', 'receipt')
           }}
         />

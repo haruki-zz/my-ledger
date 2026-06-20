@@ -3,7 +3,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  PanResponder,
   Pressable,
   RefreshControl,
   SectionList,
@@ -14,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { BentoCard, IconButton, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
+import { BentoCard, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
 import {
   CategoryList,
   FilterControlButton,
@@ -43,8 +42,7 @@ import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import { currentMonthStartDate } from '@/src/lib/recurring';
 import {
   amountForUser,
-  addMonths,
-  compareMonthKeys,
+  buildHistorySummary,
   currentMonthKey,
   expenseCategoryId,
   filterCurrentMonthSettledExpenses,
@@ -79,11 +77,6 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit'
 });
 
-const SWIPE_DISTANCE = 36;
-const SWIPE_DIRECTION_RATIO = 2.5;
-const SWIPE_VELOCITY = 0.35;
-const SWIPE_VELOCITY_RATIO = 1.5;
-
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -108,13 +101,12 @@ export default function HistoryScreen() {
     closeDropdown,
     resetFilters,
     selectedCategories,
-    selectedMonth,
     selectedUserId,
-    selectMonth,
     selectUser,
     toggleCategory,
     toggleDropdown
   } = useHistoryFilters();
+  const selectedMonth = currentMonthKey();
   const sectionListRef = useRef<SectionList<FilteredExpense, HistorySection> | null>(null);
   const scrolledTargetRef = useRef<string | null>(null);
   const consumedTargetParamRef = useRef<string | null>(null);
@@ -208,14 +200,9 @@ export default function HistoryScreen() {
 
   useEffect(() => {
     const paramDate = firstParam(params.date);
-    const paramMonth = firstParam(params.month) || paramDate?.slice(0, 7);
-    const targetParamKey = paramDate && isDateString(paramDate)
-      ? `${paramMonth || paramDate.slice(0, 7)}:${paramDate}`
+    const targetParamKey = paramDate && isDateString(paramDate) && paramDate.startsWith(`${selectedMonth}-`)
+      ? `${selectedMonth}:${paramDate}`
       : null;
-
-    if (paramMonth && isMonthKey(paramMonth)) {
-      selectMonth(paramMonth);
-    }
 
     if (targetParamKey && paramDate && consumedTargetParamRef.current !== targetParamKey) {
       consumedTargetParamRef.current = targetParamKey;
@@ -226,10 +213,10 @@ export default function HistoryScreen() {
       return;
     }
 
-    if (!paramDate && !paramMonth) {
+    if (!paramDate) {
       consumedTargetParamRef.current = null;
     }
-  }, [activeLedgerId, params.date, params.month, selectMonth]);
+  }, [activeLedgerId, params.date, selectedMonth]);
 
   useEffect(() => {
     void load('initial');
@@ -302,17 +289,6 @@ export default function HistoryScreen() {
       }))
   ), [settledExpenses]);
 
-  const minimumMonthKey = useMemo(() => {
-    const expenseMonthKeys = settledExpenses.map((expense) => monthKeyFromDateString(expense.spent_on));
-    if (expenseMonthKeys.length === 0) {
-      return currentMonthKey();
-    }
-
-    return expenseMonthKeys.sort(compareMonthKeys)[0];
-  }, [settledExpenses]);
-  const atCurrentMonth = compareMonthKeys(selectedMonth, currentMonthKey()) >= 0;
-  const atMinimumMonth = minimumMonthKey ? compareMonthKeys(selectedMonth, minimumMonthKey) <= 0 : false;
-
   const filteredExpenses = useMemo<FilteredExpense[]>(() => {
     const nextFilteredExpenses: FilteredExpense[] = [];
 
@@ -346,10 +322,11 @@ export default function HistoryScreen() {
     selectedCategories.size > 0
   );
 
-  const total = useMemo(
-    () => filteredExpenses.reduce((sum, item) => sum + item.displayAmountYen, 0),
-    [filteredExpenses]
-  );
+  const historySummary = useMemo(() => buildHistorySummary({
+    activeFilterCount: (selectedUserId ? 1 : 0) + selectedCategories.size,
+    expenses: filteredExpenses,
+    monthKey: selectedMonth
+  }), [filteredExpenses, selectedCategories.size, selectedMonth, selectedUserId]);
 
   const sections = useMemo<HistorySection[]>(() => {
     const sectionMap = new Map<string, FilteredExpense[]>();
@@ -449,47 +426,6 @@ export default function HistoryScreen() {
     toggleDropdown(dropdown);
   }
 
-  const moveMonth = useCallback((amount: number) => {
-    if (amount < 0 && atMinimumMonth) {
-      return;
-    }
-
-    if (amount > 0 && atCurrentMonth) {
-      return;
-    }
-
-    const nextMonth = addMonths(selectedMonth, amount);
-    closeDropdown();
-    setTargetDate(null);
-    selectMonth(nextMonth);
-  }, [atCurrentMonth, atMinimumMonth, closeDropdown, selectMonth, selectedMonth]);
-
-  const monthSwipeResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: () => false,
-    onMoveShouldSetPanResponder: (_, gestureState) => (
-      isIntentionalMonthSwipe(
-        gestureState.dx,
-        gestureState.dy,
-        gestureState.vx,
-        gestureState.vy
-      )
-    ),
-    onPanResponderRelease: (_, gestureState) => {
-      if (!isIntentionalMonthSwipe(gestureState.dx, gestureState.dy, gestureState.vx, gestureState.vy)) {
-        return;
-      }
-
-      if (gestureState.dx > 0 && !atMinimumMonth) {
-        moveMonth(-1);
-      }
-
-      if (gestureState.dx < 0 && !atCurrentMonth) {
-        moveMonth(1);
-      }
-    },
-    onPanResponderTerminationRequest: () => true
-  }), [atCurrentMonth, atMinimumMonth, moveMonth]);
-
   function toggleSection(date: string) {
     setCollapsedSections((current) => {
       const next = new Set(current);
@@ -537,48 +473,78 @@ export default function HistoryScreen() {
 
   const header = (
     <View style={localStyles.headerContent}>
-      <View style={localStyles.monthSwipeArea} {...monthSwipeResponder.panHandlers}>
-        <View style={localStyles.monthAnchor}>
-          <IconButton
-            accessibilityLabel="Previous month"
-            disabled={atMinimumMonth}
-            icon="chevron-back"
-            onPress={() => moveMonth(-1)}
-            size="sm"
-            tone="primary"
-          />
-
-          <View style={localStyles.monthTitleGroup}>
-            <Ionicons color={colors.primaryDark} name="calendar" size={24} />
-            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthTitle}>
-              {formatMonthLabel(selectedMonth)}
-            </Text>
-          </View>
-
-          <IconButton
-            accessibilityLabel="Next month"
-            disabled={atCurrentMonth}
-            icon="chevron-forward"
-            onPress={() => moveMonth(1)}
-            size="sm"
-            tone="primary"
-          />
-        </View>
+      <View style={localStyles.monthTitleGroup}>
+        <Ionicons color={colors.primaryDark} name="calendar" size={24} />
+        <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthTitle}>
+          {formatMonthLabel(selectedMonth)}
+        </Text>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
       <BentoCard style={localStyles.summaryCard}>
-        <View style={localStyles.summaryTotalBlock}>
-          <View style={localStyles.summaryLabelRow}>
-            <Text style={localStyles.summaryLabel}>Filtered Total</Text>
-            <Ionicons color={colors.muted} name="information-circle-outline" size={17} />
-          </View>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>
-            {formatYen(total)}
-          </Text>
+        <View style={localStyles.summaryMetaRow}>
+          <Text numberOfLines={1} style={localStyles.summaryLabel}>FILTERED RESULTS</Text>
+          <Text numberOfLines={1} style={localStyles.summaryMeta}>{historySummary.dateSpanLabel}</Text>
         </View>
 
+        <View style={localStyles.summaryLeadRow}>
+          <View style={localStyles.summaryCountBlock}>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryCount}>
+              {historySummary.count}
+            </Text>
+            <Text numberOfLines={1} style={localStyles.summaryRecords}>records</Text>
+          </View>
+          <View style={localStyles.summaryTotalBlock}>
+            <Text numberOfLines={1} style={localStyles.summarySmallLabel}>TOTAL</Text>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summarySmallAmount}>
+              {formatYen(historySummary.totalYen)}
+            </Text>
+          </View>
+        </View>
+
+        <View style={localStyles.summaryStatsRow}>
+          <View style={localStyles.summaryStatTile}>
+            <Text numberOfLines={1} style={localStyles.summarySmallLabel}>Avg / day</Text>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryStatValue}>
+              {formatYen(historySummary.averagePerDayYen)}
+            </Text>
+          </View>
+          <View style={localStyles.summaryStatTile}>
+            <Text numberOfLines={1} style={localStyles.summarySmallLabel}>Peak day</Text>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryStatValue}>
+              {historySummary.peakDay.date ? formatYen(historySummary.peakDay.amountYen) : '--'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={localStyles.categoryMixBar}>
+          {historySummary.categoryMix.map((segment) => (
+            <View
+              key={segment.categoryId}
+              style={[
+                localStyles.categoryMixSegment,
+                {
+                  backgroundColor: segment.color,
+                  flexGrow: segment.amountYen,
+                  flexBasis: 0
+                }
+              ]}
+            />
+          ))}
+          {historySummary.categoryMix.length === 0 ? <View style={localStyles.categoryMixEmpty} /> : null}
+        </View>
+        <View style={localStyles.categoryCaptionRow}>
+          <View
+            style={[
+              localStyles.categoryCaptionDot,
+              { backgroundColor: historySummary.categoryMix[0]?.color || colors.subtle }
+            ]}
+          />
+          <Text numberOfLines={1} style={localStyles.categoryCaption}>
+            {historySummary.topCategoryCaption}
+          </Text>
+        </View>
       </BentoCard>
 
       <View style={localStyles.filterArea}>
@@ -868,10 +834,6 @@ function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function isMonthKey(value: string) {
-  return /^\d{4}-\d{2}$/.test(value);
-}
-
 function isDateString(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
@@ -880,23 +842,42 @@ function uniqueUserIds(userIds: string[]) {
   return [...new Set(userIds.filter(Boolean))];
 }
 
-function isIntentionalMonthSwipe(dx: number, dy: number, vx: number, vy: number) {
-  const horizontalDistance = Math.abs(dx);
-  const verticalDistance = Math.abs(dy);
-  const horizontalVelocity = Math.abs(vx);
-  const verticalVelocity = Math.abs(vy);
-
-  if (horizontalDistance <= SWIPE_DISTANCE) {
-    return false;
-  }
-
-  return (
-    horizontalDistance > verticalDistance * SWIPE_DIRECTION_RATIO ||
-    (horizontalVelocity > SWIPE_VELOCITY && horizontalVelocity > verticalVelocity * SWIPE_VELOCITY_RATIO)
-  );
-}
-
 const localStyles = StyleSheet.create({
+  categoryCaption: {
+    color: colors.muted,
+    flex: 1,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 15,
+    minWidth: 0
+  },
+  categoryCaptionDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  categoryCaptionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    minWidth: 0
+  },
+  categoryMixBar: {
+    backgroundColor: 'rgba(42,39,34,0.08)',
+    borderRadius: 5,
+    flexDirection: 'row',
+    height: 10,
+    overflow: 'hidden',
+    width: '100%'
+  },
+  categoryMixEmpty: {
+    backgroundColor: 'rgba(42,39,34,0.10)',
+    flex: 1
+  },
+  categoryMixSegment: {
+    minWidth: 2
+  },
   dropdownCard: {
     gap: 10,
     padding: 14
@@ -929,7 +910,6 @@ const localStyles = StyleSheet.create({
   },
   monthTitle: {
     color: colors.primaryDark,
-    flexShrink: 1,
     fontFamily: fontFamilies.monoBold,
     fontSize: 24,
     fontWeight: '700',
@@ -937,12 +917,11 @@ const localStyles = StyleSheet.create({
   },
   monthTitleGroup: {
     alignItems: 'center',
-    flex: 1,
     flexDirection: 'row',
     gap: 10,
     justifyContent: 'center',
     minWidth: 0,
-    paddingHorizontal: 12
+    width: '100%'
   },
   pressed: {
     opacity: 0.76
@@ -1034,9 +1013,31 @@ const localStyles = StyleSheet.create({
     lineHeight: 52
   },
   summaryCard: {
-    gap: 18,
-    paddingHorizontal: 22,
-    paddingVertical: 20
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 16
+  },
+  summaryCount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 44,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 50
+  },
+  summaryCountBlock: {
+    alignItems: 'baseline',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 9,
+    minWidth: 0
+  },
+  summaryLeadRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 12,
+    justifyContent: 'space-between'
   },
   summaryLabel: {
     color: colors.muted,
@@ -1052,9 +1053,74 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6
   },
-  summaryTotalBlock: {
-    gap: 8,
+  summaryMeta: {
+    color: colors.subtle,
+    flexShrink: 1,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10.5,
+    fontWeight: '700',
+    lineHeight: 15,
+    minWidth: 0,
+    textAlign: 'right'
+  },
+  summaryMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 10,
+    justifyContent: 'space-between',
     minWidth: 0
+  },
+  summaryRecords: {
+    color: colors.muted,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20
+  },
+  summarySmallAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 22,
+    textAlign: 'right'
+  },
+  summarySmallLabel: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.bold,
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    lineHeight: 14,
+    textTransform: 'uppercase'
+  },
+  summaryStatsRow: {
+    flexDirection: 'row',
+    gap: 10
+  },
+  summaryStatTile: {
+    backgroundColor: 'rgba(241,236,227,0.68)',
+    borderColor: colors.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  summaryStatValue: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20
+  },
+  summaryTotalBlock: {
+    alignItems: 'flex-end',
+    gap: 3,
+    minWidth: 116
   },
   topBar: {
     alignItems: 'center',

@@ -14,13 +14,13 @@ import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/compo
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { tintFromAccent } from '@/src/lib/color';
-import { buildUserColorMap, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
+import { buildUserColorMap, colorForDarkSurface, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, formatYen, todayDateString } from '@/src/lib/format';
 import {
-  addMonths,
   buildDashboardHeatDays,
-  compareMonthKeys,
   currentMonthKey,
+  monthKeyFromDateString,
+  resolveDashboardPeriodNavigation,
   type CategoryStat,
   type DashboardPeriod
 } from '@/src/lib/stats';
@@ -39,15 +39,11 @@ const SWIPE_DISTANCE = 36;
 const SWIPE_DIRECTION_RATIO = 2.5;
 const SWIPE_VELOCITY = 0.35;
 const SWIPE_VELOCITY_RATIO = 1.5;
-const monthLabelFormatter = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  year: 'numeric'
-});
-
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
-  const [monthKey, setMonthKey] = useState(currentMonthKey());
+  const currentDashboardMonthKey = currentMonthKey();
   const [period, setPeriod] = useState<DashboardPeriod>('month');
+  const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<SelectedCategoryState | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const {
@@ -60,7 +56,7 @@ export default function DashboardScreen() {
     stats,
     error,
     reload
-  } = useDashboardData(monthKey, period);
+  } = useDashboardData(currentDashboardMonthKey, period, periodOffset);
   const {
     items: transferItems,
     loading: transferLoading,
@@ -72,9 +68,6 @@ export default function DashboardScreen() {
 
   const currentUserName = displayName(members.find((member) => member.user_id === currentUserId)?.profile.display_name);
   const otherUserName = displayName(members.find((member) => member.user_id === otherUserId)?.profile.display_name);
-  const atCurrentMonth = compareMonthKeys(monthKey, currentMonthKey()) >= 0;
-  const atMinimumMonth = minimumMonthKey ? compareMonthKeys(monthKey, minimumMonthKey) <= 0 : false;
-  const monthNavigationDisabled = period !== 'month';
   const memberStats = stats.memberTotals;
   const currentMemberStat = memberStats.find((member) => member.userId === currentUserId);
   const otherMemberStat = memberStats.find((member) => member.userId === otherUserId);
@@ -86,8 +79,17 @@ export default function DashboardScreen() {
   ), [currentUserId, userIds]);
   const currentUserColor = currentUserId ? userColorById.get(currentUserId) || DEFAULT_USER_COLOR : DEFAULT_USER_COLOR;
   const otherUserColor = otherUserId ? userColorById.get(otherUserId) || DEFAULT_PARTNER_COLOR : DEFAULT_PARTNER_COLOR;
+  const currentUserColorOnDark = colorForDarkSurface(currentUserColor);
+  const otherUserColorOnDark = colorForDarkSurface(otherUserColor);
   const heatmapMonthKey = stats.dateRange.effectiveMonthKey;
   const ledgerTodayString = todayDateString(DEFAULT_LEDGER_TIME_ZONE);
+  const periodNavigation = resolveDashboardPeriodNavigation({
+    minimumMonthKey,
+    monthKey: currentDashboardMonthKey,
+    offset: periodOffset,
+    period,
+    today: ledgerTodayString
+  });
   const heatDays = useMemo(() => (
     buildDashboardHeatDays({
       expenses: settledExpenses,
@@ -98,14 +100,10 @@ export default function DashboardScreen() {
     })
   ), [currentUserId, heatmapMonthKey, ledgerTodayString, members, settledExpenses]);
 
-  const moveMonth = useCallback((amount: number) => {
-    if (period !== 'month') {
-      return;
-    }
-
+  const movePeriod = useCallback((amount: number) => {
     setSelectedCategory(null);
-    setMonthKey((current) => addMonths(current, amount));
-  }, [period]);
+    setPeriodOffset((current) => current + amount);
+  }, []);
 
   const refreshDashboard = useCallback(async () => {
     setManualRefreshing(true);
@@ -123,9 +121,7 @@ export default function DashboardScreen() {
 
     setSelectedCategory(null);
     setPeriod(nextPeriod);
-    if (nextPeriod !== 'month') {
-      setMonthKey(currentMonthKey());
-    }
+    setPeriodOffset(0);
   }
 
   function toggleCategorySelection(category: CategoryStat) {
@@ -137,11 +133,19 @@ export default function DashboardScreen() {
   }
 
   function viewHistoryDate(date: string) {
+    const targetMonthKey = monthKeyFromDateString(date);
+    if (targetMonthKey !== currentMonthKey()) {
+      router.push({
+        pathname: '/(tabs)/receipts',
+        params: { month: targetMonthKey }
+      });
+      return;
+    }
+
     router.push({
       pathname: '/(tabs)/history',
       params: {
-        date,
-        month: date.slice(0, 7)
+        date
       }
     });
   }
@@ -161,20 +165,16 @@ export default function DashboardScreen() {
         return;
       }
 
-      if (monthNavigationDisabled) {
-        return;
+      if (gestureState.dx > 0 && periodNavigation.canGoPrevious) {
+        movePeriod(-1);
       }
 
-      if (gestureState.dx > 0 && !atMinimumMonth) {
-        moveMonth(-1);
-      }
-
-      if (gestureState.dx < 0 && !atCurrentMonth) {
-        moveMonth(1);
+      if (gestureState.dx < 0 && periodNavigation.canGoNext) {
+        movePeriod(1);
       }
     },
     onPanResponderTerminationRequest: () => true
-  }), [atCurrentMonth, atMinimumMonth, monthNavigationDisabled, moveMonth]);
+  }), [movePeriod, periodNavigation.canGoNext, periodNavigation.canGoPrevious]);
 
   return (
     <>
@@ -194,42 +194,39 @@ export default function DashboardScreen() {
           <View style={localStyles.monthSwipeArea} {...monthSwipeResponder.panHandlers}>
             <View style={localStyles.monthAnchor}>
               <IconButton
-                accessibilityLabel="Previous month"
-                disabled={monthNavigationDisabled || atMinimumMonth}
+                accessibilityLabel={`Previous ${period}`}
+                disabled={!periodNavigation.canGoPrevious}
                 icon="chevron-back"
-                onPress={() => moveMonth(-1)}
+                onPress={() => movePeriod(-1)}
                 size="sm"
                 tone="primary"
               />
 
               <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthLabel}>
-                {formatEnglishMonthLabel(monthKey)}
+                {periodNavigation.label}
               </Text>
 
               <IconButton
-                accessibilityLabel="Next month"
-                disabled={monthNavigationDisabled || atCurrentMonth}
+                accessibilityLabel={`Next ${period}`}
+                disabled={!periodNavigation.canGoNext}
                 icon="chevron-forward"
-                onPress={() => moveMonth(1)}
+                onPress={() => movePeriod(1)}
                 size="sm"
                 tone="primary"
               />
             </View>
 
+            <PillTabs
+              accessibilityLabel="Dashboard period"
+              onChange={selectPeriod}
+              options={PERIOD_OPTIONS}
+              size="sm"
+              style={localStyles.periodPillTrack}
+              value={period}
+            />
+
             <BentoCard variant="hero" style={localStyles.heroCard}>
               <View style={localStyles.heroContent}>
-                <View style={localStyles.heroTopRow}>
-                  <Text style={localStyles.monthlyTotalLabel}>Total</Text>
-                  <PillTabs
-                    accessibilityLabel="Dashboard period"
-                    onChange={selectPeriod}
-                    options={PERIOD_OPTIONS}
-                    size="sm"
-                    style={localStyles.periodPillTrack}
-                    value={period}
-                  />
-                </View>
-
                 <SlidingValueText
                   formatValue={formatYen}
                   textStyle={localStyles.heroAmount}
@@ -238,21 +235,21 @@ export default function DashboardScreen() {
                 />
 
                 <View style={localStyles.comparisonRow}>
-                  <SlidingValueText
-                    formatValue={formatComparisonAmount}
-                    textStyle={localStyles.comparisonAmountText}
-                    value={Math.abs(stats.comparison.deltaYen)}
-                    wrapperStyle={localStyles.comparisonAmountSlot}
-                  />
                   <Ionicons
                     color={comparisonColor(stats.comparison.direction)}
                     name={comparisonIcon(stats.comparison.direction)}
                     size={18}
                   />
+                  <SlidingValueText
+                    formatValue={formatComparisonAmount}
+                    textStyle={[localStyles.comparisonAmountText, { color: comparisonColor(stats.comparison.direction) }]}
+                    value={Math.abs(stats.comparison.deltaYen)}
+                    wrapperStyle={localStyles.comparisonAmountSlot}
+                  />
                   <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
                     {stats.comparison.label}
                   </Text>
-                  <View style={[localStyles.percentBadge, { backgroundColor: tintFromAccent(comparisonColor(stats.comparison.direction), 0.12) }]}>
+                  <View style={localStyles.percentBadge}>
                     <Text style={[localStyles.percentBadgeText, { color: comparisonColor(stats.comparison.direction) }]}>
                       {formatComparisonPercentage(stats.comparison.percentage)}
                     </Text>
@@ -264,7 +261,7 @@ export default function DashboardScreen() {
                 <View style={localStyles.memberSplitRow}>
                   <MemberSplit
                     amountYen={currentMemberStat?.amountYen || 0}
-                    color={currentUserColor}
+                    color={currentUserColorOnDark}
                     label={currentUserName}
                   />
                   {otherUserId ? (
@@ -272,7 +269,7 @@ export default function DashboardScreen() {
                       <View style={localStyles.memberDivider} />
                       <MemberSplit
                         amountYen={otherMemberStat?.amountYen || 0}
-                        color={otherUserColor}
+                        color={otherUserColorOnDark}
                         label={otherUserName}
                       />
                     </>
@@ -370,27 +367,19 @@ function MemberSplit({
 }) {
   return (
     <View style={localStyles.memberSplit}>
-      <View style={[localStyles.memberNamePill, { backgroundColor: tintFromAccent(color) }]}>
+      <View style={localStyles.memberNamePill}>
         <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.memberNamePillText, { color }]}>
           {label}
         </Text>
       </View>
-      <View style={localStyles.memberAmountRow}>
-        <SlidingValueText
-          fitToWidth
-          formatValue={formatYen}
-          textStyle={[localStyles.memberAmount, { color }]}
-          value={amountYen}
-          wrapperStyle={localStyles.memberAmountSlot}
-        />
-      </View>
+      <SlidingValueText
+        formatValue={formatYen}
+        textStyle={[localStyles.memberAmount, { color }]}
+        value={amountYen}
+        wrapperStyle={localStyles.memberAmountSlot}
+      />
     </View>
   );
-}
-
-function formatEnglishMonthLabel(monthKey: string) {
-  const [year, month] = monthKey.split('-').map(Number);
-  return monthLabelFormatter.format(new Date(year, month - 1, 1));
 }
 
 function formatComparisonAmount(amountYen: number) {
@@ -418,14 +407,14 @@ function formatComparisonPercentage(percentage: number | null) {
 
 function comparisonColor(direction: 'under' | 'over' | 'same') {
   if (direction === 'over') {
-    return colors.danger;
+    return colors.dangerOnDark;
   }
 
   if (direction === 'under') {
-    return colors.success;
+    return colors.successOnDark;
   }
 
-  return colors.muted;
+  return 'rgba(255,255,255,0.72)';
 }
 
 function comparisonIcon(direction: 'under' | 'over' | 'same') {
@@ -467,16 +456,15 @@ const localStyles = StyleSheet.create({
     minHeight: 32
   },
   comparisonText: {
-    color: colors.ink,
+    color: 'rgba(255,255,255,0.72)',
     flex: 1,
     fontFamily: fontFamilies.bold,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    lineHeight: 20,
+    lineHeight: 18,
     minWidth: 0
   },
   comparisonAmountText: {
-    color: colors.ink,
     fontFamily: fontFamilies.monoBold,
     fontSize: 14,
     fontWeight: '700',
@@ -506,29 +494,32 @@ const localStyles = StyleSheet.create({
     fontSize: 13
   },
   heroAmount: {
-    color: colors.ink,
+    color: '#FFFDF7',
     fontFamily: fontFamilies.monoBold,
-    fontSize: 52,
+    fontSize: 40,
     fontWeight: '700',
     letterSpacing: 0,
-    lineHeight: 62
+    lineHeight: 48
   },
   heroAmountSlot: {
-    height: 62
+    height: 48
   },
   heroCard: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
     gap: 0,
     minHeight: 0,
     padding: 0,
     overflow: 'hidden'
   },
   heroContent: {
-    gap: 12,
-    padding: 22,
-    paddingBottom: 0
+    gap: 10,
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    paddingTop: 15
   },
   heroDivider: {
-    backgroundColor: colors.line,
+    backgroundColor: 'rgba(255,255,255,0.14)',
     height: 1,
     marginTop: 2
   },
@@ -541,9 +532,9 @@ const localStyles = StyleSheet.create({
   },
   memberAmount: {
     fontFamily: fontFamilies.monoBold,
-    fontSize: 26,
+    fontSize: 17,
     fontWeight: '700',
-    lineHeight: 32,
+    lineHeight: 22,
     textAlign: 'left'
   },
   memberAmountRow: {
@@ -553,18 +544,19 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between'
   },
   memberAmountSlot: {
-    flex: 1,
-    height: 32,
-    minWidth: 0
+    flexShrink: 0,
+    height: 22
   },
   memberDivider: {
-    backgroundColor: colors.line,
+    backgroundColor: 'rgba(255,255,255,0.14)',
     width: 1
   },
   memberNamePill: {
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255,255,255,0.10)',
     borderRadius: theme.radii.pill,
-    maxWidth: '100%',
+    flexShrink: 1,
+    maxWidth: 78,
     minHeight: 22,
     justifyContent: 'center',
     paddingHorizontal: 9,
@@ -575,17 +567,20 @@ const localStyles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.5,
-    lineHeight: 14
+    lineHeight: 14,
+    minWidth: 0
   },
   memberSplit: {
+    alignItems: 'center',
     flex: 1,
-    gap: 8,
+    flexDirection: 'row',
+    gap: 7,
     minWidth: 0
   },
   memberSplitRow: {
     flexDirection: 'row',
-    gap: 18,
-    minHeight: 72
+    gap: 10,
+    minHeight: 22
   },
   monthAnchor: {
     alignItems: 'center',
@@ -611,9 +606,10 @@ const localStyles = StyleSheet.create({
     textTransform: 'uppercase'
   },
   monthSwipeArea: {
-    gap: 18
+    gap: 10
   },
   percentBadge: {
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4
@@ -625,9 +621,7 @@ const localStyles = StyleSheet.create({
     lineHeight: 18
   },
   periodPillTrack: {
-    flex: 1,
-    maxWidth: 236,
-    minWidth: 168
+    alignSelf: 'stretch'
   },
   sectionHeader: {
     alignItems: 'center',
