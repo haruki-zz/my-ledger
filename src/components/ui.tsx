@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
   PanResponder,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -467,8 +468,10 @@ export function SwipeExpenseRow({
   ];
   const rowTitle = content.title || content.category;
 
+  const rowMeasurementProps = Platform.OS === 'web' ? {} : { collapsable: false };
+
   return (
-    <View collapsable={false} ref={rowRef} style={uiStyles.swipeShell}>
+    <View {...rowMeasurementProps} ref={rowRef} style={uiStyles.swipeShell}>
       <View style={uiStyles.swipeActionLayer}>
         <View style={[uiStyles.swipeAction, uiStyles.swipeActionEdit]}>
           <Ionicons color="#FFFFFF" name="create-outline" size={22} />

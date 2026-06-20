@@ -39,6 +39,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
   const [minimumMonthKey, setMinimumMonthKey] = useState<string | null>(null);
   const [loadedMonthKey, setLoadedMonthKey] = useState<string | null>(null);
+  const [loadedPeriod, setLoadedPeriod] = useState<DashboardPeriod | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,10 +48,25 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
   const hasLoadedData = useRef(false);
   const loadInFlightRef = useRef(false);
   const loadRef = useRef<() => Promise<void>>(async () => undefined);
+  const periodRef = useRef(period);
+
+  const requestedDateRange = useMemo(
+    () => resolveDashboardDateRange(period, monthKey),
+    [monthKey, period]
+  );
+  const coverageMonthKey = requestedDateRange.effectiveMonthKey;
+  const coverageDateRange = useMemo(
+    () => resolveDashboardDateRange('month', coverageMonthKey),
+    [coverageMonthKey]
+  );
 
   useEffect(() => {
     currentLedgerRef.current = currentLedger;
   }, [currentLedger]);
+
+  useEffect(() => {
+    periodRef.current = period;
+  }, [period]);
 
   const load = useCallback(async (options?: { userInitiated?: boolean }) => {
     if (ledgerLoading) {
@@ -79,8 +95,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
         return;
       }
 
-      const dateRange = resolveDashboardDateRange(period, monthKey);
-      const generationMonthKey = monthKeyFromDateString(dateRange.endDateString);
+      const generationMonthKey = monthKeyFromDateString(coverageDateRange.endDateString);
       const generationPromise = generateRecurringExpenses(activeLedger.id, monthStartDateString(generationMonthKey));
       if (generationMonthKey === currentMonthKey()) {
         await generationPromise;
@@ -92,7 +107,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
       const [nextMembers, firstExpenseSpentOn, nextExpenses, nextRecurringRules] = await Promise.all([
         getLedgerMembers(activeLedger.id),
         getFirstExpenseSpentOn(activeLedger.id),
-        getExpensesByMonth(activeLedger.id, dateRange.comparisonStartDateString, dateRange.endDateString, { refreshFirst: true }),
+        getExpensesByMonth(activeLedger.id, coverageDateRange.comparisonStartDateString, coverageDateRange.endDateString, { refreshFirst: true }),
         getRecurringExpenseRules(activeLedger.id, { emitChange: false, refreshFirst: true }).catch((rulesError) => {
           console.warn('Dashboard fixed expense rules reload failed:', rulesError instanceof Error ? rulesError.message : String(rulesError));
           return null;
@@ -127,7 +142,8 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
       setCurrentUserId(userId);
       setOtherUserId(nextOtherUserId);
       setMinimumMonthKey(nextMinimumMonthKey);
-      setLoadedMonthKey(dateRange.effectiveMonthKey);
+      setLoadedMonthKey(coverageDateRange.effectiveMonthKey);
+      setLoadedPeriod(periodRef.current);
       setDataVersion((current) => current + 1);
       hasLoadedData.current = true;
     } catch (loadError) {
@@ -147,7 +163,13 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
         loadInFlightRef.current = false;
       }
     }
-  }, [ledgerLoading, monthKey, period, session?.user.id]);
+  }, [
+    coverageDateRange.comparisonStartDateString,
+    coverageDateRange.effectiveMonthKey,
+    coverageDateRange.endDateString,
+    ledgerLoading,
+    session?.user.id
+  ]);
 
   useEffect(() => {
     requestSequence.current += 1;
@@ -162,6 +184,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
     setOtherUserId(null);
     setMinimumMonthKey(null);
     setLoadedMonthKey(null);
+    setLoadedPeriod(null);
     setDataVersion((current) => current + 1);
   }, [ledgerId]);
 
@@ -194,21 +217,29 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod) {
     [expenses, recurringRules]
   );
 
+  const hasCurrentCoverage = loadedMonthKey === coverageMonthKey;
+  const statsMonthKey = hasCurrentCoverage
+    ? requestedDateRange.effectiveMonthKey
+    : loadedMonthKey || requestedDateRange.effectiveMonthKey;
+  const statsPeriod = hasCurrentCoverage
+    ? period
+    : loadedPeriod || period;
   const stats = useMemo(
     () => buildDashboardPeriodStats({
       expenses: settledExpenses,
-      monthKey: loadedMonthKey || monthKey,
-      period,
+      monthKey: statsMonthKey,
+      period: statsPeriod,
       currentUserId,
       otherUserId
     }),
-    [currentUserId, loadedMonthKey, monthKey, otherUserId, period, settledExpenses]
+    [currentUserId, otherUserId, settledExpenses, statsMonthKey, statsPeriod]
   );
 
   return {
     ledger,
     members,
     expenses,
+    settledExpenses,
     profiles,
     currentUserId,
     otherUserId,

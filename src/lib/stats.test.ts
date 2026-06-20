@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildDashboardHeatDays,
   buildDashboardDailyUserSeriesForCategories,
   buildDashboardPeriodStats,
   filterCurrentMonthSettledExpenses,
+  heatLevelForAmount,
   resolveDashboardDateRange,
   type DashboardPeriod
 } from './stats';
 import { EXPENSE_CATEGORIES, iconNameForExpenseCategory } from './categories';
 import { PRIMARY_CATEGORIES, mapLegacyCategoryToId, resolveCategory } from './categorySystem';
 import { buildUserColorMap, colorForCategory, DEFAULT_USER_COLOR } from './entityColors';
-import type { Expense } from '@/src/types/database';
+import type { Expense, LedgerMemberProfile } from '@/src/types/database';
 
 const CURRENT_USER_ID = 'user-a';
 const OTHER_USER_ID = 'user-b';
@@ -315,6 +317,89 @@ describe('buildDashboardPeriodStats', () => {
   });
 });
 
+describe('buildDashboardHeatDays', () => {
+  it('builds one natural month and ignores comparison-month expenses', () => {
+    const days = buildHeatDays([
+      expense({ amountYen: 900, category: 'Food & Dining', spentOn: '2026-05-31' }),
+      expense({ amountYen: 1200, category: 'Food & Dining', spentOn: '2026-06-01' })
+    ]);
+
+    expect(days).toHaveLength(30);
+    expect(days[0]).toMatchObject({
+      amount: 1200,
+      count: 1,
+      date: '2026-06-01'
+    });
+    expect(days.every((day) => day.date.startsWith('2026-06-'))).toBe(true);
+  });
+
+  it('sorts and colors top categories for each day', () => {
+    const days = buildHeatDays([
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-02' }),
+      expense({ amountYen: 900, category: 'Food & Dining', spentOn: '2026-06-02' }),
+      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-02' })
+    ]);
+
+    expect(days[1].byCategory).toEqual([
+      expect.objectContaining({ amount: 900, color: '#CB5F43', id: 'food_dining', label: 'Food & Dining' }),
+      expect.objectContaining({ amount: 500, color: '#4F77BE', id: 'transport', label: 'Transport' }),
+      expect.objectContaining({ amount: 200, color: '#C9628F', id: 'shopping', label: 'Shopping' })
+    ]);
+  });
+
+  it('aggregates member splits with the dashboard attribution rules', () => {
+    const days = buildHeatDays([
+      expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-06-03', splits: [650, 350] }),
+      expense({ amountYen: 700, category: 'Transport', ownership: 'personal', paidBy: OTHER_USER_ID, spentOn: '2026-06-03' })
+    ]);
+
+    expect(days[2].byMember).toEqual([
+      expect.objectContaining({ amount: 650, color: '#B25A3C', id: CURRENT_USER_ID, label: 'Alex' }),
+      expect.objectContaining({ amount: 1050, color: '#3F8A86', id: OTHER_USER_ID, label: 'Mina' })
+    ]);
+  });
+
+  it('keeps zero-spend days and excludes current-month future expenses', () => {
+    const days = buildHeatDays([
+      expense({ amountYen: 1200, category: 'Food & Dining', spentOn: '2026-06-10' })
+    ], { today: '2026-06-03' });
+
+    expect(days[8]).toMatchObject({
+      amount: 0,
+      count: 0,
+      date: '2026-06-09'
+    });
+    expect(days[9]).toMatchObject({
+      amount: 0,
+      count: 0,
+      date: '2026-06-10'
+    });
+  });
+
+  it('does not treat historical month dates after same-numbered today as future', () => {
+    const days = buildHeatDays([
+      expense({ amountYen: 1200, category: 'Food & Dining', spentOn: '2026-05-10' })
+    ], { monthKey: '2026-05', today: '2026-06-03' });
+
+    expect(days[9]).toMatchObject({
+      amount: 1200,
+      count: 1,
+      date: '2026-05-10'
+    });
+  });
+});
+
+describe('heatLevelForAmount', () => {
+  it('assigns zero and relative spend into four positive levels', () => {
+    expect(heatLevelForAmount(0, 1000)).toBe(0);
+    expect(heatLevelForAmount(1, 1000)).toBe(1);
+    expect(heatLevelForAmount(250, 1000)).toBe(1);
+    expect(heatLevelForAmount(251, 1000)).toBe(2);
+    expect(heatLevelForAmount(750, 1000)).toBe(3);
+    expect(heatLevelForAmount(1000, 1000)).toBe(4);
+  });
+});
+
 describe('filterCurrentMonthSettledExpenses', () => {
   it('keeps current-month active fixed expenses on the pay day boundary', () => {
     const expenses = [
@@ -410,6 +495,46 @@ function buildStats(period: DashboardPeriod, expenses: Expense[]) {
     otherUserId: OTHER_USER_ID,
     today: '2026-06-03'
   });
+}
+
+function buildHeatDays(
+  expenses: Expense[],
+  options: { monthKey?: string; today?: string } = {}
+) {
+  return buildDashboardHeatDays({
+    expenses,
+    monthKey: options.monthKey || '2026-06',
+    members: ledgerMembers(),
+    currentUserId: CURRENT_USER_ID,
+    today: options.today || '2026-06-20'
+  });
+}
+
+function ledgerMembers(): LedgerMemberProfile[] {
+  return [
+    {
+      ledger_id: 'ledger-1',
+      user_id: CURRENT_USER_ID,
+      joined_at: '2026-01-01T00:00:00Z',
+      profile: {
+        id: CURRENT_USER_ID,
+        display_name: 'Alex',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z'
+      }
+    },
+    {
+      ledger_id: 'ledger-1',
+      user_id: OTHER_USER_ID,
+      joined_at: '2026-01-01T00:00:00Z',
+      profile: {
+        id: OTHER_USER_ID,
+        display_name: 'Mina',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z'
+      }
+    }
+  ];
 }
 
 function expense(input: {

@@ -1,6 +1,7 @@
 import { buildUserColorMap, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './entityColors';
 import { categoryColor, categoryLabel, resolveCategory } from './categorySystem';
-import type { Expense, RecurringExpenseRule } from '../types/database';
+import { DEFAULT_LEDGER_TIME_ZONE, displayName, todayDateString } from './format';
+import type { Expense, LedgerMemberProfile, RecurringExpenseRule } from '../types/database';
 
 export type DashboardPeriod = 'today' | 'week' | 'month';
 
@@ -23,6 +24,14 @@ export type DailyUserStat = {
   label: string;
   amountsByUserId: Record<string, number>;
   totalAmountYen: number;
+};
+
+export type HeatDay = {
+  date: string;
+  amount: number;
+  count: number;
+  byCategory: { id: string; label: string; color: string; amount: number }[];
+  byMember: { id: string; label: string; color: string; amount: number }[];
 };
 
 type MemberPeriodStat = {
@@ -79,8 +88,6 @@ const dayFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
 });
-const RECURRING_EXPENSE_TIME_ZONE = 'Asia/Tokyo';
-
 function padDatePart(value: number) {
   return String(value).padStart(2, '0');
 }
@@ -106,7 +113,7 @@ export function filterCurrentMonthSettledExpenses(input: {
     ? input.today
     : input.today
       ? formatDateString(startOfDay(input.today))
-      : formatDateStringInTimeZone(new Date(), RECURRING_EXPENSE_TIME_ZONE);
+      : todayDateString(DEFAULT_LEDGER_TIME_ZONE);
   const todayMonthKey = monthKeyFromDateString(todayString);
   const recurringRulesById = new Map(input.recurringRules.map((rule) => [rule.id, rule]));
 
@@ -276,6 +283,91 @@ export function buildDashboardPeriodStats(input: {
     dateRange,
     memberTotals
   };
+}
+
+export function buildDashboardHeatDays(input: {
+  expenses: Expense[];
+  monthKey: string;
+  members: LedgerMemberProfile[];
+  currentUserId: string | null;
+  today?: Date | string;
+}): HeatDay[] {
+  const todayString = typeof input.today === 'string'
+    ? input.today
+    : input.today
+      ? formatDateString(startOfDay(input.today))
+      : todayDateString(DEFAULT_LEDGER_TIME_ZONE);
+  const isCurrentMonth = input.monthKey === monthKeyFromDateString(todayString);
+  const monthStartString = monthStartDateString(input.monthKey);
+  const monthEndStringValue = monthEndDateString(input.monthKey);
+  const dates = dateStringsInRange(monthStartString, monthEndStringValue);
+  const userIds = input.members.map((member) => member.user_id);
+  const userColorById = buildUserColorMap(userIds, input.currentUserId);
+  const categoryAmountsByDate = new Map<string, Map<string, number>>();
+  const memberAmountsByDate = new Map<string, Map<string, number>>();
+  const totalsByDate = new Map<string, number>();
+  const countsByDate = new Map<string, number>();
+
+  for (const date of dates) {
+    categoryAmountsByDate.set(date, new Map());
+    memberAmountsByDate.set(date, new Map(userIds.map((userId) => [userId, 0])));
+    totalsByDate.set(date, 0);
+    countsByDate.set(date, 0);
+  }
+
+  for (const expense of input.expenses) {
+    if (monthKeyFromDateString(expense.spent_on) !== input.monthKey) {
+      continue;
+    }
+
+    if (isCurrentMonth && expense.spent_on > todayString) {
+      continue;
+    }
+
+    const categoryAmounts = categoryAmountsByDate.get(expense.spent_on);
+    const memberAmounts = memberAmountsByDate.get(expense.spent_on);
+    if (!categoryAmounts || !memberAmounts) {
+      continue;
+    }
+
+    const categoryId = expenseCategoryId(expense);
+    categoryAmounts.set(categoryId, (categoryAmounts.get(categoryId) || 0) + expense.amount_yen);
+    totalsByDate.set(expense.spent_on, (totalsByDate.get(expense.spent_on) || 0) + expense.amount_yen);
+    countsByDate.set(expense.spent_on, (countsByDate.get(expense.spent_on) || 0) + 1);
+
+    for (const userId of userIds) {
+      memberAmounts.set(userId, (memberAmounts.get(userId) || 0) + amountForUser(expense, userId));
+    }
+  }
+
+  return dates.map((date) => ({
+    date,
+    amount: totalsByDate.get(date) || 0,
+    count: countsByDate.get(date) || 0,
+    byCategory: [...(categoryAmountsByDate.get(date)?.entries() || [])]
+      .sort((a, b) => b[1] - a[1] || categoryLabel(a[0]).localeCompare(categoryLabel(b[0])))
+      .slice(0, 4)
+      .map(([categoryId, amount]) => ({
+        id: categoryId,
+        label: categoryLabel(categoryId),
+        color: categoryColor(categoryId),
+        amount
+      })),
+    byMember: input.members.map((member) => ({
+      id: member.user_id,
+      label: displayName(member.profile.display_name),
+      color: userColorById.get(member.user_id) || DEFAULT_USER_COLOR,
+      amount: memberAmountsByDate.get(date)?.get(member.user_id) || 0
+    }))
+  }));
+}
+
+export function heatLevelForAmount(amount: number, maxAmount: number) {
+  if (amount <= 0 || maxAmount <= 0) {
+    return 0;
+  }
+
+  return Math.min(4, Math.max(1, Math.ceil((amount / maxAmount) * 4)));
 }
 
 function buildDashboardCategoryStats(input: {
@@ -521,15 +613,4 @@ function formatDateString(date: Date) {
     padDatePart(date.getMonth() + 1),
     padDatePart(date.getDate())
   ].join('-');
-}
-
-function formatDateStringInTimeZone(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    day: '2-digit',
-    month: '2-digit',
-    timeZone,
-    year: 'numeric'
-  }).formatToParts(date);
-  const valueByType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return [valueByType.year, valueByType.month, valueByType.day].join('-');
 }

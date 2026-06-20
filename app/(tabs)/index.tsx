@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DailyChart } from '@/src/components/DailyChart';
+import { DailyActivityHeatmap } from '@/src/components/DailyActivityHeatmap';
 import { PieChart } from '@/src/components/PieChart';
 import { SlidingValueText } from '@/src/components/SlidingValueText';
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
@@ -13,9 +15,10 @@ import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { tintFromAccent } from '@/src/lib/color';
 import { buildUserColorMap, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
-import { displayName, formatYen } from '@/src/lib/format';
+import { DEFAULT_LEDGER_TIME_ZONE, displayName, formatYen, todayDateString } from '@/src/lib/format';
 import {
   addMonths,
+  buildDashboardHeatDays,
   compareMonthKeys,
   currentMonthKey,
   type CategoryStat,
@@ -53,6 +56,7 @@ export default function DashboardScreen() {
     currentUserId,
     otherUserId,
     minimumMonthKey,
+    settledExpenses,
     stats,
     error,
     reload
@@ -82,6 +86,17 @@ export default function DashboardScreen() {
   ), [currentUserId, userIds]);
   const currentUserColor = currentUserId ? userColorById.get(currentUserId) || DEFAULT_USER_COLOR : DEFAULT_USER_COLOR;
   const otherUserColor = otherUserId ? userColorById.get(otherUserId) || DEFAULT_PARTNER_COLOR : DEFAULT_PARTNER_COLOR;
+  const heatmapMonthKey = stats.dateRange.effectiveMonthKey;
+  const ledgerTodayString = todayDateString(DEFAULT_LEDGER_TIME_ZONE);
+  const heatDays = useMemo(() => (
+    buildDashboardHeatDays({
+      expenses: settledExpenses,
+      monthKey: heatmapMonthKey,
+      members,
+      currentUserId,
+      today: ledgerTodayString
+    })
+  ), [currentUserId, heatmapMonthKey, ledgerTodayString, members, settledExpenses]);
 
   const moveMonth = useCallback((amount: number) => {
     if (period !== 'month') {
@@ -119,6 +134,16 @@ export default function DashboardScreen() {
         ? null
         : { category }
     ));
+  }
+
+  function viewHistoryDate(date: string) {
+    router.push({
+      pathname: '/(tabs)/history',
+      params: {
+        date,
+        month: date.slice(0, 7)
+      }
+    });
   }
 
   const monthSwipeResponder = useMemo(() => PanResponder.create({
@@ -265,6 +290,13 @@ export default function DashboardScreen() {
             members={members}
             onSetConfirmations={setConfirmations}
             saving={transferSaving}
+          />
+
+          <DailyActivityHeatmap
+            days={heatDays}
+            monthKey={heatmapMonthKey}
+            onViewHistoryDate={viewHistoryDate}
+            todayString={ledgerTodayString}
           />
 
           <BentoCard style={localStyles.categoryCard}>

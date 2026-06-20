@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -88,6 +88,7 @@ export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
+  const params = useLocalSearchParams<{ date?: string | string[]; month?: string | string[] }>();
   const currentLedger = activeLedger?.ledger || null;
   const activeLedgerId = activeLedger?.ledger.id || null;
   const currentUserId = session?.user.id || null;
@@ -114,9 +115,14 @@ export default function HistoryScreen() {
     toggleCategory,
     toggleDropdown
   } = useHistoryFilters();
+  const sectionListRef = useRef<SectionList<FilteredExpense, HistorySection> | null>(null);
+  const scrolledTargetRef = useRef<string | null>(null);
+  const consumedTargetParamRef = useRef<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [detailSelection, setDetailSelection] = useState<FilteredExpense | null>(null);
   const [splitSelection, setSplitSelection] = useState<FilteredExpense | null>(null);
+  const [targetDate, setTargetDate] = useState<string | null>(null);
+  const [targetRequestId, setTargetRequestId] = useState(0);
 
   useEffect(() => {
     currentLedgerRef.current = currentLedger;
@@ -191,10 +197,39 @@ export default function HistoryScreen() {
     setActiveMemberIds(new Set());
     resetFilters();
     setCollapsedSections(new Set());
+    setTargetDate(null);
+    setTargetRequestId(0);
+    scrolledTargetRef.current = null;
+    consumedTargetParamRef.current = null;
     collapseDefaultsMonthRef.current = null;
     setDetailSelection(null);
     setSplitSelection(null);
   }, [activeLedgerId, resetFilters]);
+
+  useEffect(() => {
+    const paramDate = firstParam(params.date);
+    const paramMonth = firstParam(params.month) || paramDate?.slice(0, 7);
+    const targetParamKey = paramDate && isDateString(paramDate)
+      ? `${paramMonth || paramDate.slice(0, 7)}:${paramDate}`
+      : null;
+
+    if (paramMonth && isMonthKey(paramMonth)) {
+      selectMonth(paramMonth);
+    }
+
+    if (targetParamKey && paramDate && consumedTargetParamRef.current !== targetParamKey) {
+      consumedTargetParamRef.current = targetParamKey;
+      setTargetDate(paramDate);
+      setTargetRequestId((current) => current + 1);
+      scrolledTargetRef.current = null;
+      router.setParams({ date: undefined, month: undefined });
+      return;
+    }
+
+    if (!paramDate && !paramMonth) {
+      consumedTargetParamRef.current = null;
+    }
+  }, [activeLedgerId, params.date, params.month, selectMonth]);
 
   useEffect(() => {
     void load('initial');
@@ -333,12 +368,36 @@ export default function HistoryScreen() {
     }));
   }, [collapsedSections, filteredExpenses]);
 
+  const scrollToTargetSection = useCallback((sectionIndex: number, animated: boolean) => {
+    sectionListRef.current?.scrollToLocation({
+      animated,
+      itemIndex: 0,
+      sectionIndex,
+      viewOffset: insets.top + 92,
+      viewPosition: 0
+    });
+  }, [insets.top]);
+
   useEffect(() => {
     if (collapseDefaultsMonthRef.current === selectedMonth) {
+      if (targetDate && targetDate.startsWith(`${selectedMonth}-`)) {
+        setCollapsedSections((current) => {
+          if (!current.has(targetDate)) {
+            return current;
+          }
+
+          const next = new Set(current);
+          next.delete(targetDate);
+          return next;
+        });
+      }
       return;
     }
 
     const today = todayDateString();
+    const targetMonthDate = targetDate && targetDate.startsWith(`${selectedMonth}-`)
+      ? targetDate
+      : null;
     const monthDates = settledExpenses
       .filter((expense) => monthKeyFromDateString(expense.spent_on) === selectedMonth)
       .map((expense) => expense.spent_on);
@@ -349,12 +408,42 @@ export default function HistoryScreen() {
     }
 
     const defaultCollapsedDates = new Set(
-      monthDates.filter((date) => date !== today)
+      monthDates.filter((date) => date !== today && date !== targetMonthDate)
     );
 
     setCollapsedSections(defaultCollapsedDates);
     collapseDefaultsMonthRef.current = selectedMonth;
-  }, [selectedMonth, settledExpenses]);
+  }, [selectedMonth, settledExpenses, targetDate]);
+
+  useEffect(() => {
+    if (!targetDate || targetDate.slice(0, 7) !== selectedMonth) {
+      return;
+    }
+
+    const sectionIndex = sections.findIndex((section) => section.date === targetDate);
+    if (sectionIndex < 0) {
+      return;
+    }
+
+    if (collapsedSections.has(targetDate)) {
+      setCollapsedSections((current) => {
+        const next = new Set(current);
+        next.delete(targetDate);
+        return next;
+      });
+      return;
+    }
+
+    const scrollKey = `${activeLedgerId || 'ledger'}:${targetDate}`;
+    if (scrolledTargetRef.current === scrollKey) {
+      return;
+    }
+
+    scrolledTargetRef.current = scrollKey;
+    requestAnimationFrame(() => {
+      scrollToTargetSection(sectionIndex, true);
+    });
+  }, [activeLedgerId, collapsedSections, scrollToTargetSection, sections, selectedMonth, targetDate, targetRequestId]);
 
   function openDropdown(dropdown: HistoryFilterDropdownKey) {
     toggleDropdown(dropdown);
@@ -371,6 +460,7 @@ export default function HistoryScreen() {
 
     const nextMonth = addMonths(selectedMonth, amount);
     closeDropdown();
+    setTargetDate(null);
     selectMonth(nextMonth);
   }, [atCurrentMonth, atMinimumMonth, closeDropdown, selectMonth, selectedMonth]);
 
@@ -528,6 +618,7 @@ export default function HistoryScreen() {
             ) : null}
           </BentoCard>
         ) : null}
+
       </View>
     </View>
   );
@@ -535,6 +626,7 @@ export default function HistoryScreen() {
   return (
     <>
       <SectionList
+        ref={sectionListRef}
         ListEmptyComponent={(
           <View style={localStyles.emptyState}>
             {!loading && expenses.length === 0 ? (
@@ -564,6 +656,18 @@ export default function HistoryScreen() {
         keyboardShouldPersistTaps="handled"
         keyExtractor={({ expense }) => expense.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} />}
+        onScrollToIndexFailed={() => {
+          if (!targetDate || targetDate.slice(0, 7) !== selectedMonth) {
+            return;
+          }
+
+          const sectionIndex = sections.findIndex((section) => section.date === targetDate);
+          if (sectionIndex < 0) {
+            return;
+          }
+
+          setTimeout(() => scrollToTargetSection(sectionIndex, false), 250);
+        }}
         renderItem={({ item, index, section }) => (
           <SectionDetailRow
             expenseBadges={expenseBadges}
@@ -758,6 +862,18 @@ function todayDateString() {
     String(date.getMonth() + 1).padStart(2, '0'),
     String(date.getDate()).padStart(2, '0')
   ].join('-');
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function isMonthKey(value: string) {
+  return /^\d{4}-\d{2}$/.test(value);
+}
+
+function isDateString(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function uniqueUserIds(userIds: string[]) {
