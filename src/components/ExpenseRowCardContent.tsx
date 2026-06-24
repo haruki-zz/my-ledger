@@ -135,7 +135,7 @@ function StandardRowContent({
         <BadgeRow badges={badges} />
       </View>
       <View style={rowCardStyles.amountBlock}>
-        <Text adjustsFontSizeToFit minimumFontScale={0.85} numberOfLines={1} style={rowCardStyles.amount}>
+        <Text ellipsizeMode="tail" numberOfLines={1} style={rowCardStyles.amount}>
           {amount}
         </Text>
       </View>
@@ -185,7 +185,7 @@ function CompactRowContent({
         ) : null}
       </View>
       <View style={[rowCardStyles.amountBlock, rowCardStyles.amountBlockCompact]}>
-        <Text adjustsFontSizeToFit minimumFontScale={0.85} numberOfLines={1} style={[rowCardStyles.amount, rowCardStyles.amountCompact]}>
+        <Text ellipsizeMode="tail" numberOfLines={1} style={[rowCardStyles.amount, rowCardStyles.amountCompact]}>
           {amount}
         </Text>
         <BadgeRow badges={badges.slice(0, 2)} compact />

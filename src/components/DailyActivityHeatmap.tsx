@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -99,6 +100,7 @@ export function DailyActivityHeatmap({
         windowWidth
       })
     : null;
+  const cardMeasurementProps = Platform.OS === 'web' ? {} : { collapsable: false };
 
   useEffect(() => {
     if (!selectedDay) {
@@ -155,7 +157,7 @@ export function DailyActivityHeatmap({
 
   return (
     <BentoCard style={localStyles.card}>
-      <View ref={cardRef} collapsable={false} style={localStyles.cardInner}>
+      <View ref={cardRef} {...cardMeasurementProps} style={localStyles.cardInner}>
         <View style={localStyles.header}>
           <View style={localStyles.titleRow}>
             <Ionicons color={colors.primary} name="grid-outline" size={16} />

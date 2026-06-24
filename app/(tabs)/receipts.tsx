@@ -411,6 +411,7 @@ function YearStrip({
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
+            hitSlop={{ bottom: 8, left: 4, right: 4, top: 8 }}
             key={group.year}
             onPress={() => onSelectReceipt(group.latestReceiptIndex)}
             style={({ pressed }) => [
@@ -914,16 +915,22 @@ const localStyles = StyleSheet.create({
   yearStrip: {
     borderBottomColor: 'rgba(42,39,34,0.12)',
     borderBottomWidth: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 20,
+    maxHeight: 20,
     width: RECEIPT_WIDTH
   },
   yearStripContent: {
+    alignItems: 'flex-start',
     gap: 4
   },
   yearTab: {
     alignItems: 'center',
-    minHeight: 34,
+    height: 20,
+    minHeight: 20,
     paddingHorizontal: 8,
-    paddingTop: 3,
+    paddingTop: 0,
     position: 'relative'
   },
   yearTabText: {

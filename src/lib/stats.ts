@@ -376,7 +376,7 @@ function resolveMonthDateRange(monthKey: string): DashboardDateRange {
     comparisonStartDateString: comparisonStartString,
     comparisonEndDateString: comparisonEndString,
     label: formatMonthLabel(effectiveMonthKey),
-    comparisonLabel: `less than ${formatShortMonthLabel(comparisonMonthKey)}`
+    comparisonLabel: `vs ${formatShortMonthLabel(comparisonMonthKey)}`
   };
 }
 

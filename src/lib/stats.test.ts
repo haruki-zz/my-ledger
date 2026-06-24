@@ -157,7 +157,8 @@ describe('resolveDashboardDateRange', () => {
       startDateString: '2026-06-01',
       endDateString: '2026-06-30',
       comparisonStartDateString: '2026-05-01',
-      comparisonEndDateString: '2026-05-31'
+      comparisonEndDateString: '2026-05-31',
+      comparisonLabel: 'vs May'
     });
   });
 
