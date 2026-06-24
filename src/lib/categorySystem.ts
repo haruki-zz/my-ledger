@@ -9,7 +9,7 @@ export const PRIMARY_CATEGORIES = [
     color: '#CB5F43',
     splitRatio: [50, 50],
     sortOrder: 10,
-    subcategories: ['Groceries', 'Restaurant', 'Cafe', 'Delivery', 'Drinks']
+    subcategories: ['Groceries', 'Restaurant', 'Cafe', 'Delivery', 'Drinks', 'Convenience']
   },
   {
     id: 'household',

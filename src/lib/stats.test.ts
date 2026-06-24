@@ -77,9 +77,11 @@ describe('primary category system', () => {
   });
 
   it('places beauty, hobby, and sports as primary category subcategory presets', () => {
+    const foodDining = PRIMARY_CATEGORIES.find((category) => category.id === 'food_dining');
     const entertainment = PRIMARY_CATEGORIES.find((category) => category.id === 'entertainment');
     const shopping = PRIMARY_CATEGORIES.find((category) => category.id === 'shopping');
 
+    expect(foodDining?.subcategories).toContain('Convenience');
     expect(entertainment?.subcategories).toEqual(expect.arrayContaining(['Hobby', 'Sports']));
     expect(shopping?.subcategories).toContain('Beauty & Salon');
   });
