@@ -12,7 +12,7 @@ type PieChartProps = {
   categories: CategoryStat[];
   totalYen: number;
   onCategoryPress?: (category: CategoryStat, anchorPoint?: AnchorPoint) => void;
-  selectedCategoryName?: string | null;
+  selectedCategoryKey?: string | null;
 };
 
 type PieSegment = CategoryStat & {
@@ -35,7 +35,7 @@ export function PieChart({
   categories,
   totalYen,
   onCategoryPress,
-  selectedCategoryName
+  selectedCategoryKey
 }: PieChartProps) {
   const chartSize = 170;
   const center = chartSize / 2;
@@ -95,6 +95,7 @@ export function PieChart({
               cx={center}
               cy={center}
               fill="none"
+              onPress={onCategoryPress ? (event) => handleCategoryPress(segments[0], event as unknown as GestureResponderEvent) : undefined}
               r={strokeRadius}
               stroke={segments[0].color}
               strokeDasharray={`${circumference} ${circumference}`}
@@ -110,6 +111,7 @@ export function PieChart({
                 d={segment.path}
                 fill="none"
                 key={`${segment.category}-${segment.path}`}
+                onPress={onCategoryPress ? (event) => handleCategoryPress(segment, event as unknown as GestureResponderEvent) : undefined}
                 stroke={segment.color}
                 strokeDasharray={`${segment.segmentLength} ${segment.segmentLength}`}
                 strokeDashoffset={donutProgress.interpolate({
@@ -149,12 +151,14 @@ export function PieChart({
       <View style={chartStyles.legend}>
         {categories.map((category) => {
           const disabled = !onCategoryPress;
-          const selected = selectedCategoryName === category.category;
+          const selected = selectedCategoryKey === category.detailKey;
           return (
             <Pressable
+              accessibilityLabel={`Open ${category.category} category details`}
+              accessibilityRole="button"
               disabled={disabled}
               hitSlop={4}
-              key={`${category.category}-${category.color}`}
+              key={`${category.detailKey}-${category.color}`}
               onPress={(event) => handleCategoryPress(category, event)}
               style={({ pressed }) => [
                 chartStyles.categoryRow,
@@ -173,6 +177,7 @@ export function PieChart({
               <Text adjustsFontSizeToFit numberOfLines={1} style={chartStyles.amountText}>
                 {formatYen(category.amountYen)}
               </Text>
+              <Ionicons color={colors.subtle} name="chevron-forward" size={16} style={chartStyles.chevron} />
             </Pressable>
           );
         })}
@@ -234,8 +239,8 @@ const chartStyles = StyleSheet.create({
     fontFamily: fontFamilies.mono,
     fontSize: 12,
     lineHeight: 18,
-    maxWidth: 92,
-    minWidth: 76,
+    maxWidth: 86,
+    minWidth: 70,
     textAlign: 'right'
   },
   categoryRow: {
@@ -258,6 +263,10 @@ const chartStyles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'column',
     gap: 20
+  },
+  chevron: {
+    flexShrink: 0,
+    marginLeft: -3
   },
   donutWrap: {
     alignItems: 'center',

@@ -25,6 +25,7 @@ import {
   nextReceiptIndexWithinYear,
   receiptYear
 } from '@/src/lib/receiptNavigation';
+import { getSpendComparisonPresentation } from '@/src/lib/spendComparison';
 import {
   addMonths,
   buildMonthlyReceipts,
@@ -437,13 +438,7 @@ function ReceiptBody({
   otherUserName: string;
   receipt: MonthlyReceiptStat;
 }) {
-  const comparisonColor = receipt.comparison.direction === 'over'
-    ? colors.danger
-    : receipt.comparison.direction === 'under'
-      ? colors.success
-      : colors.muted;
-  const comparisonArrow = receipt.comparison.direction === 'over' ? '▲' : receipt.comparison.direction === 'under' ? '▼' : '•';
-  const comparisonWord = receipt.comparison.direction === 'over' ? 'over' : receipt.comparison.direction === 'under' ? 'under' : 'same';
+  const comparison = getSpendComparisonPresentation(receipt.comparison.direction);
 
   return (
     <View style={localStyles.receiptBody}>
@@ -498,8 +493,8 @@ function ReceiptBody({
         <Text style={localStyles.totalValue}>{formatYen(receipt.totalYen)}</Text>
       </View>
       <Text style={localStyles.comparisonLine}>
-        <Text style={[localStyles.comparisonStrong, { color: comparisonColor }]}>
-          {comparisonArrow} {formatReceiptPercentage(receipt.comparison.percentage)} {comparisonWord}
+        <Text style={[localStyles.comparisonStrong, { color: comparison.color }]}>
+          {comparison.symbol} {formatReceiptPercentage(receipt.comparison.percentage)} {comparison.word}
         </Text>
         {' '}vs {receipt.comparison.label}
       </Text>

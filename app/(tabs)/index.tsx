@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CategoryDetailSheet } from '@/src/components/CategoryDetailSheet';
 import { DailyChart } from '@/src/components/DailyChart';
 import { DailyActivityHeatmap } from '@/src/components/DailyActivityHeatmap';
 import { PieChart } from '@/src/components/PieChart';
@@ -16,6 +17,7 @@ import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { tintFromAccent } from '@/src/lib/color';
 import { buildUserColorMap, colorForDarkSurface, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, formatYen, todayDateString } from '@/src/lib/format';
+import { getSpendComparisonPresentation } from '@/src/lib/spendComparison';
 import { isIntentionalMonthSwipe } from '@/src/lib/swipe';
 import {
   buildDashboardHeatDays,
@@ -25,10 +27,6 @@ import {
   type CategoryStat,
   type DashboardPeriod
 } from '@/src/lib/stats';
-
-type SelectedCategoryState = {
-  category: CategoryStat;
-};
 
 const PERIOD_OPTIONS: PillTabOption<DashboardPeriod>[] = [
   { label: 'Today', value: 'today' },
@@ -41,7 +39,7 @@ export default function DashboardScreen() {
   const currentDashboardMonthKey = currentMonthKey();
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [periodOffset, setPeriodOffset] = useState(0);
-  const [selectedCategory, setSelectedCategory] = useState<SelectedCategoryState | null>(null);
+  const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const {
     ledger,
@@ -96,9 +94,31 @@ export default function DashboardScreen() {
       today: ledgerTodayString
     })
   ), [currentUserId, heatmapMonthKey, ledgerTodayString, members, settledExpenses]);
+  const selectedCategoryDetail = useMemo(() => (
+    selectedCategoryKey
+      ? stats.getCategoryDetail(selectedCategoryKey)
+      : null
+  ), [selectedCategoryKey, stats]);
+  const dashboardComparison = getSpendComparisonPresentation(stats.comparison.direction, {
+    neutralIcon: 'remove',
+    tone: 'onDark'
+  });
+  const closeCategoryDetail = useCallback(() => {
+    setSelectedCategoryKey(null);
+  }, []);
+
+  useEffect(() => {
+    if (selectedCategoryKey && !selectedCategoryDetail) {
+      setSelectedCategoryKey(null);
+    }
+  }, [selectedCategoryDetail, selectedCategoryKey]);
+
+  useFocusEffect(useCallback(() => (
+    () => setSelectedCategoryKey(null)
+  ), []));
 
   const movePeriod = useCallback((amount: number) => {
-    setSelectedCategory(null);
+    setSelectedCategoryKey(null);
     setPeriodOffset((current) => current + amount);
   }, []);
 
@@ -116,17 +136,13 @@ export default function DashboardScreen() {
       return;
     }
 
-    setSelectedCategory(null);
+    setSelectedCategoryKey(null);
     setPeriod(nextPeriod);
     setPeriodOffset(0);
   }
 
-  function toggleCategorySelection(category: CategoryStat) {
-    setSelectedCategory((current) => (
-      current?.category.category === category.category
-        ? null
-        : { category }
-    ));
+  function openCategoryDetail(category: CategoryStat) {
+    setSelectedCategoryKey(category.detailKey);
   }
 
   function viewHistoryDate(date: string) {
@@ -233,13 +249,13 @@ export default function DashboardScreen() {
 
                 <View style={localStyles.comparisonRow}>
                   <Ionicons
-                    color={comparisonColor(stats.comparison.direction)}
-                    name={comparisonIcon(stats.comparison.direction)}
+                    color={dashboardComparison.color}
+                    name={dashboardComparison.icon || 'remove'}
                     size={18}
                   />
                   <SlidingValueText
                     formatValue={formatComparisonAmount}
-                    textStyle={[localStyles.comparisonAmountText, { color: comparisonColor(stats.comparison.direction) }]}
+                    textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
                     value={Math.abs(stats.comparison.deltaYen)}
                     wrapperStyle={localStyles.comparisonAmountSlot}
                   />
@@ -247,7 +263,7 @@ export default function DashboardScreen() {
                     {stats.comparison.label}
                   </Text>
                   <View style={localStyles.percentBadge}>
-                    <Text style={[localStyles.percentBadgeText, { color: comparisonColor(stats.comparison.direction) }]}>
+                    <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
                       {formatComparisonPercentage(stats.comparison.percentage)}
                     </Text>
                   </View>
@@ -296,11 +312,17 @@ export default function DashboardScreen() {
           <BentoCard style={localStyles.categoryCard}>
             <View style={localStyles.sectionHeader}>
               <Text style={[styles.upperLabel, localStyles.greenLabel]}>Category Share</Text>
+              {stats.totalYen > 0 ? (
+                <View style={localStyles.categoryHint}>
+                  <Ionicons color={colors.secondary} name="hand-left-outline" size={13} />
+                  <Text style={localStyles.categoryHintText}>Tap to break down</Text>
+                </View>
+              ) : null}
             </View>
             <PieChart
               categories={stats.categories}
-              onCategoryPress={toggleCategorySelection}
-              selectedCategoryName={selectedCategory?.category.category}
+              onCategoryPress={openCategoryDetail}
+              selectedCategoryKey={selectedCategoryKey}
               totalYen={stats.totalYen}
             />
           </BentoCard>
@@ -335,6 +357,11 @@ export default function DashboardScreen() {
         </View>
       </ScrollView>
 
+      <CategoryDetailSheet
+        detail={selectedCategoryDetail}
+        members={members}
+        onClose={closeCategoryDetail}
+      />
     </>
   );
 }
@@ -402,33 +429,28 @@ function formatComparisonPercentage(percentage: number | null) {
   return `${sign}${Math.abs(percentage).toFixed(1)}%`;
 }
 
-function comparisonColor(direction: 'under' | 'over' | 'same') {
-  if (direction === 'over') {
-    return colors.dangerOnDark;
-  }
-
-  if (direction === 'under') {
-    return colors.successOnDark;
-  }
-
-  return 'rgba(255,255,255,0.72)';
-}
-
-function comparisonIcon(direction: 'under' | 'over' | 'same') {
-  if (direction === 'over') {
-    return 'arrow-up' as const;
-  }
-
-  if (direction === 'under') {
-    return 'arrow-down' as const;
-  }
-
-  return 'remove' as const;
-}
-
 const localStyles = StyleSheet.create({
   categoryCard: {
     gap: 16
+  },
+  categoryHint: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(192,137,46,0.08)',
+    borderColor: colors.line,
+    borderRadius: theme.radii.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 5,
+    minHeight: 24,
+    paddingHorizontal: 8,
+    paddingVertical: 3
+  },
+  categoryHintText: {
+    color: colors.secondary,
+    fontFamily: fontFamilies.bold,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 15
   },
   comparisonRow: {
     alignItems: 'center',
