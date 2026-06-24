@@ -16,6 +16,7 @@ import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { tintFromAccent } from '@/src/lib/color';
 import { buildUserColorMap, colorForDarkSurface, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, formatYen, todayDateString } from '@/src/lib/format';
+import { isIntentionalMonthSwipe } from '@/src/lib/swipe';
 import {
   buildDashboardHeatDays,
   currentMonthKey,
@@ -35,10 +36,6 @@ const PERIOD_OPTIONS: PillTabOption<DashboardPeriod>[] = [
   { label: 'Month', value: 'month' }
 ];
 
-const SWIPE_DISTANCE = 36;
-const SWIPE_DIRECTION_RATIO = 2.5;
-const SWIPE_VELOCITY = 0.35;
-const SWIPE_VELOCITY_RATIO = 1.5;
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const currentDashboardMonthKey = currentMonthKey();
@@ -427,22 +424,6 @@ function comparisonIcon(direction: 'under' | 'over' | 'same') {
   }
 
   return 'remove' as const;
-}
-
-function isIntentionalMonthSwipe(dx: number, dy: number, vx: number, vy: number) {
-  const horizontalDistance = Math.abs(dx);
-  const verticalDistance = Math.abs(dy);
-  const horizontalVelocity = Math.abs(vx);
-  const verticalVelocity = Math.abs(vy);
-
-  if (horizontalDistance <= SWIPE_DISTANCE) {
-    return false;
-  }
-
-  return (
-    horizontalDistance > verticalDistance * SWIPE_DIRECTION_RATIO ||
-    (horizontalVelocity > SWIPE_VELOCITY && horizontalVelocity > verticalVelocity * SWIPE_VELOCITY_RATIO)
-  );
 }
 
 const localStyles = StyleSheet.create({

@@ -4,20 +4,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
+  PanResponder,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
+  type AccessibilityActionEvent
 } from 'react-native';
 import Svg, { Defs, LinearGradient, Pattern, Polygon, Rect, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { displayName, formatYen } from '@/src/lib/format';
+import {
+  buildReceiptYearGroups,
+  nextReceiptIndexWithinYear,
+  receiptYear
+} from '@/src/lib/receiptNavigation';
 import {
   addMonths,
   buildMonthlyReceipts,
@@ -33,9 +40,13 @@ import {
   getFirstExpenseSpentOn,
   getLedgerMembers
 } from '@/src/lib/ledger';
+import { isIntentionalMonthSwipe } from '@/src/lib/swipe';
 import type { LedgerMemberProfile } from '@/src/types/database';
 
 const RECEIPT_WIDTH = 290;
+const RECEIPT_SLIDE_DISTANCE = RECEIPT_WIDTH + 96;
+const RECEIPT_SLIDE_OUT_DURATION = 220;
+const RECEIPT_SLIDE_IN_DURATION = 300;
 const AnimatedReceipt = Animated.createAnimatedComponent(View);
 
 type ReceiptsLoadState = {
@@ -55,7 +66,9 @@ export default function ReceiptsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
-  const translateY = useRef(new Animated.Value(0)).current;
+  const receiptTranslateX = useRef(new Animated.Value(0)).current;
+  const receiptOpacity = useRef(new Animated.Value(1)).current;
+  const animatingRef = useRef(false);
   const [state, setState] = useState<ReceiptsLoadState>({
     error: null,
     loading: true,
@@ -65,7 +78,13 @@ export default function ReceiptsScreen() {
 
   const selectedMonthParam = firstParam(params.month);
   const selectedReceipt = state.receipts[selectedIndex] || null;
-  const selectedReceiptMonthKey = selectedReceipt?.monthKey || null;
+  const receiptYearGroups = useMemo(() => buildReceiptYearGroups(state.receipts), [state.receipts]);
+  const activeYear = selectedReceipt ? receiptYear(selectedReceipt.monthKey) : null;
+  const receiptRotate = receiptTranslateX.interpolate({
+    extrapolate: 'clamp',
+    inputRange: [-RECEIPT_SLIDE_DISTANCE, 0, RECEIPT_SLIDE_DISTANCE],
+    outputRange: ['-5deg', '0deg', '6deg']
+  });
   const currentMember = state.members.find((member) => member.user_id === currentUserId) || null;
   const otherMember = state.members.find((member) => member.user_id !== currentUserId) || null;
   const currentUserName = displayName(currentMember?.profile.display_name);
@@ -140,29 +159,52 @@ export default function ReceiptsScreen() {
   }, []);
 
   useEffect(() => {
-    if (!selectedMonthParam || state.receipts.length === 0) {
+    if (state.receipts.length === 0) {
+      return;
+    }
+
+    if (!selectedMonthParam) {
       return;
     }
 
     const nextIndex = state.receipts.findIndex((receipt) => receipt.monthKey === selectedMonthParam);
     if (nextIndex >= 0) {
-      setSelectedIndex(nextIndex);
-    }
-  }, [selectedMonthParam, state.receipts]);
-
-  useEffect(() => {
-    if (reduceMotion || !selectedReceiptMonthKey) {
-      translateY.setValue(0);
+      if (nextIndex !== selectedIndex) {
+        setSelectedIndex(nextIndex);
+      }
       return;
     }
 
-    translateY.setValue(-10);
-    Animated.timing(translateY, {
-      duration: 420,
-      toValue: 0,
-      useNativeDriver: true
-    }).start();
-  }, [reduceMotion, selectedReceiptMonthKey, translateY]);
+    setSelectedIndex(0);
+    router.setParams({ month: state.receipts[0].monthKey });
+  }, [selectedIndex, selectedMonthParam, state.receipts]);
+
+  useEffect(() => {
+    if (state.receipts.length === 0) {
+      if (selectedIndex !== 0) {
+        setSelectedIndex(0);
+      }
+      return;
+    }
+
+    if (selectedIndex >= state.receipts.length) {
+      const nextIndex = state.receipts.length - 1;
+      setSelectedIndex(nextIndex);
+      router.setParams({ month: state.receipts[nextIndex].monthKey });
+    }
+  }, [selectedIndex, state.receipts]);
+
+  useEffect(() => {
+    if (!reduceMotion) {
+      return;
+    }
+
+    animatingRef.current = false;
+    receiptTranslateX.stopAnimation();
+    receiptOpacity.stopAnimation();
+    receiptTranslateX.setValue(0);
+    receiptOpacity.setValue(1);
+  }, [receiptOpacity, receiptTranslateX, reduceMotion]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -173,7 +215,7 @@ export default function ReceiptsScreen() {
     }
   }, [load]);
 
-  function selectReceipt(nextIndex: number) {
+  const selectReceipt = useCallback((nextIndex: number) => {
     const receipt = state.receipts[nextIndex];
     if (!receipt) {
       return;
@@ -181,10 +223,99 @@ export default function ReceiptsScreen() {
 
     setSelectedIndex(nextIndex);
     router.setParams({ month: receipt.monthKey });
-  }
+  }, [state.receipts]);
 
-  const canGoOlder = selectedIndex < state.receipts.length - 1;
-  const canGoNewer = selectedIndex > 0;
+  const animateReceiptToIndex = useCallback((nextIndex: number, direction: 1 | -1) => {
+    const receipt = state.receipts[nextIndex];
+    if (!receipt || nextIndex === selectedIndex || animatingRef.current) {
+      return;
+    }
+
+    if (reduceMotion) {
+      selectReceipt(nextIndex);
+      return;
+    }
+
+    const exitX = direction > 0 ? -RECEIPT_SLIDE_DISTANCE : RECEIPT_SLIDE_DISTANCE;
+    const enterX = direction > 0 ? RECEIPT_SLIDE_DISTANCE : -RECEIPT_SLIDE_DISTANCE;
+    animatingRef.current = true;
+    receiptTranslateX.stopAnimation();
+    receiptOpacity.stopAnimation();
+
+    Animated.parallel([
+      Animated.timing(receiptTranslateX, {
+        duration: RECEIPT_SLIDE_OUT_DURATION,
+        toValue: exitX,
+        useNativeDriver: true
+      }),
+      Animated.timing(receiptOpacity, {
+        duration: RECEIPT_SLIDE_OUT_DURATION,
+        toValue: 0,
+        useNativeDriver: true
+      })
+    ]).start(({ finished }) => {
+      if (!finished) {
+        animatingRef.current = false;
+        receiptTranslateX.setValue(0);
+        receiptOpacity.setValue(1);
+        return;
+      }
+
+      selectReceipt(nextIndex);
+      receiptTranslateX.setValue(enterX);
+      receiptOpacity.setValue(0);
+
+      Animated.parallel([
+        Animated.timing(receiptTranslateX, {
+          duration: RECEIPT_SLIDE_IN_DURATION,
+          toValue: 0,
+          useNativeDriver: true
+        }),
+        Animated.timing(receiptOpacity, {
+          duration: RECEIPT_SLIDE_IN_DURATION,
+          toValue: 1,
+          useNativeDriver: true
+        })
+      ]).start(() => {
+        receiptTranslateX.setValue(0);
+        receiptOpacity.setValue(1);
+        animatingRef.current = false;
+      });
+    });
+  }, [receiptOpacity, receiptTranslateX, reduceMotion, selectReceipt, selectedIndex, state.receipts]);
+
+  const flipReceipt = useCallback((direction: 1 | -1) => {
+    const nextIndex = nextReceiptIndexWithinYear(receiptYearGroups, selectedIndex, direction);
+    animateReceiptToIndex(nextIndex, direction);
+  }, [animateReceiptToIndex, receiptYearGroups, selectedIndex]);
+
+  const receiptSwipeResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) => isIntentionalMonthSwipe(
+      gestureState.dx,
+      gestureState.dy,
+      gestureState.vx,
+      gestureState.vy
+    ),
+    onPanResponderRelease: (_, gestureState) => {
+      if (!isIntentionalMonthSwipe(gestureState.dx, gestureState.dy, gestureState.vx, gestureState.vy)) {
+        return;
+      }
+
+      flipReceipt(gestureState.dx < 0 ? 1 : -1);
+    },
+    onPanResponderTerminationRequest: () => true
+  }), [flipReceipt]);
+
+  function handleReceiptAccessibilityAction(event: AccessibilityActionEvent) {
+    if (event.nativeEvent.actionName === 'nextMonth') {
+      flipReceipt(1);
+    }
+
+    if (event.nativeEvent.actionName === 'previousMonth') {
+      flipReceipt(-1);
+    }
+  }
 
   return (
     <ScrollView
@@ -192,6 +323,13 @@ export default function ReceiptsScreen() {
       style={styles.page}
       contentContainerStyle={[styles.content, localStyles.content, { paddingTop: insets.top + 16 }]}
     >
+      <View style={localStyles.pageHeader}>
+        <Text numberOfLines={1} style={localStyles.pageTitle}>
+          Receipts
+          <Text style={localStyles.pageTitleLedger}> · {activeLedger?.ledger.name || 'Ledger'}</Text>
+        </Text>
+      </View>
+
       {state.error ? <Text style={styles.error}>{state.error}</Text> : null}
 
       {!state.loading && state.receipts.length === 0 ? (
@@ -203,10 +341,38 @@ export default function ReceiptsScreen() {
 
       {selectedReceipt ? (
         <View style={localStyles.stage}>
-          <View style={localStyles.stack}>
+          <YearStrip
+            activeYear={activeYear}
+            groups={receiptYearGroups}
+            onSelectReceipt={selectReceipt}
+          />
+
+          <View
+            accessibilityActions={[
+              { label: 'Previous month', name: 'previousMonth' },
+              { label: 'Next month', name: 'nextMonth' }
+            ]}
+            accessibilityLabel={`${selectedReceipt.label}, ${selectedReceipt.records} records`}
+            accessibilityRole="adjustable"
+            onAccessibilityAction={handleReceiptAccessibilityAction}
+            style={localStyles.stack}
+            {...receiptSwipeResponder.panHandlers}
+          >
             <View style={[localStyles.peek, localStyles.peekBack]} />
+            <View style={[localStyles.peek, localStyles.peekMiddle]} />
             <View style={[localStyles.peek, localStyles.peekFront]} />
-            <AnimatedReceipt style={[localStyles.receiptWrap, { transform: [{ translateY }] }]}>
+            <AnimatedReceipt
+              style={[
+                localStyles.receiptWrap,
+                {
+                  opacity: receiptOpacity,
+                  transform: [
+                    { translateX: receiptTranslateX },
+                    { rotate: receiptRotate }
+                  ]
+                }
+              ]}
+            >
               <TearEdge direction="top" />
               <ReceiptBody
                 currentUserName={currentUserName}
@@ -216,27 +382,48 @@ export default function ReceiptsScreen() {
               <TearEdge direction="bottom" />
             </AnimatedReceipt>
           </View>
-
-          <View style={localStyles.flipRow}>
-            <FlipButton
-              accessibilityLabel="Older month"
-              disabled={!canGoOlder}
-              icon="chevron-back"
-              onPress={() => selectReceipt(selectedIndex + 1)}
-            />
-            <View style={localStyles.flipMiddle}>
-              <Text numberOfLines={1} style={localStyles.flipLabel}>{selectedReceipt.label}</Text>
-              <Text numberOfLines={1} style={localStyles.flipPosition}>{selectedIndex + 1} / {state.receipts.length}</Text>
-            </View>
-            <FlipButton
-              accessibilityLabel="Newer month"
-              disabled={!canGoNewer}
-              icon="chevron-forward"
-              onPress={() => selectReceipt(selectedIndex - 1)}
-            />
-          </View>
         </View>
       ) : null}
+    </ScrollView>
+  );
+}
+
+function YearStrip({
+  activeYear,
+  groups,
+  onSelectReceipt
+}: {
+  activeYear: number | null;
+  groups: ReturnType<typeof buildReceiptYearGroups>;
+  onSelectReceipt: (index: number) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={localStyles.yearStrip}
+      contentContainerStyle={localStyles.yearStripContent}
+    >
+      {groups.map((group) => {
+        const active = group.year === activeYear;
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            key={group.year}
+            onPress={() => onSelectReceipt(group.latestReceiptIndex)}
+            style={({ pressed }) => [
+              localStyles.yearTab,
+              pressed && localStyles.pressed
+            ]}
+          >
+            <Text style={[localStyles.yearTabText, active && localStyles.yearTabTextActive]}>
+              {group.year}
+            </Text>
+            {active ? <View style={localStyles.yearTabUnderline} /> : null}
+          </Pressable>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -260,10 +447,8 @@ function ReceiptBody({
 
   return (
     <View style={localStyles.receiptBody}>
-      <Text style={localStyles.receiptMark}>MY LEDGER</Text>
-      <Text style={localStyles.receiptSub}>HOUSEHOLD 2026 · JPY</Text>
       <Text style={localStyles.receiptMonth}>{receipt.label}</Text>
-      <Text style={localStyles.receiptMeta}>{receipt.span} · {receipt.records} records</Text>
+      <Text style={localStyles.receiptMeta}>{receipt.records} records</Text>
       <Rule />
       <View style={localStyles.receiptColumns}>
         <Text style={localStyles.columnItem}>ITEM</Text>
@@ -397,34 +582,6 @@ function Barcode({ seed }: { seed: number }) {
   );
 }
 
-function FlipButton({
-  accessibilityLabel,
-  disabled,
-  icon,
-  onPress
-}: {
-  accessibilityLabel: string;
-  disabled: boolean;
-  icon: keyof typeof Ionicons.glyphMap;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        localStyles.flipButton,
-        disabled && localStyles.disabled,
-        pressed && !disabled && localStyles.pressed
-      ]}
-    >
-      <Ionicons color={colors.primaryDark} name={icon} size={21} />
-    </Pressable>
-  );
-}
-
 function formatReceiptPercentage(value: number | null) {
   if (value === null) {
     return 'NEW';
@@ -492,49 +649,9 @@ const localStyles = StyleSheet.create({
   content: {
     alignItems: 'center'
   },
-  disabled: {
-    opacity: 0.4
-  },
   emptyCard: {
     ...styles.section,
     width: '100%'
-  },
-  flipButton: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderColor: 'rgba(42,39,34,0.12)',
-    borderRadius: 22,
-    borderWidth: 1,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-    ...theme.shadow
-  },
-  flipLabel: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 19,
-    textAlign: 'center'
-  },
-  flipMiddle: {
-    minWidth: 136
-  },
-  flipPosition: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.mono,
-    fontSize: 10,
-    lineHeight: 14,
-    marginTop: 2,
-    textAlign: 'center'
-  },
-  flipRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 16,
-    justifyContent: 'center'
   },
   footerText: {
     color: colors.muted,
@@ -631,6 +748,23 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 3
   },
+  pageHeader: {
+    alignSelf: 'stretch',
+    minWidth: 0
+  },
+  pageTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 24,
+    fontWeight: '700',
+    lineHeight: 31,
+    textAlign: 'center'
+  },
+  pageTitleLedger: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontWeight: '400'
+  },
   peek: {
     backgroundColor: '#FFFDF7',
     borderColor: 'rgba(42,39,34,0.10)',
@@ -647,6 +781,13 @@ const localStyles = StyleSheet.create({
     right: 8,
     top: 9,
     transform: [{ rotate: '-1.4deg' }]
+  },
+  peekMiddle: {
+    left: 2,
+    opacity: 0.9,
+    right: 6,
+    top: 7,
+    transform: [{ rotate: '1.7deg' }]
   },
   peekFront: {
     left: 4,
@@ -680,23 +821,11 @@ const localStyles = StyleSheet.create({
     gap: 8,
     paddingRight: 6
   },
-  receiptColumnsText: {
-    color: colors.subtle
-  },
   receiptItem: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
     paddingVertical: 3
-  },
-  receiptMark: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 3,
-    lineHeight: 23,
-    textAlign: 'center'
   },
   receiptMeta: {
     color: colors.muted,
@@ -709,21 +838,11 @@ const localStyles = StyleSheet.create({
   receiptMonth: {
     color: colors.ink,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 15,
+    fontSize: 18,
     fontWeight: '700',
     letterSpacing: 1.5,
-    lineHeight: 20,
-    marginTop: 8,
-    textAlign: 'center'
-  },
-  receiptSub: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 9.5,
-    fontWeight: '600',
-    letterSpacing: 1.5,
-    lineHeight: 13,
-    marginTop: 3,
+    lineHeight: 23,
+    marginTop: 2,
     textAlign: 'center'
   },
   receiptWrap: {
@@ -770,12 +889,12 @@ const localStyles = StyleSheet.create({
     marginBottom: 2
   },
   stack: {
-    paddingTop: 6,
+    paddingTop: 8,
     width: RECEIPT_WIDTH
   },
   stage: {
     alignItems: 'center',
-    gap: 18
+    gap: 14
   },
   totalLabel: {
     color: colors.ink,
@@ -796,6 +915,42 @@ const localStyles = StyleSheet.create({
     fontSize: 21,
     fontWeight: '800',
     lineHeight: 27
+  },
+  yearStrip: {
+    borderBottomColor: 'rgba(42,39,34,0.12)',
+    borderBottomWidth: 1,
+    width: RECEIPT_WIDTH
+  },
+  yearStripContent: {
+    gap: 4
+  },
+  yearTab: {
+    alignItems: 'center',
+    minHeight: 34,
+    paddingHorizontal: 8,
+    paddingTop: 3,
+    position: 'relative'
+  },
+  yearTabText: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    lineHeight: 18
+  },
+  yearTabTextActive: {
+    color: colors.ink
+  },
+  yearTabUnderline: {
+    backgroundColor: colors.accent,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+    bottom: -1,
+    height: 2,
+    left: 8,
+    position: 'absolute',
+    right: 8
   },
   zeroText: {
     color: colors.subtle,
