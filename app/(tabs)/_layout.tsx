@@ -314,6 +314,14 @@ function ResponsiveTabBar({
           type: 'tabPress'
         });
 
+        if (route.name === 'history' && !event.defaultPrevented) {
+          navigation.navigate({
+            name: route.name,
+            params: { resetToLedger: String(Date.now()) }
+          });
+          return;
+        }
+
         if (!focused && !event.defaultPrevented) {
           navigation.navigate(route.name);
         }

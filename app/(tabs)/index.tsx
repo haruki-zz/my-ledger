@@ -147,17 +147,10 @@ export default function DashboardScreen() {
 
   function viewHistoryDate(date: string) {
     const targetMonthKey = monthKeyFromDateString(date);
-    if (targetMonthKey !== currentMonthKey()) {
-      router.push({
-        pathname: '/(tabs)/receipts',
-        params: { month: targetMonthKey }
-      });
-      return;
-    }
-
     router.push({
       pathname: '/(tabs)/history',
       params: {
+        month: targetMonthKey,
         date
       }
     });
