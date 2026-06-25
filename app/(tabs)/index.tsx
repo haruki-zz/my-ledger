@@ -18,7 +18,7 @@ import { DashboardDailyActivity } from '@/src/components/DashboardDailyActivity'
 import { DashboardDailyTrend } from '@/src/components/DashboardDailyTrend';
 import { SlidingValueText } from '@/src/components/SlidingValueText';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
-import { TransferChecklistCard } from '@/src/components/TransferChecklistCard';
+import { TransferSettleEntry } from '@/src/components/TransferSettleEntry';
 import { BentoCard } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
@@ -110,14 +110,6 @@ export default function DashboardScreen() {
     neutralIcon: 'remove',
     tone: 'onDark'
   });
-  const averageDenominator = dashboardAverageDenominator({
-    effectiveMonthKey: stats.dateRange.effectiveMonthKey,
-    endDateString: stats.dateRange.endDateString,
-    period,
-    startDateString: stats.dateRange.startDateString,
-    todayString: ledgerTodayString
-  });
-  const averagePerDay = stats.totalYen / Math.max(1, averageDenominator);
 
   const closeCategoryDetail = useCallback(() => {
     setSelectedCategoryKey(null);
@@ -264,7 +256,6 @@ export default function DashboardScreen() {
 
               <View style={localStyles.heroAmountRow}>
                 <View style={localStyles.heroAmountBlock}>
-                  <Text style={localStyles.heroLabel}>TOTAL SPEND</Text>
                   <SlidingValueText
                     formatValue={formatYen}
                     textStyle={localStyles.heroAmount}
@@ -272,31 +263,28 @@ export default function DashboardScreen() {
                     wrapperStyle={localStyles.heroAmountSlot}
                   />
                 </View>
-                <View style={localStyles.heroMeta}>
-                  <Text style={localStyles.heroMetaText}>{stats.count} records</Text>
-                  <Text style={localStyles.heroMetaText}>{formatYen(Math.round(averagePerDay))} / day</Text>
-                </View>
-              </View>
-
-              <View style={localStyles.comparisonRow}>
-                <Ionicons
-                  color={dashboardComparison.color}
-                  name={dashboardComparison.icon || 'remove'}
-                  size={14}
-                />
-                <SlidingValueText
-                  formatValue={formatComparisonAmount}
-                  textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
-                  value={Math.abs(stats.comparison.deltaYen)}
-                  wrapperStyle={localStyles.comparisonAmountSlot}
-                />
-                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
-                  {stats.comparison.label}
-                </Text>
-                <View style={localStyles.percentBadge}>
-                  <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
-                    {formatComparisonPercentage(stats.comparison.percentage)}
-                  </Text>
+                <View style={localStyles.comparisonStack}>
+                  <View style={localStyles.comparisonTopLine}>
+                    <Ionicons
+                      color={dashboardComparison.color}
+                      name={dashboardComparison.icon || 'remove'}
+                      size={13}
+                    />
+                    <SlidingValueText
+                      formatValue={formatComparisonAmount}
+                      textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
+                      value={Math.abs(stats.comparison.deltaYen)}
+                      wrapperStyle={localStyles.comparisonAmountSlot}
+                    />
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
+                      {stats.comparison.label}
+                    </Text>
+                  </View>
+                  <View style={localStyles.percentBadge}>
+                    <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
+                      {formatComparisonPercentage(stats.comparison.percentage)}
+                    </Text>
+                  </View>
                 </View>
               </View>
 
@@ -319,6 +307,16 @@ export default function DashboardScreen() {
                   </>
                 ) : null}
               </View>
+
+              <TransferSettleEntry
+                currentUserId={currentUserId}
+                error={transferError}
+                items={transferItems}
+                loading={transferLoading}
+                members={members}
+                onSetConfirmations={setConfirmations}
+                saving={transferSaving}
+              />
             </BentoCard>
           </View>
 
@@ -347,15 +345,6 @@ export default function DashboardScreen() {
             todayString={ledgerTodayString}
           />
 
-          <TransferChecklistCard
-            currentUserId={currentUserId}
-            error={transferError}
-            items={transferItems}
-            loading={transferLoading}
-            members={members}
-            onSetConfirmations={setConfirmations}
-            saving={transferSaving}
-          />
         </View>
       </ScrollView>
 
@@ -427,45 +416,6 @@ function MemberSplit({
   );
 }
 
-function dashboardAverageDenominator(input: {
-  effectiveMonthKey: string;
-  endDateString: string;
-  period: DashboardPeriod;
-  startDateString: string;
-  todayString: string;
-}) {
-  if (input.period === 'today') {
-    return 1;
-  }
-
-  if (input.period === 'week') {
-    return daysBetween(input.startDateString, input.endDateString) + 1;
-  }
-
-  const daysInSelectedMonth = daysInMonth(input.effectiveMonthKey);
-  if (input.effectiveMonthKey === input.todayString.slice(0, 7)) {
-    return Math.min(Number(input.todayString.slice(8, 10)), daysInSelectedMonth);
-  }
-
-  return daysInSelectedMonth;
-}
-
-function daysInMonth(monthKey: string) {
-  const [year, month] = monthKey.split('-').map(Number);
-  return new Date(year, month, 0).getDate();
-}
-
-function daysBetween(startDateString: string, endDateString: string) {
-  const start = parseDateString(startDateString).getTime();
-  const end = parseDateString(endDateString).getTime();
-  return Math.max(0, Math.round((end - start) / 86_400_000));
-}
-
-function parseDateString(dateString: string) {
-  const [year, month, day] = dateString.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
-
 function periodLabel(period: DashboardPeriod) {
   if (period === 'today') {
     return 'today';
@@ -513,20 +463,29 @@ const localStyles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 18
   },
-  comparisonRow: {
+  comparisonStack: {
+    alignItems: 'flex-end',
+    gap: 6,
+    justifyContent: 'center',
+    maxWidth: 152,
+    paddingBottom: 3,
+    paddingTop: 3
+  },
+  comparisonTopLine: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 7,
-    marginTop: 9,
-    minHeight: 24
+    gap: 4,
+    justifyContent: 'flex-end',
+    maxWidth: 152
   },
   comparisonText: {
     color: 'rgba(255,253,247,0.66)',
-    flex: 1,
     fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    lineHeight: 16,
-    minWidth: 0
+    fontSize: 10.5,
+    flexShrink: 1,
+    lineHeight: 13,
+    maxWidth: 82,
+    textAlign: 'right'
   },
   content: {
     gap: 0
@@ -547,13 +506,14 @@ const localStyles = StyleSheet.create({
     minWidth: 0
   },
   heroAmountRow: {
-    alignItems: 'flex-end',
+    alignItems: 'center',
     flexDirection: 'row',
+    gap: 10,
     justifyContent: 'space-between'
   },
   heroAmountSlot: {
     height: 40,
-    marginTop: 4
+    marginTop: 0
   },
   heroCard: {
     backgroundColor: colors.primary,
@@ -563,9 +523,9 @@ const localStyles = StyleSheet.create({
     gap: 0,
     minHeight: 0,
     overflow: 'hidden',
-    paddingBottom: 15,
+    paddingBottom: 12,
     paddingHorizontal: 16,
-    paddingTop: 13
+    paddingTop: 11
   },
   heroChevron: {
     alignItems: 'center',
@@ -584,27 +544,8 @@ const localStyles = StyleSheet.create({
   heroDivider: {
     backgroundColor: 'rgba(255,253,247,0.12)',
     height: 1,
-    marginBottom: 11,
-    marginTop: 12
-  },
-  heroLabel: {
-    color: 'rgba(255,253,247,0.50)',
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 1.6,
-    lineHeight: 12
-  },
-  heroMeta: {
-    alignItems: 'flex-end',
-    gap: 3,
-    paddingBottom: 2
-  },
-  heroMetaText: {
-    color: 'rgba(255,253,247,0.50)',
-    fontFamily: fontFamilies.mono,
-    fontSize: 9.5,
-    lineHeight: 13
+    marginBottom: 9,
+    marginTop: 9
   },
   heroMonth: {
     color: '#FFFDF7',
@@ -629,7 +570,7 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     justifyContent: 'space-between',
-    marginBottom: 13
+    marginBottom: 12
   },
   heroZone: {
     transformOrigin: 'top center'
@@ -637,18 +578,18 @@ const localStyles = StyleSheet.create({
   memberAmount: {
     color: '#FFFDF7',
     fontFamily: fontFamilies.monoBold,
-    fontSize: 15,
+    fontSize: 18,
     fontWeight: '700',
-    lineHeight: 20,
-    textAlign: 'right'
+    lineHeight: 23,
+    textAlign: 'left'
   },
   memberAmountSlot: {
-    flexShrink: 0,
-    height: 20
+    alignSelf: 'stretch',
+    height: 23
   },
   memberDivider: {
     backgroundColor: 'rgba(255,253,247,0.12)',
-    height: 22,
+    height: 42,
     width: 1
   },
   memberDot: {
@@ -658,27 +599,23 @@ const localStyles = StyleSheet.create({
   },
   memberName: {
     alignItems: 'center',
-    flex: 1,
     flexDirection: 'row',
     gap: 6,
     minWidth: 0
   },
   memberNameText: {
     color: 'rgba(255,253,247,0.60)',
-    flex: 1,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 9.5,
+    fontSize: 10.5,
     fontWeight: '700',
     letterSpacing: 0.6,
-    lineHeight: 13,
+    lineHeight: 14,
     minWidth: 0
   },
   memberSplit: {
-    alignItems: 'center',
+    alignItems: 'stretch',
     flex: 1,
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'space-between',
+    gap: 4,
     minWidth: 0
   },
   memberSplitRow: {

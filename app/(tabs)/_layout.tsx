@@ -383,7 +383,7 @@ function ResponsiveTabBar({
       style={[
         localStyles.bottomTabShell,
         {
-          bottom: insets.bottom + 10
+          bottom: Math.max(4, insets.bottom - 4)
         }
       ]}
     >

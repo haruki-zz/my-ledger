@@ -116,7 +116,9 @@ export function useTransferChecklist(ledgerId: string | null) {
       await setTransferConfirmations(updates);
       scheduleReload();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Could not update transfers');
+      const message = saveError instanceof Error ? saveError.message : 'Could not update transfers';
+      setError(message);
+      throw saveError instanceof Error ? saveError : new Error(message);
     } finally {
       setSaving(false);
     }

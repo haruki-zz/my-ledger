@@ -50,8 +50,7 @@ Prefer these before introducing a new card, segmented control, icon button, swit
 | `DailyChart` | `src/components/DailyChart.tsx` | Member daily series chart. |
 | `PieChart` | `src/components/PieChart.tsx` | Category breakdown. |
 | `SlidingValueText` | `src/components/SlidingValueText.tsx` | Animated numeric text transitions. |
-| `TransferChecklistCard` | `src/components/TransferChecklistCard.tsx` | Dashboard transfer checklist summary. |
-| `TransferItemsOverlay` | `src/components/TransferItemsOverlay.tsx` | Full transfer checklist overlay. |
+| `TransferSettleEntry` | `src/components/TransferSettleEntry.tsx` | Dashboard hero transfer entry and settle-up bottom sheet. |
 | `TransferChecklistShared` exports | `src/components/TransferChecklistShared.tsx` | Shared transfer item card, participant/completion helpers. |
 
 ## Keyboard Components
