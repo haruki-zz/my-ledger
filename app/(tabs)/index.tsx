@@ -1,20 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PanResponder, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  PanResponder,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CategoryDetailSheet } from '@/src/components/CategoryDetailSheet';
-import { DailyChart } from '@/src/components/DailyChart';
-import { DailyActivityHeatmap } from '@/src/components/DailyActivityHeatmap';
-import { PieChart } from '@/src/components/PieChart';
+import { DashboardCategoryShare } from '@/src/components/DashboardCategoryShare';
+import { DashboardDailyActivity } from '@/src/components/DashboardDailyActivity';
+import { DashboardDailyTrend } from '@/src/components/DashboardDailyTrend';
 import { SlidingValueText } from '@/src/components/SlidingValueText';
-import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { TransferChecklistCard } from '@/src/components/TransferChecklistCard';
-import { BentoCard, IconButton, PillTabs, type PillTabOption } from '@/src/components/ui';
+import { BentoCard } from '@/src/components/ui';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
-import { tintFromAccent } from '@/src/lib/color';
 import { buildUserColorMap, colorForDarkSurface, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, formatYen, todayDateString } from '@/src/lib/format';
 import { getSpendComparisonPresentation } from '@/src/lib/spendComparison';
@@ -28,10 +35,10 @@ import {
   type DashboardPeriod
 } from '@/src/lib/stats';
 
-const PERIOD_OPTIONS: PillTabOption<DashboardPeriod>[] = [
-  { label: 'Today', value: 'today' },
-  { label: 'Week', value: 'week' },
-  { label: 'Month', value: 'month' }
+const PERIOD_OPTIONS: { label: string; value: DashboardPeriod }[] = [
+  { label: 'D', value: 'today' },
+  { label: 'W', value: 'week' },
+  { label: 'M', value: 'month' }
 ];
 
 export default function DashboardScreen() {
@@ -103,6 +110,15 @@ export default function DashboardScreen() {
     neutralIcon: 'remove',
     tone: 'onDark'
   });
+  const averageDenominator = dashboardAverageDenominator({
+    effectiveMonthKey: stats.dateRange.effectiveMonthKey,
+    endDateString: stats.dateRange.endDateString,
+    period,
+    startDateString: stats.dateRange.startDateString,
+    todayString: ledgerTodayString
+  });
+  const averagePerDay = stats.totalYen / Math.max(1, averageDenominator);
+
   const closeCategoryDetail = useCallback(() => {
     setSelectedCategoryKey(null);
   }, []);
@@ -185,6 +201,7 @@ export default function DashboardScreen() {
   return (
     <>
       <ScrollView
+        contentInsetAdjustmentBehavior="never"
         refreshControl={
           <RefreshControl
             refreshing={manualRefreshing}
@@ -192,98 +209,143 @@ export default function DashboardScreen() {
           />
         }
         style={styles.page}
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
+        contentContainerStyle={[styles.content, localStyles.content, { paddingTop: Math.max(0, insets.top) }]}
       >
         <View style={localStyles.dashboardContent}>
           {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <View style={localStyles.monthSwipeArea} {...monthSwipeResponder.panHandlers}>
-            <View style={localStyles.monthAnchor}>
-              <IconButton
-                accessibilityLabel={`Previous ${period}`}
-                disabled={!periodNavigation.canGoPrevious}
-                icon="chevron-back"
-                onPress={() => movePeriod(-1)}
-                size="sm"
-                tone="primary"
-              />
-
-              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthLabel}>
-                {periodNavigation.label}
-              </Text>
-
-              <IconButton
-                accessibilityLabel={`Next ${period}`}
-                disabled={!periodNavigation.canGoNext}
-                icon="chevron-forward"
-                onPress={() => movePeriod(1)}
-                size="sm"
-                tone="primary"
-              />
-            </View>
-
-            <PillTabs
-              accessibilityLabel="Dashboard period"
-              onChange={selectPeriod}
-              options={PERIOD_OPTIONS}
-              size="sm"
-              style={localStyles.periodPillTrack}
-              value={period}
-            />
-
+          <View
+            style={localStyles.heroZone}
+            {...monthSwipeResponder.panHandlers}
+          >
             <BentoCard variant="hero" style={localStyles.heroCard}>
-              <View style={localStyles.heroContent}>
-                <SlidingValueText
-                  formatValue={formatYen}
-                  textStyle={localStyles.heroAmount}
-                  value={stats.totalYen}
-                  wrapperStyle={localStyles.heroAmountSlot}
-                />
-
-                <View style={localStyles.comparisonRow}>
-                  <Ionicons
-                    color={dashboardComparison.color}
-                    name={dashboardComparison.icon || 'remove'}
-                    size={18}
+              <View style={localStyles.heroTop}>
+                <View style={localStyles.heroSwitch}>
+                  <HeroChevron
+                    accessibilityLabel={`Previous ${period}`}
+                    disabled={!periodNavigation.canGoPrevious}
+                    direction="back"
+                    onPress={() => movePeriod(-1)}
                   />
-                  <SlidingValueText
-                    formatValue={formatComparisonAmount}
-                    textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
-                    value={Math.abs(stats.comparison.deltaYen)}
-                    wrapperStyle={localStyles.comparisonAmountSlot}
-                  />
-                  <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
-                    {stats.comparison.label}
+                  <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.heroMonth}>
+                    {periodNavigation.label}
                   </Text>
-                  <View style={localStyles.percentBadge}>
-                    <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
-                      {formatComparisonPercentage(stats.comparison.percentage)}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={localStyles.heroDivider} />
-
-                <View style={localStyles.memberSplitRow}>
-                  <MemberSplit
-                    amountYen={currentMemberStat?.amountYen || 0}
-                    color={currentUserColorOnDark}
-                    label={currentUserName}
+                  <HeroChevron
+                    accessibilityLabel={`Next ${period}`}
+                    disabled={!periodNavigation.canGoNext}
+                    direction="forward"
+                    onPress={() => movePeriod(1)}
                   />
-                  {otherUserId ? (
-                    <>
-                      <View style={localStyles.memberDivider} />
-                      <MemberSplit
-                        amountYen={otherMemberStat?.amountYen || 0}
-                        color={otherUserColorOnDark}
-                        label={otherUserName}
-                      />
-                    </>
-                  ) : null}
                 </View>
+
+                <View style={localStyles.periodSegment}>
+                  {PERIOD_OPTIONS.map((option) => {
+                    const active = option.value === period;
+                    return (
+                      <Pressable
+                        accessibilityLabel={`Show ${periodLabel(option.value)} dashboard`}
+                        accessibilityRole="button"
+                        key={option.value}
+                        onPress={() => selectPeriod(option.value)}
+                        style={({ pressed }) => [
+                          localStyles.periodOption,
+                          active && localStyles.periodOptionActive,
+                          pressed && !active && localStyles.periodOptionPressed
+                        ]}
+                      >
+                        <Text style={[localStyles.periodText, active && localStyles.periodTextActive]}>
+                          {option.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <View style={localStyles.heroAmountRow}>
+                <View style={localStyles.heroAmountBlock}>
+                  <Text style={localStyles.heroLabel}>TOTAL SPEND</Text>
+                  <SlidingValueText
+                    formatValue={formatYen}
+                    textStyle={localStyles.heroAmount}
+                    value={stats.totalYen}
+                    wrapperStyle={localStyles.heroAmountSlot}
+                  />
+                </View>
+                <View style={localStyles.heroMeta}>
+                  <Text style={localStyles.heroMetaText}>{stats.count} records</Text>
+                  <Text style={localStyles.heroMetaText}>{formatYen(Math.round(averagePerDay))} / day</Text>
+                </View>
+              </View>
+
+              <View style={localStyles.comparisonRow}>
+                <Ionicons
+                  color={dashboardComparison.color}
+                  name={dashboardComparison.icon || 'remove'}
+                  size={14}
+                />
+                <SlidingValueText
+                  formatValue={formatComparisonAmount}
+                  textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
+                  value={Math.abs(stats.comparison.deltaYen)}
+                  wrapperStyle={localStyles.comparisonAmountSlot}
+                />
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
+                  {stats.comparison.label}
+                </Text>
+                <View style={localStyles.percentBadge}>
+                  <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
+                    {formatComparisonPercentage(stats.comparison.percentage)}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={localStyles.heroDivider} />
+
+              <View style={localStyles.memberSplitRow}>
+                <MemberSplit
+                  amountYen={currentMemberStat?.amountYen || 0}
+                  color={currentUserColorOnDark}
+                  label={currentUserName}
+                />
+                {otherUserId ? (
+                  <>
+                    <View style={localStyles.memberDivider} />
+                    <MemberSplit
+                      amountYen={otherMemberStat?.amountYen || 0}
+                      color={otherUserColorOnDark}
+                      label={otherUserName}
+                    />
+                  </>
+                ) : null}
               </View>
             </BentoCard>
           </View>
+
+          <DashboardDailyActivity
+            days={heatDays}
+            monthKey={heatmapMonthKey}
+            onViewHistoryDate={viewHistoryDate}
+            todayString={ledgerTodayString}
+          />
+
+          <DashboardCategoryShare
+            categories={stats.categories}
+            onCategoryPress={openCategoryDetail}
+            selectedCategoryKey={selectedCategoryKey}
+            totalYen={stats.totalYen}
+          />
+
+          <DashboardDailyTrend
+            currentUserColor={currentUserColor}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+            otherUserColor={otherUserColor}
+            otherUserId={otherUserId}
+            otherUserName={otherUserName}
+            series={stats.dailyUserSeries}
+            todayString={ledgerTodayString}
+          />
 
           <TransferChecklistCard
             currentUserId={currentUserId}
@@ -294,59 +356,6 @@ export default function DashboardScreen() {
             onSetConfirmations={setConfirmations}
             saving={transferSaving}
           />
-
-          <DailyActivityHeatmap
-            days={heatDays}
-            monthKey={heatmapMonthKey}
-            onViewHistoryDate={viewHistoryDate}
-            todayString={ledgerTodayString}
-          />
-
-          <BentoCard style={localStyles.categoryCard}>
-            <View style={localStyles.sectionHeader}>
-              <Text style={[styles.upperLabel, localStyles.greenLabel]}>Category Share</Text>
-              {stats.totalYen > 0 ? (
-                <View style={localStyles.categoryHint}>
-                  <Ionicons color={colors.secondary} name="hand-left-outline" size={13} />
-                  <Text style={localStyles.categoryHintText}>Tap to break down</Text>
-                </View>
-              ) : null}
-            </View>
-            <PieChart
-              categories={stats.categories}
-              onCategoryPress={openCategoryDetail}
-              selectedCategoryKey={selectedCategoryKey}
-              totalYen={stats.totalYen}
-            />
-          </BentoCard>
-
-          <BentoCard variant="chart" style={localStyles.trendCard}>
-            <View style={localStyles.dailyTrendHeader}>
-              <View style={localStyles.dailyTrendTitle}>
-                <View style={localStyles.trendTitleRow}>
-                  <Ionicons color={colors.primaryDark} name="trending-up-outline" size={24} />
-                  <Text style={[styles.upperLabel, localStyles.greenLabel]}>Daily Trend</Text>
-                </View>
-              </View>
-
-              <View style={localStyles.trendActions}>
-                <View style={localStyles.dailyTrendLegend}>
-                  {currentUserId ? <UserLegendPill color={currentUserColor} label={currentUserName} /> : null}
-                  {otherUserId ? <UserLegendPill color={otherUserColor} label={otherUserName} /> : null}
-                </View>
-              </View>
-            </View>
-
-            <DailyChart
-              currentUserColor={currentUserColor}
-              currentUserId={currentUserId}
-              currentUserName={currentUserName}
-              otherUserColor={otherUserColor}
-              otherUserId={otherUserId}
-              otherUserName={otherUserName}
-              series={stats.dailyUserSeries}
-            />
-          </BentoCard>
         </View>
       </ScrollView>
 
@@ -359,17 +368,35 @@ export default function DashboardScreen() {
   );
 }
 
-function UserLegendPill({ color, label }: { color: string; label: string }) {
+function HeroChevron({
+  accessibilityLabel,
+  direction,
+  disabled,
+  onPress
+}: {
+  accessibilityLabel: string;
+  direction: 'back' | 'forward';
+  disabled: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={[
-      localStyles.userLegendPill,
-      { backgroundColor: tintFromAccent(color) }
-    ]}>
-      <View style={[localStyles.userLegendDot, { backgroundColor: color }]} />
-      <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.userLegendText, { color }]}>
-        {label}
-      </Text>
-    </View>
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        localStyles.heroChevron,
+        disabled && localStyles.heroChevronDisabled,
+        pressed && !disabled && localStyles.heroChevronPressed
+      ]}
+    >
+      <Ionicons
+        color={disabled ? 'rgba(255,253,247,0.24)' : 'rgba(255,253,247,0.72)'}
+        name={direction === 'back' ? 'chevron-back' : 'chevron-forward'}
+        size={16}
+      />
+    </Pressable>
   );
 }
 
@@ -384,19 +411,71 @@ function MemberSplit({
 }) {
   return (
     <View style={localStyles.memberSplit}>
-      <View style={localStyles.memberNamePill}>
-        <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.memberNamePillText, { color }]}>
-          {label}
+      <View style={localStyles.memberName}>
+        <View style={[localStyles.memberDot, { backgroundColor: color }]} />
+        <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.memberNameText}>
+          {displayName(label).toUpperCase()}
         </Text>
       </View>
       <SlidingValueText
         formatValue={formatYen}
-        textStyle={[localStyles.memberAmount, { color }]}
+        textStyle={localStyles.memberAmount}
         value={amountYen}
         wrapperStyle={localStyles.memberAmountSlot}
       />
     </View>
   );
+}
+
+function dashboardAverageDenominator(input: {
+  effectiveMonthKey: string;
+  endDateString: string;
+  period: DashboardPeriod;
+  startDateString: string;
+  todayString: string;
+}) {
+  if (input.period === 'today') {
+    return 1;
+  }
+
+  if (input.period === 'week') {
+    return daysBetween(input.startDateString, input.endDateString) + 1;
+  }
+
+  const daysInSelectedMonth = daysInMonth(input.effectiveMonthKey);
+  if (input.effectiveMonthKey === input.todayString.slice(0, 7)) {
+    return Math.min(Number(input.todayString.slice(8, 10)), daysInSelectedMonth);
+  }
+
+  return daysInSelectedMonth;
+}
+
+function daysInMonth(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Date(year, month, 0).getDate();
+}
+
+function daysBetween(startDateString: string, endDateString: string) {
+  const start = parseDateString(startDateString).getTime();
+  const end = parseDateString(endDateString).getTime();
+  return Math.max(0, Math.round((end - start) / 86_400_000));
+}
+
+function parseDateString(dateString: string) {
+  const [year, month, day] = dateString.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function periodLabel(period: DashboardPeriod) {
+  if (period === 'today') {
+    return 'today';
+  }
+
+  if (period === 'week') {
+    return 'week';
+  }
+
+  return 'month';
 }
 
 function formatComparisonAmount(amountYen: number) {
@@ -423,250 +502,232 @@ function formatComparisonPercentage(percentage: number | null) {
 }
 
 const localStyles = StyleSheet.create({
-  categoryCard: {
-    gap: 16
+  comparisonAmountSlot: {
+    flexShrink: 0,
+    height: 18
   },
-  categoryHint: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(192,137,46,0.08)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.pill,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 5,
-    minHeight: 24,
-    paddingHorizontal: 8,
-    paddingVertical: 3
-  },
-  categoryHintText: {
-    color: colors.secondary,
-    fontFamily: fontFamilies.bold,
-    fontSize: 11,
+  comparisonAmountText: {
+    flexShrink: 0,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 12.5,
     fontWeight: '700',
-    lineHeight: 15
+    lineHeight: 18
   },
   comparisonRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 7,
-    minHeight: 32
+    marginTop: 9,
+    minHeight: 24
   },
   comparisonText: {
-    color: 'rgba(255,255,255,0.72)',
+    color: 'rgba(255,253,247,0.66)',
     flex: 1,
-    fontFamily: fontFamilies.bold,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 18,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16,
     minWidth: 0
   },
-  comparisonAmountText: {
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 20,
-    flexShrink: 0
-  },
-  comparisonAmountSlot: {
-    flexShrink: 0,
-    height: 20
+  content: {
+    gap: 0
   },
   dashboardContent: {
-    gap: 18
-  },
-  dailyTrendHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between'
-  },
-  dailyTrendTitle: {
-    flex: 1,
-    gap: 4,
-    minWidth: 0
-  },
-  greenLabel: {
-    color: colors.primaryDark,
-    fontSize: 13
+    gap: 13
   },
   heroAmount: {
     color: '#FFFDF7',
     fontFamily: fontFamilies.monoBold,
-    fontSize: 40,
+    fontSize: 37,
     fontWeight: '700',
     letterSpacing: 0,
-    lineHeight: 48
+    lineHeight: 40
+  },
+  heroAmountBlock: {
+    flex: 1,
+    minWidth: 0
+  },
+  heroAmountRow: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
   },
   heroAmountSlot: {
-    height: 48
+    height: 40,
+    marginTop: 4
   },
   heroCard: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
+    borderRadius: 22,
+    boxShadow: '0 20px 40px -20px rgba(42,39,34,0.55)',
     gap: 0,
     minHeight: 0,
-    padding: 0,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    paddingBottom: 15,
+    paddingHorizontal: 16,
+    paddingTop: 13
   },
-  heroContent: {
-    gap: 10,
-    paddingHorizontal: 18,
-    paddingBottom: 16,
-    paddingTop: 15
+  heroChevron: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,253,247,0.08)',
+    borderRadius: 8,
+    height: 26,
+    justifyContent: 'center',
+    width: 26
+  },
+  heroChevronDisabled: {
+    opacity: 0.52
+  },
+  heroChevronPressed: {
+    backgroundColor: 'rgba(255,253,247,0.14)'
   },
   heroDivider: {
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,253,247,0.12)',
     height: 1,
-    marginTop: 2
+    marginBottom: 11,
+    marginTop: 12
   },
-  heroTopRow: {
+  heroLabel: {
+    color: 'rgba(255,253,247,0.50)',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+    lineHeight: 12
+  },
+  heroMeta: {
+    alignItems: 'flex-end',
+    gap: 3,
+    paddingBottom: 2
+  },
+  heroMetaText: {
+    color: 'rgba(255,253,247,0.50)',
+    fontFamily: fontFamilies.mono,
+    fontSize: 9.5,
+    lineHeight: 13
+  },
+  heroMonth: {
+    color: '#FFFDF7',
+    flexShrink: 1,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 22,
+    maxWidth: 142,
+    minWidth: 0,
+    textAlign: 'center'
+  },
+  heroSwitch: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0
+  },
+  heroTop: {
     alignItems: 'center',
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    justifyContent: 'space-between'
+    gap: 10,
+    justifyContent: 'space-between',
+    marginBottom: 13
+  },
+  heroZone: {
+    transformOrigin: 'top center'
   },
   memberAmount: {
+    color: '#FFFDF7',
     fontFamily: fontFamilies.monoBold,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
-    lineHeight: 22,
-    textAlign: 'left'
-  },
-  memberAmountRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    minHeight: 32,
-    justifyContent: 'space-between'
+    lineHeight: 20,
+    textAlign: 'right'
   },
   memberAmountSlot: {
     flexShrink: 0,
-    height: 22
+    height: 20
   },
   memberDivider: {
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,253,247,0.12)',
+    height: 22,
     width: 1
   },
-  memberNamePill: {
-    alignSelf: 'center',
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    borderRadius: theme.radii.pill,
-    flexShrink: 1,
-    maxWidth: 78,
-    minHeight: 22,
-    justifyContent: 'center',
-    paddingHorizontal: 9,
-    paddingVertical: 3
+  memberDot: {
+    borderRadius: 2,
+    height: 7,
+    width: 7
   },
-  memberNamePillText: {
+  memberName: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0
+  },
+  memberNameText: {
+    color: 'rgba(255,253,247,0.60)',
+    flex: 1,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 14,
+    letterSpacing: 0.6,
+    lineHeight: 13,
     minWidth: 0
   },
   memberSplit: {
     alignItems: 'center',
     flex: 1,
     flexDirection: 'row',
-    gap: 7,
+    gap: 8,
+    justifyContent: 'space-between',
     minWidth: 0
   },
   memberSplitRow: {
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 22
-  },
-  monthAnchor: {
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 54
-  },
-  monthLabel: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 30,
-    fontWeight: '700',
-    lineHeight: 38,
-    textAlign: 'center'
-  },
-  monthlyTotalLabel: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    lineHeight: 20,
-    textTransform: 'uppercase'
-  },
-  monthSwipeArea: {
-    gap: 10
+    gap: 14
   },
   percentBadge: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4
+    backgroundColor: 'rgba(232,149,123,0.16)',
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 3
   },
   percentBadgeText: {
     fontFamily: fontFamilies.monoBold,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '700',
-    lineHeight: 18
+    lineHeight: 15
   },
-  periodPillTrack: {
-    alignSelf: 'stretch'
-  },
-  sectionHeader: {
+  periodOption: {
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between'
+    borderRadius: 6,
+    height: 24,
+    justifyContent: 'center',
+    minWidth: 27,
+    paddingHorizontal: 8
   },
-  trendActions: {
+  periodOptionActive: {
+    backgroundColor: 'rgba(255,253,247,0.92)'
+  },
+  periodOptionPressed: {
+    backgroundColor: 'rgba(255,253,247,0.12)'
+  },
+  periodSegment: {
     alignItems: 'center',
+    backgroundColor: 'rgba(255,253,247,0.08)',
+    borderRadius: 9,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8
+    gap: 2,
+    padding: 3
   },
-  dailyTrendLegend: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    gap: 6,
-    justifyContent: 'flex-end',
-    minWidth: 0
-  },
-  trendCard: {
-    minHeight: 0
-  },
-  trendTitleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8
-  },
-  userLegendDot: {
-    borderRadius: 4,
-    height: 8,
-    width: 8
-  },
-  userLegendPill: {
-    alignItems: 'center',
-    borderRadius: theme.radii.pill,
-    flexDirection: 'row',
-    gap: 6,
-    maxWidth: 112,
-    minHeight: 24,
-    paddingHorizontal: 9,
-    paddingVertical: 4
-  },
-  userLegendText: {
-    flexShrink: 1,
+  periodText: {
+    color: 'rgba(255,253,247,0.50)',
     fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
+    fontSize: 10.5,
     fontWeight: '700',
-    letterSpacing: 0.5,
     lineHeight: 14
+  },
+  periodTextActive: {
+    color: colors.primary
   }
 });

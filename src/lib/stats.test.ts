@@ -287,14 +287,15 @@ describe('buildDashboardPeriodStats', () => {
     expect(stats.dailyUserSeries[19].totalAmountYen).toBe(0);
   });
 
-  it('aggregates category rows as top four plus Other', () => {
+  it('aggregates category rows as top five plus Other', () => {
     const stats = buildStats('month', [
-      expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
-      expense({ amountYen: 500, category: 'Food & Dining', spentOn: '2026-06-01' }),
-      expense({ amountYen: 400, category: 'Transport', spentOn: '2026-06-01' }),
-      expense({ amountYen: 300, category: 'Utilities', spentOn: '2026-06-01' }),
-      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-01' }),
-      expense({ amountYen: 100, category: 'Travel', spentOn: '2026-06-01' })
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-01' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-01' })
     ]);
 
     expect(stats.categories.map((category) => category.category)).toEqual([
@@ -302,23 +303,25 @@ describe('buildDashboardPeriodStats', () => {
       'Food & Dining',
       'Transport',
       'Utilities',
+      'Shopping',
       'Other'
     ]);
-    expect(stats.categories[4]).toMatchObject({
+    expect(stats.categories[5]).toMatchObject({
       amountYen: 300,
-      percentage: expect.closeTo(14.285, 2),
-      sourceCategories: ['shopping', 'travel']
+      percentage: expect.closeTo(10.714, 2),
+      sourceCategories: ['travel', 'healthcare']
     });
   });
 
   it('keeps daily series scoped to aggregated Other source categories', () => {
     const expenses = [
-      expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
-      expense({ amountYen: 500, category: 'Food & Dining', spentOn: '2026-06-01' }),
-      expense({ amountYen: 400, category: 'Transport', spentOn: '2026-06-01' }),
-      expense({ amountYen: 300, category: 'Utilities', spentOn: '2026-06-01' }),
-      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-02' }),
-      expense({ amountYen: 100, category: 'Travel', spentOn: '2026-06-03' })
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-02' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' })
     ];
     const stats = buildStats('month', expenses);
     const other = stats.categories.find((category) => category.category === 'Other');
@@ -375,28 +378,29 @@ describe('buildDashboardPeriodStats', () => {
 
   it('uses a by-category breakdown for aggregated Other details', () => {
     const stats = buildStats('month', [
-      expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
-      expense({ amountYen: 500, category: 'Food & Dining', spentOn: '2026-06-01' }),
-      expense({ amountYen: 400, category: 'Transport', spentOn: '2026-06-01' }),
-      expense({ amountYen: 300, category: 'Utilities', spentOn: '2026-06-01' }),
-      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-02' }),
-      expense({ amountYen: 100, category: 'Travel', spentOn: '2026-06-03' }),
-      expense({ amountYen: 150, category: 'Shopping', spentOn: '2026-05-03' })
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-02' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' }),
+      expense({ amountYen: 150, category: 'Travel', spentOn: '2026-05-03' })
     ]);
     const otherRow = stats.categories.find((category) => category.category === 'Other');
     const otherDetail = stats.categoryDetails.find((detail) => detail.detailKey === otherRow?.detailKey);
 
     expect(otherRow).toMatchObject({
       amountYen: 300,
-      sourceCategories: ['shopping', 'travel']
+      sourceCategories: ['travel', 'healthcare']
     });
     expect(otherDetail).toMatchObject({
       breakdownKind: 'category',
-      sourceCategories: ['shopping', 'travel']
+      sourceCategories: ['travel', 'healthcare']
     });
     expect(otherDetail?.breakdown.map((item) => [item.label, item.amountYen])).toEqual([
-      ['Shopping', 200],
-      ['Travel', 100]
+      ['Travel', 200],
+      ['Healthcare', 100]
     ]);
     expect(otherDetail?.comparison).toMatchObject({ direction: 'over', label: '+100%', previousAmountYen: 150 });
   });
@@ -421,13 +425,14 @@ describe('buildDashboardPeriodStats', () => {
 
   it('merges an existing Other category into the aggregated Other row', () => {
     const stats = buildStats('month', [
-      expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
-      expense({ amountYen: 500, category: 'Food & Dining', spentOn: '2026-06-01' }),
-      expense({ amountYen: 400, category: 'Transport', spentOn: '2026-06-01' }),
-      expense({ amountYen: 300, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-02' }),
       expense({ amountYen: 250, category: 'Other', spentOn: '2026-06-02' }),
-      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-02' }),
-      expense({ amountYen: 100, category: 'Travel', spentOn: '2026-06-03' })
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-03' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' })
     ]);
 
     expect(stats.categories.map((category) => category.category)).toEqual([
@@ -435,11 +440,12 @@ describe('buildDashboardPeriodStats', () => {
       'Food & Dining',
       'Transport',
       'Utilities',
+      'Shopping',
       'Other'
     ]);
-    expect(stats.categories[4]).toMatchObject({
+    expect(stats.categories[5]).toMatchObject({
       amountYen: 550,
-      sourceCategories: ['shopping', 'travel', 'other']
+      sourceCategories: ['travel', 'healthcare', 'other']
     });
   });
 

@@ -16,6 +16,7 @@ type DailyChartProps = {
   otherUserName: string;
   series: DailyUserStat[];
   selectedCategoryName?: string | null;
+  todayString?: string;
 };
 
 type BarTargetGroup = {
@@ -51,7 +52,8 @@ export function DailyChart({
   otherUserId,
   otherUserName,
   series,
-  selectedCategoryName
+  selectedCategoryName,
+  todayString
 }: DailyChartProps) {
   const maxAmount = Math.max(0, ...series.map((item) => item.totalAmountYen));
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
@@ -63,6 +65,9 @@ export function DailyChart({
   const labelIndexes = useMemo(() => labelIndexSet(series.length), [series.length]);
   const baseline = PADDING_TOP + PLOT_HEIGHT;
   const midline = PADDING_TOP + PLOT_HEIGHT / 2;
+  const elapsedSeries = todayString ? series.filter((item) => item.date <= todayString) : series;
+  const averageAmount = series.reduce((sum, item) => sum + item.totalAmountYen, 0) / Math.max(1, elapsedSeries.length || series.length);
+  const averageY = maxAmount > 0 ? baseline - (averageAmount / maxAmount) * PLOT_HEIGHT : baseline;
   const barSlotWidth = series.length > 0 ? PLOT_WIDTH / series.length : PLOT_WIDTH;
   const barWidth = Math.max(4, Math.min(12, barSlotWidth * 0.48));
   const points = useMemo(() => {
@@ -190,7 +195,12 @@ export function DailyChart({
 
   return (
     <Pressable
-      onLayout={(event) => setChartWidth(event.nativeEvent.layout.width)}
+      onLayout={(event) => {
+        const nextWidth = event.nativeEvent.layout.width;
+        if (nextWidth > 0) {
+          setChartWidth(nextWidth);
+        }
+      }}
       onPress={handleChartPress}
       style={{ gap: 10 }}
     >
@@ -198,6 +208,15 @@ export function DailyChart({
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={baseline} y2={baseline} />
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={midline} y2={midline} />
         <Line stroke={theme.chart.grid} strokeWidth={1} x1={PADDING_LEFT} x2={WIDTH - PADDING_RIGHT} y1={PADDING_TOP} y2={PADDING_TOP} />
+        <Line
+          stroke="rgba(192,137,46,0.55)"
+          strokeDasharray="4 4"
+          strokeWidth={1}
+          x1={PADDING_LEFT}
+          x2={WIDTH - PADDING_RIGHT}
+          y1={averageY}
+          y2={averageY}
+        />
         <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} x={4} y={PADDING_TOP + 4}>
           {formatCompactYen(maxAmount)}
         </SvgText>
@@ -217,6 +236,7 @@ export function DailyChart({
                   inputRange: [0, 1],
                   outputRange: [0, group.currentTargetHeight]
                 })}
+                opacity={todayString && group.date > todayString ? 0.25 : 1}
                 rx={3}
                 width={group.barWidth}
                 x={group.x - group.barWidth / 2}
@@ -233,6 +253,7 @@ export function DailyChart({
                   inputRange: [0, 1],
                   outputRange: [0, group.otherTargetHeight]
                 })}
+                opacity={todayString && group.date > todayString ? 0.25 : 1}
                 rx={3}
                 width={group.barWidth}
                 x={group.x - group.barWidth / 2}

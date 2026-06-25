@@ -209,7 +209,7 @@ export type DashboardPeriodStats = DashboardStats & {
   memberTotals: MemberPeriodStat[];
 };
 
-const DASHBOARD_CATEGORY_LIMIT = 5;
+const DASHBOARD_CATEGORY_LIMIT = 6;
 const DASHBOARD_OTHER_CATEGORY_COLOR = OTHER_CATEGORY_COLOR;
 
 const monthFormatter = new Intl.DateTimeFormat('en', {
