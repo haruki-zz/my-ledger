@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -15,10 +15,16 @@ import {
 import Svg, { Defs, Pattern, Polygon, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ReceiptPrinterOverlay } from '@/src/components/ReceiptPrinterOverlay';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { displayName, formatYen } from '@/src/lib/format';
+import {
+  getLastShownReceiptPrinterMonthKey,
+  markReceiptPrinterShown,
+  shouldShowReceiptPrinter
+} from '@/src/lib/receiptPrinter';
 import {
   buildReceiptYearGroups,
   nextReceiptIndexWithinYear,
@@ -45,8 +51,10 @@ import type { LedgerMemberProfile } from '@/src/types/database';
 
 const RECEIPT_WIDTH = 290;
 const RECEIPT_SLIDE_DISTANCE = RECEIPT_WIDTH + 96;
-const RECEIPT_SLIDE_OUT_DURATION = 220;
-const RECEIPT_SLIDE_IN_DURATION = 300;
+const RECEIPT_COMMIT_THRESHOLD = RECEIPT_WIDTH * 0.24;
+const RECEIPT_DRAG_CAPTURE_DISTANCE = 6;
+// Temporary testing switch: bypass the persisted once-per-month gate while keeping the original path intact.
+const FORCE_RECEIPT_PRINTER_ON_FOCUS = false;
 const AnimatedReceipt = Animated.createAnimatedComponent(View);
 
 type ReceiptsLoadState = {
@@ -55,6 +63,8 @@ type ReceiptsLoadState = {
   members: LedgerMemberProfile[];
   receipts: MonthlyReceiptStat[];
 };
+
+type PrinterCheckState = 'checking' | 'ready';
 
 export default function ReceiptsScreen() {
   const insets = useSafeAreaInsets();
@@ -65,10 +75,13 @@ export default function ReceiptsScreen() {
   const currentUserId = session?.user.id || null;
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
+  const [printerCheckState, setPrinterCheckState] = useState<PrinterCheckState>('checking');
+  const [printerVisible, setPrinterVisible] = useState(false);
   const receiptTranslateX = useRef(new Animated.Value(0)).current;
-  const receiptOpacity = useRef(new Animated.Value(1)).current;
   const animatingRef = useRef(false);
+  const printerVisibleRef = useRef(false);
   const [state, setState] = useState<ReceiptsLoadState>({
     error: null,
     loading: true,
@@ -78,6 +91,7 @@ export default function ReceiptsScreen() {
 
   const selectedMonthParam = firstParam(params.month);
   const selectedReceipt = state.receipts[selectedIndex] || null;
+  const dragTargetReceipt = dragTargetIndex === null ? null : state.receipts[dragTargetIndex] || null;
   const receiptYearGroups = useMemo(() => buildReceiptYearGroups(state.receipts), [state.receipts]);
   const activeYear = selectedReceipt ? receiptYear(selectedReceipt.monthKey) : null;
   const receiptRotate = receiptTranslateX.interpolate({
@@ -145,6 +159,79 @@ export default function ReceiptsScreen() {
   }, [activeLedgerId, load]);
 
   useEffect(() => {
+    printerVisibleRef.current = printerVisible;
+  }, [printerVisible]);
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+
+    async function checkReceiptPrinterGate() {
+      if (printerVisibleRef.current) {
+        setPrinterCheckState('ready');
+        return;
+      }
+
+      if (ledgerLoading || state.loading || !activeLedgerId || !currentUserId) {
+        setPrinterCheckState('checking');
+        return;
+      }
+
+      setPrinterCheckState('checking');
+      try {
+        const latestReceipt = state.receipts[0] || null;
+        if (FORCE_RECEIPT_PRINTER_ON_FOCUS) {
+          if (latestReceipt) {
+            setSelectedIndex(0);
+            router.setParams({ month: latestReceipt.monthKey });
+            setPrinterVisible(true);
+          } else {
+            setPrinterVisible(false);
+          }
+          return;
+        }
+
+        const lastShownMonthKey = await getLastShownReceiptPrinterMonthKey(activeLedgerId, currentUserId);
+        if (!active) {
+          return;
+        }
+
+        if (shouldShowReceiptPrinter({ lastShownMonthKey, latestReceipt })) {
+          setSelectedIndex(0);
+          if (latestReceipt) {
+            router.setParams({ month: latestReceipt.monthKey });
+            await markReceiptPrinterShown(activeLedgerId, currentUserId, latestReceipt.monthKey);
+          }
+          if (active) {
+            setPrinterVisible(true);
+          }
+        } else {
+          setPrinterVisible(false);
+        }
+      } catch {
+        if (active) {
+          setPrinterVisible(false);
+        }
+      } finally {
+        if (active) {
+          setPrinterCheckState('ready');
+        }
+      }
+    }
+
+    void checkReceiptPrinterGate();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    activeLedgerId,
+    currentUserId,
+    ledgerLoading,
+    state.loading,
+    state.receipts
+  ]));
+
+  useEffect(() => {
     let mounted = true;
     AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
       if (mounted) {
@@ -201,10 +288,8 @@ export default function ReceiptsScreen() {
 
     animatingRef.current = false;
     receiptTranslateX.stopAnimation();
-    receiptOpacity.stopAnimation();
     receiptTranslateX.setValue(0);
-    receiptOpacity.setValue(1);
-  }, [receiptOpacity, receiptTranslateX, reduceMotion]);
+  }, [receiptTranslateX, reduceMotion]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -225,87 +310,119 @@ export default function ReceiptsScreen() {
     router.setParams({ month: receipt.monthKey });
   }, [state.receipts]);
 
-  const animateReceiptToIndex = useCallback((nextIndex: number, direction: 1 | -1) => {
+  const getNextReceiptIndex = useCallback((direction: 1 | -1) => (
+    nextReceiptIndexWithinYear(receiptYearGroups, selectedIndex, direction)
+  ), [receiptYearGroups, selectedIndex]);
+
+  const commitDraggedReceipt = useCallback((nextIndex: number, direction: 1 | -1) => {
     const receipt = state.receipts[nextIndex];
     if (!receipt || nextIndex === selectedIndex || animatingRef.current) {
+      setDragTargetIndex(null);
+      Animated.spring(receiptTranslateX, {
+        damping: 20,
+        stiffness: 220,
+        toValue: 0,
+        useNativeDriver: true
+      }).start();
       return;
     }
 
     if (reduceMotion) {
       selectReceipt(nextIndex);
+      setDragTargetIndex(null);
       return;
     }
 
     const exitX = direction > 0 ? -RECEIPT_SLIDE_DISTANCE : RECEIPT_SLIDE_DISTANCE;
-    const enterX = direction > 0 ? RECEIPT_SLIDE_DISTANCE : -RECEIPT_SLIDE_DISTANCE;
     animatingRef.current = true;
     receiptTranslateX.stopAnimation();
-    receiptOpacity.stopAnimation();
+    setDragTargetIndex(nextIndex);
 
-    Animated.parallel([
-      Animated.timing(receiptTranslateX, {
-        duration: RECEIPT_SLIDE_OUT_DURATION,
-        toValue: exitX,
-        useNativeDriver: true
-      }),
-      Animated.timing(receiptOpacity, {
-        duration: RECEIPT_SLIDE_OUT_DURATION,
-        toValue: 0,
-        useNativeDriver: true
-      })
-    ]).start(({ finished }) => {
+    Animated.timing(receiptTranslateX, {
+      duration: 220,
+      toValue: exitX,
+      useNativeDriver: true
+    }).start(({ finished }) => {
       if (!finished) {
         animatingRef.current = false;
         receiptTranslateX.setValue(0);
-        receiptOpacity.setValue(1);
+        setDragTargetIndex(null);
         return;
       }
 
       selectReceipt(nextIndex);
-      receiptTranslateX.setValue(enterX);
-      receiptOpacity.setValue(0);
-
-      Animated.parallel([
-        Animated.timing(receiptTranslateX, {
-          duration: RECEIPT_SLIDE_IN_DURATION,
-          toValue: 0,
-          useNativeDriver: true
-        }),
-        Animated.timing(receiptOpacity, {
-          duration: RECEIPT_SLIDE_IN_DURATION,
-          toValue: 1,
-          useNativeDriver: true
-        })
-      ]).start(() => {
-        receiptTranslateX.setValue(0);
-        receiptOpacity.setValue(1);
-        animatingRef.current = false;
-      });
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          receiptTranslateX.setValue(0);
+          setDragTargetIndex(null);
+          animatingRef.current = false;
+        });
+      }, 0);
     });
-  }, [receiptOpacity, receiptTranslateX, reduceMotion, selectReceipt, selectedIndex, state.receipts]);
+  }, [receiptTranslateX, reduceMotion, selectReceipt, selectedIndex, state.receipts]);
 
   const flipReceipt = useCallback((direction: 1 | -1) => {
-    const nextIndex = nextReceiptIndexWithinYear(receiptYearGroups, selectedIndex, direction);
-    animateReceiptToIndex(nextIndex, direction);
-  }, [animateReceiptToIndex, receiptYearGroups, selectedIndex]);
+    const nextIndex = getNextReceiptIndex(direction);
+    commitDraggedReceipt(nextIndex, direction);
+  }, [commitDraggedReceipt, getNextReceiptIndex]);
 
   const receiptSwipeResponder = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponderCapture: () => false,
-    onMoveShouldSetPanResponder: (_, gestureState) => isIntentionalMonthSwipe(
-      gestureState.dx,
-      gestureState.dy,
-      gestureState.vx,
-      gestureState.vy
+    onMoveShouldSetPanResponder: (_, gestureState) => (
+      Math.abs(gestureState.dx) > RECEIPT_DRAG_CAPTURE_DISTANCE &&
+      Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.2
     ),
-    onPanResponderRelease: (_, gestureState) => {
-      if (!isIntentionalMonthSwipe(gestureState.dx, gestureState.dy, gestureState.vx, gestureState.vy)) {
+    onPanResponderGrant: () => {
+      receiptTranslateX.stopAnimation();
+    },
+    onPanResponderMove: (_, gestureState) => {
+      if (animatingRef.current) {
         return;
       }
 
-      flipReceipt(gestureState.dx < 0 ? 1 : -1);
+      const direction = gestureState.dx < 0 ? 1 : -1;
+      const nextIndex = getNextReceiptIndex(direction);
+      setDragTargetIndex(nextIndex !== selectedIndex ? nextIndex : null);
+      receiptTranslateX.setValue(Math.max(-RECEIPT_SLIDE_DISTANCE, Math.min(RECEIPT_SLIDE_DISTANCE, gestureState.dx)));
+    },
+    onPanResponderRelease: (_, gestureState) => {
+      if (!isIntentionalMonthSwipe(gestureState.dx, gestureState.dy, gestureState.vx, gestureState.vy)) {
+        setDragTargetIndex(null);
+        Animated.spring(receiptTranslateX, {
+          damping: 20,
+          stiffness: 220,
+          toValue: 0,
+          useNativeDriver: true
+        }).start();
+        return;
+      }
+
+      const direction = gestureState.dx < 0 ? 1 : -1;
+      const nextIndex = getNextReceiptIndex(direction);
+      if (Math.abs(gestureState.dx) < RECEIPT_COMMIT_THRESHOLD || nextIndex === selectedIndex) {
+        setDragTargetIndex(null);
+        Animated.spring(receiptTranslateX, {
+          damping: 20,
+          stiffness: 220,
+          toValue: 0,
+          useNativeDriver: true
+        }).start();
+        return;
+      }
+
+      commitDraggedReceipt(nextIndex, direction);
+    },
+    onPanResponderTerminate: () => {
+      setDragTargetIndex(null);
+      Animated.spring(receiptTranslateX, {
+        damping: 20,
+        stiffness: 220,
+        toValue: 0,
+        useNativeDriver: true
+      }).start();
     },
     onPanResponderTerminationRequest: () => true
-  }), [flipReceipt]);
+  }), [commitDraggedReceipt, getNextReceiptIndex, receiptTranslateX, selectedIndex]);
 
   function handleReceiptAccessibilityAction(event: AccessibilityActionEvent) {
     if (event.nativeEvent.actionName === 'nextMonth') {
@@ -317,74 +434,105 @@ export default function ReceiptsScreen() {
     }
   }
 
+  if (printerCheckState === 'checking' && !printerVisible) {
+    return <View style={styles.page} />;
+  }
+
   return (
-    <ScrollView
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-      style={styles.page}
-      contentContainerStyle={[styles.content, localStyles.content, { paddingTop: insets.top + 16 }]}
-    >
-      <View style={localStyles.pageHeader}>
-        <Text numberOfLines={1} style={localStyles.pageTitle}>
-          Receipts
-          <Text style={localStyles.pageTitleLedger}> · {activeLedger?.ledger.name || 'Ledger'}</Text>
-        </Text>
-      </View>
-
-      {state.error ? <Text style={styles.error}>{state.error}</Text> : null}
-
-      {!state.loading && state.receipts.length === 0 ? (
-        <View style={localStyles.emptyCard}>
-          <Text style={styles.h2}>No Closed Months Yet</Text>
-          <Text style={styles.muted}>Receipts print after a month closes.</Text>
+    <View style={styles.page}>
+      <ScrollView
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        style={styles.page}
+        contentContainerStyle={[styles.content, localStyles.content, { paddingTop: insets.top + 16 }]}
+      >
+        <View style={localStyles.pageHeader}>
+          <Text numberOfLines={1} style={localStyles.pageTitle}>
+            Receipts
+            <Text style={localStyles.pageTitleLedger}> · {activeLedger?.ledger.name || 'Ledger'}</Text>
+          </Text>
         </View>
-      ) : null}
 
-      {selectedReceipt ? (
-        <View style={localStyles.stage}>
-          <YearStrip
-            activeYear={activeYear}
-            groups={receiptYearGroups}
-            onSelectReceipt={selectReceipt}
-          />
+        {state.error ? <Text style={styles.error}>{state.error}</Text> : null}
 
-          <View
-            accessibilityActions={[
-              { label: 'Previous month', name: 'previousMonth' },
-              { label: 'Next month', name: 'nextMonth' }
-            ]}
-            accessibilityLabel={`${selectedReceipt.label}, ${selectedReceipt.records} records`}
-            accessibilityRole="adjustable"
-            onAccessibilityAction={handleReceiptAccessibilityAction}
-            style={localStyles.stack}
-            {...receiptSwipeResponder.panHandlers}
-          >
-            <View style={[localStyles.peek, localStyles.peekBack]} />
-            <View style={[localStyles.peek, localStyles.peekMiddle]} />
-            <View style={[localStyles.peek, localStyles.peekFront]} />
-            <AnimatedReceipt
-              style={[
-                localStyles.receiptWrap,
-                {
-                  opacity: receiptOpacity,
-                  transform: [
-                    { translateX: receiptTranslateX },
-                    { rotate: receiptRotate }
-                  ]
-                }
-              ]}
-            >
-              <TearEdge direction="top" />
-              <ReceiptBody
-                currentUserName={currentUserName}
-                otherUserName={otherUserName}
-                receipt={selectedReceipt}
-              />
-              <TearEdge direction="bottom" />
-            </AnimatedReceipt>
+        {!state.loading && state.receipts.length === 0 ? (
+          <View style={localStyles.emptyCard}>
+            <Text style={styles.h2}>No Closed Months Yet</Text>
+            <Text style={styles.muted}>Receipts print after a month closes.</Text>
           </View>
-        </View>
+        ) : null}
+
+        {selectedReceipt ? (
+          <View style={localStyles.stage}>
+            <YearStrip
+              activeYear={activeYear}
+              groups={receiptYearGroups}
+              onSelectReceipt={selectReceipt}
+            />
+
+            <View
+              accessibilityActions={[
+                { label: 'Previous month', name: 'previousMonth' },
+                { label: 'Next month', name: 'nextMonth' }
+              ]}
+              accessibilityLabel={`${selectedReceipt.label}, ${selectedReceipt.records} records`}
+              accessibilityRole="adjustable"
+              onAccessibilityAction={handleReceiptAccessibilityAction}
+              style={localStyles.stack}
+              {...receiptSwipeResponder.panHandlers}
+            >
+              {dragTargetReceipt ? (
+                <View pointerEvents="none" style={[localStyles.receiptWrap, localStyles.underReceiptWrap]}>
+                  <TearEdge direction="top" />
+                  <ReceiptBody
+                    currentUserName={currentUserName}
+                    otherUserName={otherUserName}
+                    receipt={dragTargetReceipt}
+                  />
+                  <TearEdge direction="bottom" />
+                </View>
+              ) : (
+                <>
+                  <View style={[localStyles.peek, localStyles.peekBack]} />
+                  <View style={[localStyles.peek, localStyles.peekMiddle]} />
+                  <View style={[localStyles.peek, localStyles.peekFront]} />
+                </>
+              )}
+              <AnimatedReceipt
+                style={[
+                  localStyles.receiptWrap,
+                  localStyles.topReceiptWrap,
+                  {
+                    transform: [
+                      { translateX: receiptTranslateX },
+                      { rotate: receiptRotate }
+                    ]
+                  }
+                ]}
+              >
+                <TearEdge direction="top" />
+                <ReceiptBody
+                  currentUserName={currentUserName}
+                  otherUserName={otherUserName}
+                  receipt={selectedReceipt}
+                />
+                <TearEdge direction="bottom" />
+              </AnimatedReceipt>
+            </View>
+          </View>
+        ) : null}
+      </ScrollView>
+      {printerVisible && selectedReceipt ? (
+        <ReceiptPrinterOverlay
+          currentUserName={currentUserName}
+          onKeep={() => setPrinterVisible(false)}
+          otherUserName={otherUserName}
+          receipt={selectedReceipt}
+          reduceMotion={reduceMotion}
+          safeAreaBottom={insets.bottom}
+          safeAreaTop={insets.top}
+        />
       ) : null}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -849,6 +997,15 @@ const localStyles = StyleSheet.create({
     shadowOffset: { height: 22, width: 0 },
     shadowOpacity: 0.26,
     shadowRadius: 28
+  },
+  topReceiptWrap: {
+    zIndex: 2
+  },
+  underReceiptWrap: {
+    left: 0,
+    position: 'absolute',
+    top: 8,
+    zIndex: 1
   },
   rule: {
     borderColor: 'rgba(42,39,34,0.32)',

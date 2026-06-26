@@ -490,7 +490,7 @@ describe('buildHistorySummary', () => {
 });
 
 describe('monthly receipts', () => {
-  it('enumerates closed months only and includes zero-record closed months', () => {
+  it('enumerates closed months but excludes zero-record and zero-spend receipts', () => {
     expect(closedMonthKeys({ startMonthKey: '2026-03', endBeforeMonthKey: '2026-06' })).toEqual([
       '2026-05',
       '2026-04',
@@ -502,19 +502,14 @@ describe('monthly receipts', () => {
       endBeforeMonthKey: '2026-06',
       expenses: [
         expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-03-10' }),
+        expense({ amountYen: 0, category: 'Food & Dining', spentOn: '2026-04-10' }),
         expense({ amountYen: 2000, category: 'Food & Dining', spentOn: '2026-05-10' })
       ],
       otherUserId: OTHER_USER_ID,
       startMonthKey: '2026-03'
     });
 
-    expect(receipts.map((receipt) => receipt.monthKey)).toEqual(['2026-05', '2026-04', '2026-03']);
-    expect(receipts[1]).toMatchObject({
-      records: 0,
-      totalYen: 0
-    });
-    expect(receipts[1].lines).toHaveLength(11);
-    expect(receipts[1].lines.every((line) => line.amountYen === 0)).toBe(true);
+    expect(receipts.map((receipt) => receipt.monthKey)).toEqual(['2026-05', '2026-03']);
   });
 
   it('builds receipt MoM states, active categories, daily average, and split totals', () => {

@@ -649,7 +649,10 @@ export function buildMonthlyReceipts(input: {
     categoryAmountsByMonth.set(monthKey, categoryAmounts);
   }
 
-  return monthKeys.map((monthKey) => {
+  return monthKeys.filter((monthKey) => (
+    (recordsByMonth.get(monthKey) || 0) > 0 &&
+    (totalsByMonth.get(monthKey) || 0) > 0
+  )).map((monthKey) => {
     const previousMonthKey = addMonths(monthKey, -1);
     const totalYen = totalsByMonth.get(monthKey) || 0;
     const previousTotalYen = totalsByMonth.get(previousMonthKey) || 0;
