@@ -67,9 +67,8 @@
 | `src/components/SlidingValueText.tsx` | 数值变化时的 animated text。 | none |
 | `src/components/KeyboardAwareScrollView.tsx` | ScrollView keyboard wrapper，附带 keyboard done accessory。 | `KeyboardDoneAccessory` |
 | `src/components/KeyboardDoneAccessory.tsx` | iOS `InputAccessoryView` Done 和 Android fixed Done button。 | `styles` |
-| `src/components/TransferChecklistCard.tsx` | Dashboard 内嵌转账清单卡片。 | transfer shared/overlay components, `styles`, `ui`, color/entity/format/ledger helpers, database types |
+| `src/components/TransferSettleEntry.tsx` | Dashboard hero 内嵌 transfer 入口和 settle-up bottom sheet。 | transfer shared helpers, `styles`, `ui`, color/category/entity/format/ledger/transfer summary helpers, database types |
 | `src/components/TransferChecklistShared.tsx` | 转账清单卡片复用展示、参与者判断、完成时间判断。 | `styles`, category/color/entity/format helpers, database types |
-| `src/components/TransferItemsOverlay.tsx` | 转账清单全量 overlay。 | `TransferChecklistShared`, `styles`, `ui`, database types |
 | `src/components/history/HistoryFilterControls.tsx` | History filter buttons/options/category multiselect。 | `styles` |
 | `src/components/history/HistoryExpenseModals.tsx` | History expense detail and split breakdown modals。 | `styles`, `ui`, category/format helpers, database types |
 

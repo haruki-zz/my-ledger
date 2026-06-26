@@ -5,21 +5,18 @@ import {
   Alert,
   Pressable,
   RefreshControl,
+  ScrollView,
   SectionList,
   StyleSheet,
   Text,
-  View
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { BentoCard, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
-import {
-  CategoryList,
-  FilterControlButton,
-  OptionList,
-  type HistoryFilterOption
-} from '@/src/components/history/HistoryFilterControls';
 import {
   ExpenseDetailModal,
   SplitBreakdownModal,
@@ -27,7 +24,15 @@ import {
 } from '@/src/components/history/HistoryExpenseModals';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
-import { categoryColor, categoryIconName, categoryWithSubcategory, resolveCategory } from '@/src/lib/categorySystem';
+import {
+  categoryColor,
+  categoryIconName,
+  categoryLabel,
+  categoryWithSubcategory,
+  PRIMARY_CATEGORIES,
+  resolveCategory,
+  type PrimaryCategoryId
+} from '@/src/lib/categorySystem';
 import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
@@ -41,15 +46,14 @@ import {
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import { currentMonthStartDate } from '@/src/lib/recurring';
 import {
-  amountForUser,
-  buildHistorySummary,
+  addMonths,
+  buildMonthlyReceipts,
   currentMonthKey,
-  expenseCategoryId,
   filterCurrentMonthSettledExpenses,
   formatMonthLabel,
-  monthKeyFromDateString
+  monthKeyFromDateString,
+  type MonthlyReceiptStat
 } from '@/src/lib/stats';
-import { useHistoryFilters, type HistoryFilterDropdownKey } from '@/src/hooks/useHistoryFilters';
 import type { Expense, Ledger, Profile, RecurringExpenseRule } from '@/src/types/database';
 
 type FilteredExpense = HistoryExpenseItem;
@@ -62,6 +66,30 @@ type HistorySection = {
 };
 
 type LoadMode = 'background' | 'initial' | 'refresh';
+type HistoryViewMode = 'ledger' | 'records';
+
+type LedgerYearGroup = {
+  months: MonthlyReceiptStat[];
+  totalYen: number;
+  year: string;
+};
+
+type CapsuleEntry = {
+  amountYen: number;
+  categoryId: PrimaryCategoryId;
+  color: string;
+  label: string;
+};
+
+type TrendPoint = {
+  monthKey: string;
+  totalYen: number;
+};
+
+const CAPSULE_COUNT = 20;
+const DASHBOARD_CATEGORY_LIMIT = 5;
+const NEUTRAL_CAPSULE_COLOR = 'rgba(42,39,34,0.18)';
+const OTHER_CATEGORY_COLOR = '#9A8F80';
 
 const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
   day: '2-digit',
@@ -76,18 +104,31 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
   hour12: false,
   minute: '2-digit'
 });
+const monthAbbreviationFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short'
+});
+const shortMonthWithYearFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  year: '2-digit'
+});
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
-  const params = useLocalSearchParams<{ date?: string | string[]; month?: string | string[] }>();
+  const params = useLocalSearchParams<{ date?: string | string[]; month?: string | string[]; resetToLedger?: string | string[] }>();
   const currentLedger = activeLedger?.ledger || null;
   const activeLedgerId = activeLedger?.ledger.id || null;
   const currentUserId = session?.user.id || null;
   const currentLedgerRef = useRef<Ledger | null>(null);
   const loadInFlightRef = useRef(false);
   const collapseDefaultsMonthRef = useRef<string | null>(null);
+  const sectionListRef = useRef<SectionList<FilteredExpense, HistorySection> | null>(null);
+  const ledgerScrollRef = useRef<ScrollView | null>(null);
+  const ledgerScrollOffsetRef = useRef(0);
+  const scrolledTargetRef = useRef<string | null>(null);
+  const consumedTargetParamRef = useRef<string | null>(null);
+  const consumedResetParamRef = useRef<string | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [recurringRules, setRecurringRules] = useState<RecurringExpenseRule[] | null>(null);
   const [activeMemberIds, setActiveMemberIds] = useState<Set<string>>(new Set());
@@ -95,21 +136,8 @@ export default function HistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const {
-    activeDropdown,
-    clearCategories,
-    closeDropdown,
-    resetFilters,
-    selectedCategories,
-    selectedUserId,
-    selectUser,
-    toggleCategory,
-    toggleDropdown
-  } = useHistoryFilters();
-  const selectedMonth = currentMonthKey();
-  const sectionListRef = useRef<SectionList<FilteredExpense, HistorySection> | null>(null);
-  const scrolledTargetRef = useRef<string | null>(null);
-  const consumedTargetParamRef = useRef<string | null>(null);
+  const [viewMode, setViewMode] = useState<HistoryViewMode>('ledger');
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [detailSelection, setDetailSelection] = useState<FilteredExpense | null>(null);
   const [splitSelection, setSplitSelection] = useState<FilteredExpense | null>(null);
@@ -187,36 +215,65 @@ export default function HistoryScreen() {
     setRecurringRules(null);
     setProfiles({});
     setActiveMemberIds(new Set());
-    resetFilters();
+    setViewMode('ledger');
+    setSelectedMonthKey(null);
     setCollapsedSections(new Set());
     setTargetDate(null);
     setTargetRequestId(0);
-    scrolledTargetRef.current = null;
-    consumedTargetParamRef.current = null;
-    collapseDefaultsMonthRef.current = null;
     setDetailSelection(null);
     setSplitSelection(null);
-  }, [activeLedgerId, resetFilters]);
+    ledgerScrollOffsetRef.current = 0;
+    scrolledTargetRef.current = null;
+    consumedTargetParamRef.current = null;
+    consumedResetParamRef.current = null;
+    collapseDefaultsMonthRef.current = null;
+  }, [activeLedgerId]);
 
   useEffect(() => {
     const paramDate = firstParam(params.date);
-    const targetParamKey = paramDate && isDateString(paramDate) && paramDate.startsWith(`${selectedMonth}-`)
-      ? `${selectedMonth}:${paramDate}`
-      : null;
+    const paramMonth = firstParam(params.month);
+    const resetParam = firstParam(params.resetToLedger);
 
-    if (targetParamKey && paramDate && consumedTargetParamRef.current !== targetParamKey) {
-      consumedTargetParamRef.current = targetParamKey;
-      setTargetDate(paramDate);
+    if (resetParam && consumedResetParamRef.current !== resetParam) {
+      consumedResetParamRef.current = resetParam;
+      setViewMode('ledger');
+      setSelectedMonthKey(null);
+      setTargetDate(null);
       setTargetRequestId((current) => current + 1);
       scrolledTargetRef.current = null;
+      collapseDefaultsMonthRef.current = null;
+      router.setParams({ date: undefined, month: undefined, resetToLedger: undefined });
+      return;
+    }
+
+    const targetMonth = paramMonth && isMonthString(paramMonth)
+      ? paramMonth
+      : paramDate && isDateString(paramDate)
+        ? monthKeyFromDateString(paramDate)
+        : null;
+    const targetParamKey = targetMonth
+      ? `${targetMonth}:${paramDate && isDateString(paramDate) ? paramDate : ''}`
+      : null;
+
+    if (targetMonth && targetParamKey && consumedTargetParamRef.current !== targetParamKey) {
+      consumedTargetParamRef.current = targetParamKey;
+      setSelectedMonthKey(targetMonth);
+      setViewMode('records');
+      setTargetDate(paramDate && isDateString(paramDate) && monthKeyFromDateString(paramDate) === targetMonth ? paramDate : null);
+      setTargetRequestId((current) => current + 1);
+      scrolledTargetRef.current = null;
+      collapseDefaultsMonthRef.current = null;
       router.setParams({ date: undefined, month: undefined });
       return;
     }
 
-    if (!paramDate) {
+    if (!paramDate && !paramMonth) {
       consumedTargetParamRef.current = null;
     }
-  }, [activeLedgerId, params.date, selectedMonth]);
+    if (!resetParam) {
+      consumedResetParamRef.current = null;
+    }
+  }, [activeLedgerId, params.date, params.month, params.resetToLedger]);
 
   useEffect(() => {
     void load('initial');
@@ -273,60 +330,88 @@ export default function HistoryScreen() {
     buildUserColorMap(sortedUserIds, currentUserId)
   ), [currentUserId, sortedUserIds]);
 
-  const userOptions = useMemo<HistoryFilterOption[]>(() => (
-    sortedUserIds.map((userId) => ({
-      label: profileDisplayName(userId),
-      value: userId
-    }))
-  ), [profileDisplayName, sortedUserIds]);
+  const otherUserId = useMemo(() => (
+    sortedUserIds.find((userId) => userId !== currentUserId) || null
+  ), [currentUserId, sortedUserIds]);
 
-  const categoryOptions = useMemo<HistoryFilterOption[]>(() => (
-    [...new Set(settledExpenses.map((expense) => expenseCategoryId(expense)).filter(Boolean))]
-      .sort((a, b) => resolveCategory({ categoryId: a }).label.localeCompare(resolveCategory({ categoryId: b }).label))
-      .map((categoryId) => ({
-        label: resolveCategory({ categoryId }).label,
-        value: categoryId
-      }))
-  ), [settledExpenses]);
+  const activeMemberNames = useMemo(() => {
+    const names = [...activeMemberIds]
+      .sort((a, b) => {
+        if (a === currentUserId) {
+          return -1;
+        }
+        if (b === currentUserId) {
+          return 1;
+        }
+        const nameComparison = profileDisplayName(a).localeCompare(profileDisplayName(b));
+        return nameComparison || a.localeCompare(b);
+      })
+      .map((userId) => profileDisplayName(userId).replace(/ \(left\)$/, ''));
 
-  const filteredExpenses = useMemo<FilteredExpense[]>(() => {
-    const nextFilteredExpenses: FilteredExpense[] = [];
+    return names.length > 0 ? names.join(' & ') : 'MEMBERS';
+  }, [activeMemberIds, currentUserId, profileDisplayName]);
 
-    for (const expense of settledExpenses) {
-      const displayAmountYen = selectedUserId ? amountForUser(expense, selectedUserId) : expense.amount_yen;
+  const startMonthKey = useMemo(() => {
+    const firstExpense = settledExpenses
+      .map((expense) => expense.spent_on)
+      .sort((a, b) => a.localeCompare(b))[0];
+    return firstExpense ? monthKeyFromDateString(firstExpense) : null;
+  }, [settledExpenses]);
 
-      if (selectedUserId && displayAmountYen <= 0) {
-        continue;
-      }
-
-      if (selectedCategories.size > 0 && !selectedCategories.has(expenseCategoryId(expense))) {
-        continue;
-      }
-
-      const expenseMonth = monthKeyFromDateString(expense.spent_on);
-      if (expenseMonth !== selectedMonth) {
-        continue;
-      }
-
-      nextFilteredExpenses.push({ displayAmountYen, expense });
+  const monthlyReceipts = useMemo(() => {
+    if (!startMonthKey) {
+      return [];
     }
 
-    return nextFilteredExpenses.sort((a, b) => (
-      b.expense.spent_on.localeCompare(a.expense.spent_on) ||
-      b.expense.created_at.localeCompare(a.expense.created_at)
-    ));
-  }, [selectedCategories, selectedMonth, selectedUserId, settledExpenses]);
+    return buildMonthlyReceipts({
+      currentUserId,
+      endBeforeMonthKey: addMonths(currentMonthKey(), 1),
+      expenses: settledExpenses,
+      otherUserId,
+      startMonthKey
+    });
+  }, [currentUserId, otherUserId, settledExpenses, startMonthKey]);
 
-  const hasActiveFilters = Boolean(
-    selectedUserId ||
-    selectedCategories.size > 0
-  );
+  const trendPoints = useMemo(() => buildTrendPoints(monthlyReceipts), [monthlyReceipts]);
+  const trendMax = useMemo(() => Math.max(0, ...trendPoints.map((point) => point.totalYen)), [trendPoints]);
+  const trendAverage = useMemo(() => {
+    const visibleReceipts = monthlyReceipts.slice(0, trendPoints.length);
+    if (visibleReceipts.length === 0) {
+      return 0;
+    }
 
-  const historySummary = useMemo(() => buildHistorySummary({
-    activeFilterCount: (selectedUserId ? 1 : 0) + selectedCategories.size,
-    expenses: filteredExpenses,
-    monthKey: selectedMonth
-  }), [filteredExpenses, selectedCategories.size, selectedMonth, selectedUserId]);
+    return Math.round(visibleReceipts.reduce((sum, receipt) => sum + receipt.totalYen, 0) / visibleReceipts.length);
+  }, [monthlyReceipts, trendPoints.length]);
+
+  const yearGroups = useMemo<LedgerYearGroup[]>(() => {
+    const groups = new Map<string, MonthlyReceiptStat[]>();
+    for (const receipt of monthlyReceipts) {
+      const year = receipt.monthKey.slice(0, 4);
+      const current = groups.get(year) || [];
+      current.push(receipt);
+      groups.set(year, current);
+    }
+
+    return [...groups.entries()].map(([year, months]) => ({
+      months,
+      totalYen: months.reduce((sum, receipt) => sum + receipt.totalYen, 0),
+      year
+    }));
+  }, [monthlyReceipts]);
+
+  const filteredExpenses = useMemo<FilteredExpense[]>(() => {
+    if (!selectedMonthKey) {
+      return [];
+    }
+
+    return settledExpenses
+      .filter((expense) => monthKeyFromDateString(expense.spent_on) === selectedMonthKey)
+      .map((expense) => ({ displayAmountYen: expense.amount_yen, expense }))
+      .sort((a, b) => (
+        b.expense.spent_on.localeCompare(a.expense.spent_on) ||
+        b.expense.created_at.localeCompare(a.expense.created_at)
+      ));
+  }, [selectedMonthKey, settledExpenses]);
 
   const sections = useMemo<HistorySection[]>(() => {
     const sectionMap = new Map<string, FilteredExpense[]>();
@@ -356,44 +441,40 @@ export default function HistoryScreen() {
   }, [insets.top]);
 
   useEffect(() => {
-    if (collapseDefaultsMonthRef.current === selectedMonth) {
-      if (targetDate && targetDate.startsWith(`${selectedMonth}-`)) {
-        setCollapsedSections((current) => {
-          if (!current.has(targetDate)) {
-            return current;
-          }
+    if (!selectedMonthKey || viewMode !== 'records') {
+      return;
+    }
 
-          const next = new Set(current);
-          next.delete(targetDate);
-          return next;
-        });
-      }
+    const monthDates = [...new Set(
+      filteredExpenses
+        .filter((item) => monthKeyFromDateString(item.expense.spent_on) === selectedMonthKey)
+        .map((item) => item.expense.spent_on)
+    )].sort((a, b) => b.localeCompare(a));
+
+    if (monthDates.length === 0) {
+      setCollapsedSections(new Set());
       return;
     }
 
     const today = todayDateString();
-    const targetMonthDate = targetDate && targetDate.startsWith(`${selectedMonth}-`)
+    const targetMonthDate = targetDate && targetDate.startsWith(`${selectedMonthKey}-`)
       ? targetDate
       : null;
-    const monthDates = settledExpenses
-      .filter((expense) => monthKeyFromDateString(expense.spent_on) === selectedMonth)
-      .map((expense) => expense.spent_on);
+    const collapseKey = `${selectedMonthKey}:${targetMonthDate || ''}:${monthDates.join('|')}`;
 
-    if (monthDates.length === 0) {
-      collapseDefaultsMonthRef.current = selectedMonth;
+    if (collapseDefaultsMonthRef.current === collapseKey) {
       return;
     }
 
-    const defaultCollapsedDates = new Set(
-      monthDates.filter((date) => date !== today && date !== targetMonthDate)
-    );
+    const dateToExpand = targetMonthDate ||
+      (selectedMonthKey === currentMonthKey() && monthDates.includes(today) ? today : monthDates[0]);
 
-    setCollapsedSections(defaultCollapsedDates);
-    collapseDefaultsMonthRef.current = selectedMonth;
-  }, [selectedMonth, settledExpenses, targetDate]);
+    setCollapsedSections(new Set(monthDates.filter((date) => date !== dateToExpand)));
+    collapseDefaultsMonthRef.current = collapseKey;
+  }, [filteredExpenses, selectedMonthKey, targetDate, viewMode]);
 
   useEffect(() => {
-    if (!targetDate || targetDate.slice(0, 7) !== selectedMonth) {
+    if (!targetDate || !selectedMonthKey || targetDate.slice(0, 7) !== selectedMonthKey || viewMode !== 'records') {
       return;
     }
 
@@ -411,7 +492,7 @@ export default function HistoryScreen() {
       return;
     }
 
-    const scrollKey = `${activeLedgerId || 'ledger'}:${targetDate}`;
+    const scrollKey = `${activeLedgerId || 'ledger'}:${targetDate}:${targetRequestId}`;
     if (scrolledTargetRef.current === scrollKey) {
       return;
     }
@@ -420,10 +501,49 @@ export default function HistoryScreen() {
     requestAnimationFrame(() => {
       scrollToTargetSection(sectionIndex, true);
     });
-  }, [activeLedgerId, collapsedSections, scrollToTargetSection, sections, selectedMonth, targetDate, targetRequestId]);
+  }, [
+    activeLedgerId,
+    collapsedSections,
+    scrollToTargetSection,
+    sections,
+    selectedMonthKey,
+    targetDate,
+    targetRequestId,
+    viewMode
+  ]);
 
-  function openDropdown(dropdown: HistoryFilterDropdownKey) {
-    toggleDropdown(dropdown);
+  useEffect(() => {
+    if (viewMode !== 'ledger') {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      ledgerScrollRef.current?.scrollTo({ animated: false, y: ledgerScrollOffsetRef.current });
+    });
+  }, [viewMode]);
+
+  function openMonth(monthKey: string) {
+    setSelectedMonthKey(monthKey);
+    setTargetDate(null);
+    setTargetRequestId((current) => current + 1);
+    scrolledTargetRef.current = null;
+    collapseDefaultsMonthRef.current = null;
+    setViewMode('records');
+    router.setParams({ month: monthKey, date: undefined });
+  }
+
+  function closeMonth() {
+    setViewMode('ledger');
+    setSelectedMonthKey(null);
+    setTargetDate(null);
+    setTargetRequestId((current) => current + 1);
+    scrolledTargetRef.current = null;
+    collapseDefaultsMonthRef.current = null;
+    router.setParams({ month: undefined, date: undefined });
+  }
+
+  function handleLedgerScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    ledgerScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
   }
 
   function toggleSection(date: string) {
@@ -471,195 +591,113 @@ export default function HistoryScreen() {
     ]);
   }
 
-  const header = (
-    <View style={localStyles.headerContent}>
-      <View style={localStyles.monthTitleGroup}>
-        <Ionicons color={colors.primaryDark} name="calendar" size={24} />
-        <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.monthTitle}>
-          {formatMonthLabel(selectedMonth)}
-        </Text>
-      </View>
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <BentoCard style={localStyles.summaryCard}>
-        <View style={localStyles.summaryMetaRow}>
-          <Text numberOfLines={1} style={localStyles.summaryLabel}>FILTERED RESULTS</Text>
-          <Text numberOfLines={1} style={localStyles.summaryMeta}>{historySummary.dateSpanLabel}</Text>
-        </View>
-
-        <View style={localStyles.summaryLeadRow}>
-          <View style={localStyles.summaryCountBlock}>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryCount}>
-              {historySummary.count}
-            </Text>
-            <Text numberOfLines={1} style={localStyles.summaryRecords}>records</Text>
-          </View>
-          <View style={localStyles.summaryTotalBlock}>
-            <Text numberOfLines={1} style={localStyles.summarySmallLabel}>TOTAL</Text>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summarySmallAmount}>
-              {formatYen(historySummary.totalYen)}
-            </Text>
-          </View>
-        </View>
-
-        <View style={localStyles.summaryStatsRow}>
-          <View style={localStyles.summaryStatTile}>
-            <Text numberOfLines={1} style={localStyles.summarySmallLabel}>Avg / day</Text>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryStatValue}>
-              {formatYen(historySummary.averagePerDayYen)}
-            </Text>
-          </View>
-          <View style={localStyles.summaryStatTile}>
-            <Text numberOfLines={1} style={localStyles.summarySmallLabel}>Peak day</Text>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryStatValue}>
-              {historySummary.peakDay.date ? formatYen(historySummary.peakDay.amountYen) : '--'}
-            </Text>
-          </View>
-        </View>
-
-        <View style={localStyles.categoryMixBar}>
-          {historySummary.categoryMix.map((segment) => (
-            <View
-              key={segment.categoryId}
-              style={[
-                localStyles.categoryMixSegment,
-                {
-                  backgroundColor: segment.color,
-                  flexGrow: segment.amountYen,
-                  flexBasis: 0
-                }
-              ]}
-            />
-          ))}
-          {historySummary.categoryMix.length === 0 ? <View style={localStyles.categoryMixEmpty} /> : null}
-        </View>
-        <View style={localStyles.categoryCaptionRow}>
-          <View
-            style={[
-              localStyles.categoryCaptionDot,
-              { backgroundColor: historySummary.categoryMix[0]?.color || colors.subtle }
-            ]}
-          />
-          <Text numberOfLines={1} style={localStyles.categoryCaption}>
-            {historySummary.topCategoryCaption}
-          </Text>
-        </View>
-      </BentoCard>
-
-      <View style={localStyles.filterArea}>
-        <View style={localStyles.filterControls}>
-          <FilterControlButton
-            active={Boolean(selectedUserId)}
-            icon="person-outline"
-            label={selectedUserId ? profileDisplayName(selectedUserId) : 'User'}
-            onPress={() => openDropdown('user')}
-          />
-          <FilterControlButton
-            active={selectedCategories.size > 0}
-            icon="pricetag-outline"
-            label={selectedCategories.size > 0 ? `Category ${selectedCategories.size}` : 'Category'}
-            onPress={() => openDropdown('category')}
-          />
-        </View>
-
-        {activeDropdown ? (
-          <BentoCard style={localStyles.dropdownCard}>
-            {activeDropdown === 'user' ? (
-              <OptionList
-                emptyLabel="All users"
-                onChange={selectUser}
-                options={userOptions}
-                selectedValue={selectedUserId || ''}
-              />
-            ) : null}
-            {activeDropdown === 'category' ? (
-              <CategoryList
-                onApply={closeDropdown}
-                onClear={clearCategories}
-                onToggle={toggleCategory}
-                options={categoryOptions}
-                selectedCategories={selectedCategories}
-              />
-            ) : null}
-          </BentoCard>
-        ) : null}
-
-      </View>
-    </View>
-  );
+  const contentTopPadding = insets.top + 16;
 
   return (
     <>
-      <SectionList
-        ref={sectionListRef}
-        ListEmptyComponent={(
-          <View style={localStyles.emptyState}>
-            {!loading && expenses.length === 0 ? (
-              <BentoCard>
-                <Text style={styles.h2}>No Expenses Yet</Text>
-                <Text style={styles.muted}>Tap the floating add button to create the first record.</Text>
-              </BentoCard>
-            ) : null}
-
-            {!loading && expenses.length > 0 && filteredExpenses.length === 0 ? (
-              <BentoCard>
-                <Text style={styles.h2}>No Expenses This Month</Text>
-                <Text style={styles.muted}>Switch month or adjust user and category filters.</Text>
-                {hasActiveFilters ? (
-                  <Pressable onPress={resetFilters} style={[styles.button, styles.secondaryButton]}>
-                    <Text style={[styles.buttonText, styles.secondaryButtonText]}>Clear all</Text>
-                  </Pressable>
-                ) : null}
-              </BentoCard>
-            ) : null}
-          </View>
-        )}
-        ListHeaderComponent={header}
-        contentContainerStyle={[styles.content, localStyles.listContent, { paddingTop: insets.top + 16 }]}
-        initialNumToRender={18}
-        keyboardDismissMode="on-drag"
-        keyboardShouldPersistTaps="handled"
-        keyExtractor={({ expense }) => expense.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} />}
-        onScrollToIndexFailed={() => {
-          if (!targetDate || targetDate.slice(0, 7) !== selectedMonth) {
-            return;
-          }
-
-          const sectionIndex = sections.findIndex((section) => section.date === targetDate);
-          if (sectionIndex < 0) {
-            return;
-          }
-
-          setTimeout(() => scrollToTargetSection(sectionIndex, false), 250);
-        }}
-        renderItem={({ item, index, section }) => (
-          <SectionDetailRow
-            expenseBadges={expenseBadges}
-            first={index === 0}
-            item={item}
-            last={index === section.data.length - 1}
-            onDelete={(expense) => confirmDelete(expense.id)}
-            onEdit={(expense) => router.push(`/expenses/${expense.id}`)}
-            onSplitBreakdown={setSplitSelection}
-            onViewDetails={setDetailSelection}
+      {viewMode === 'ledger' ? (
+        <ScrollView
+          ref={ledgerScrollRef}
+          contentContainerStyle={[styles.content, localStyles.ledgerContent, { paddingTop: contentTopPadding }]}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          onScroll={handleLedgerScroll}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} />}
+          scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
+          style={styles.page}
+        >
+          <LedgerHeader
+            activeMemberNames={activeMemberNames}
+            error={error}
+            firstMonthKey={startMonthKey}
           />
-        )}
-        renderSectionHeader={({ section }) => (
-          <SectionHeader
-            collapsed={collapsedSections.has(section.date)}
-            count={section.count}
-            date={section.date}
-            onPress={() => toggleSection(section.date)}
-            totalYen={section.totalYen}
-          />
-        )}
-        sections={sections}
-        showsVerticalScrollIndicator={false}
-        stickySectionHeadersEnabled={false}
-        style={styles.page}
-      />
+
+          {loading ? null : monthlyReceipts.length === 0 ? (
+            <BentoCard style={localStyles.emptyCard}>
+              <Text style={styles.h2}>No Expenses Yet</Text>
+              <Text style={styles.muted}>Tap the floating add button to create the first record.</Text>
+            </BentoCard>
+          ) : (
+            <>
+              <TrendCard
+                averageYen={trendAverage}
+                maxYen={trendMax}
+                points={trendPoints}
+              />
+              <LedgerTable
+                currentMonth={currentMonthKey()}
+                groups={yearGroups}
+                onOpenMonth={openMonth}
+              />
+            </>
+          )}
+        </ScrollView>
+      ) : (
+        <SectionList
+          ref={sectionListRef}
+          ListEmptyComponent={(
+            <View style={localStyles.emptyState}>
+              {!loading && selectedMonthKey ? (
+                <BentoCard>
+                  <Text style={styles.h2}>No Expenses This Month</Text>
+                  <Text style={styles.muted}>There are no records for {formatMonthLabel(selectedMonthKey)}.</Text>
+                </BentoCard>
+              ) : null}
+            </View>
+          )}
+          ListHeaderComponent={(
+            <RecordsHeader
+              error={error}
+              monthKey={selectedMonthKey}
+              onBack={closeMonth}
+            />
+          )}
+          contentContainerStyle={[styles.content, localStyles.recordsContent, { paddingTop: contentTopPadding }]}
+          initialNumToRender={18}
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+          keyExtractor={({ expense }) => expense.id}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} />}
+          onScrollToIndexFailed={() => {
+            if (!targetDate || !selectedMonthKey || targetDate.slice(0, 7) !== selectedMonthKey) {
+              return;
+            }
+
+            const sectionIndex = sections.findIndex((section) => section.date === targetDate);
+            if (sectionIndex < 0) {
+              return;
+            }
+
+            setTimeout(() => scrollToTargetSection(sectionIndex, false), 250);
+          }}
+          renderItem={({ item, index, section }) => (
+            <SectionDetailRow
+              expenseBadges={expenseBadges}
+              first={index === 0}
+              item={item}
+              last={index === section.data.length - 1}
+              onDelete={(expense) => confirmDelete(expense.id)}
+              onEdit={(expense) => router.push(`/expenses/${expense.id}`)}
+              onSplitBreakdown={setSplitSelection}
+              onViewDetails={setDetailSelection}
+            />
+          )}
+          renderSectionHeader={({ section }) => (
+            <SectionHeader
+              collapsed={collapsedSections.has(section.date)}
+              count={section.count}
+              date={section.date}
+              onPress={() => toggleSection(section.date)}
+              totalYen={section.totalYen}
+            />
+          )}
+          sections={sections}
+          showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled={false}
+          style={styles.page}
+        />
+      )}
 
       {detailSelection ? (
         <ExpenseDetailModal
@@ -688,6 +726,178 @@ export default function HistoryScreen() {
   );
 }
 
+function LedgerHeader({
+  activeMemberNames,
+  error,
+  firstMonthKey
+}: {
+  activeMemberNames: string;
+  error: string | null;
+  firstMonthKey: string | null;
+}) {
+  return (
+    <View style={localStyles.ledgerHeader}>
+      <Text style={localStyles.historyTitle}>History</Text>
+      <Text numberOfLines={1} style={localStyles.historySubtitle}>
+        EVERY MONTH SINCE {firstMonthKey ? formatMonthLabel(firstMonthKey).toUpperCase() : '--'} · {activeMemberNames.toUpperCase()}
+      </Text>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
+function TrendCard({
+  averageYen,
+  maxYen,
+  points
+}: {
+  averageYen: number;
+  maxYen: number;
+  points: TrendPoint[];
+}) {
+  const firstMonth = points[0]?.monthKey || null;
+  const latestMonth = points[points.length - 1]?.monthKey || null;
+
+  return (
+    <BentoCard style={localStyles.trendCard}>
+      <View style={localStyles.trendHead}>
+        <Text numberOfLines={1} style={localStyles.trendLabel}>MONTHLY TOTAL · {points.length} MONTHS</Text>
+        <Text numberOfLines={1} style={localStyles.trendAverage}>avg {formatYen(averageYen)}</Text>
+      </View>
+      <View style={localStyles.trendBars}>
+        {points.map((point) => {
+          const heightPercent = maxYen > 0 && point.totalYen > 0
+            ? Math.max(8, Math.round((point.totalYen / maxYen) * 100))
+            : 8;
+          return (
+            <View
+              key={point.monthKey}
+              style={[
+                localStyles.trendBar,
+                {
+                  backgroundColor: point.monthKey === latestMonth ? colors.accent : 'rgba(42,39,34,0.20)',
+                  opacity: point.totalYen > 0 ? 1 : 0.38,
+                  height: `${heightPercent}%`
+                }
+              ]}
+            />
+          );
+        })}
+      </View>
+      <View style={localStyles.trendTicks}>
+        <Text style={localStyles.trendTick}>{firstMonth ? formatShortMonthWithYear(firstMonth) : '--'}</Text>
+        <Text style={[localStyles.trendTick, localStyles.trendTickCurrent]}>
+          {latestMonth ? formatShortMonthWithYear(latestMonth) : '--'}
+        </Text>
+      </View>
+    </BentoCard>
+  );
+}
+
+function LedgerTable({
+  currentMonth,
+  groups,
+  onOpenMonth
+}: {
+  currentMonth: string;
+  groups: LedgerYearGroup[];
+  onOpenMonth: (monthKey: string) => void;
+}) {
+  return (
+    <BentoCard style={localStyles.ledgerTable}>
+      <View style={localStyles.ledgerColumnHeader}>
+        <Text style={[localStyles.ledgerColumnText, localStyles.monthColumn]}>MONTH</Text>
+        <Text style={[localStyles.ledgerColumnText, localStyles.mixColumn]}>CATEGORY MIX</Text>
+        <Text style={[localStyles.ledgerColumnText, localStyles.amountColumn]}>TOTAL · Δ</Text>
+        <View style={localStyles.chevronColumn} />
+      </View>
+
+      {groups.map((group) => (
+        <View key={group.year}>
+          <View style={localStyles.yearBand}>
+            <Text style={localStyles.yearLabel}>{group.year}</Text>
+            <Text style={localStyles.yearSummary}>{group.months.length} months · {formatYen(group.totalYen)}</Text>
+          </View>
+          {group.months.map((receipt) => (
+            <MonthLedgerRow
+              current={receipt.monthKey === currentMonth}
+              key={receipt.monthKey}
+              onPress={() => onOpenMonth(receipt.monthKey)}
+              receipt={receipt}
+            />
+          ))}
+        </View>
+      ))}
+    </BentoCard>
+  );
+}
+
+function MonthLedgerRow({
+  current,
+  onPress,
+  receipt
+}: {
+  current: boolean;
+  onPress: () => void;
+  receipt: MonthlyReceiptStat;
+}) {
+  const capsules = categoryCapsules(receipt);
+  const delta = formatMonthDelta(receipt);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        localStyles.monthLedgerRow,
+        pressed && localStyles.monthLedgerRowPressed
+      ]}
+    >
+      <Text style={[localStyles.monthCode, current && localStyles.monthCodeCurrent]}>
+        {formatMonthAbbreviation(receipt.monthKey).toUpperCase()}
+      </Text>
+      <View style={localStyles.capsuleRow}>
+        {capsules.map((color, index) => (
+          <View
+            key={`${receipt.monthKey}-${index}`}
+            style={[localStyles.capsule, { backgroundColor: color }]}
+          />
+        ))}
+      </View>
+      <View style={localStyles.monthAmountBlock}>
+        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.monthTotal}>{formatYen(receipt.totalYen)}</Text>
+        <Text numberOfLines={1} style={[localStyles.monthDelta, { color: delta.color }]}>{delta.label}</Text>
+      </View>
+      <Ionicons color="#C7BDAE" name="chevron-forward" size={15} style={localStyles.monthChevron} />
+    </Pressable>
+  );
+}
+
+function RecordsHeader({
+  error,
+  monthKey,
+  onBack
+}: {
+  error: string | null;
+  monthKey: string | null;
+  onBack: () => void;
+}) {
+  return (
+    <View style={localStyles.recordsHeader}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onBack}
+        style={({ pressed }) => [localStyles.backLink, pressed && localStyles.backLinkPressed]}
+      >
+        <Ionicons color={colors.accent} name="chevron-back" size={22} />
+        <Text style={localStyles.backText}>History</Text>
+      </Pressable>
+      <Text style={localStyles.recordsMonthTitle}>{monthKey ? formatMonthLabel(monthKey) : 'History'}</Text>
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+    </View>
+  );
+}
+
 function SectionHeader({
   collapsed,
   count,
@@ -712,7 +922,9 @@ function SectionHeader({
     >
       <View style={localStyles.sectionDateBlock}>
         <Text style={localStyles.sectionDate}>{formatSectionDate(date)}</Text>
-        <Text style={localStyles.sectionWeekday}>{formatWeekday(date)} · {count} records</Text>
+        <Text style={localStyles.sectionWeekday}>
+          {formatWeekday(date)}{date === todayDateString() ? ' · TODAY' : ''} · {count} records
+        </Text>
       </View>
       <View style={localStyles.sectionTotalBlock}>
         <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.sectionTotal}>{formatYen(totalYen)}</Text>
@@ -776,6 +988,117 @@ function SectionDetailRow({
   );
 }
 
+function buildTrendPoints(receipts: MonthlyReceiptStat[]): TrendPoint[] {
+  if (receipts.length === 0) {
+    return [];
+  }
+
+  const visibleMonthCount = receipts.length <= 12
+    ? 12
+    : receipts.length <= 15
+      ? 15
+      : 18;
+  const newestReceipt = receipts[0];
+  const totalsByMonth = new Map(receipts.map((receipt) => [receipt.monthKey, receipt.totalYen]));
+  const startMonth = addMonths(newestReceipt.monthKey, -(visibleMonthCount - 1));
+
+  return Array.from({ length: visibleMonthCount }, (_, index) => {
+    const monthKey = addMonths(startMonth, index);
+    return {
+      monthKey,
+      totalYen: totalsByMonth.get(monthKey) || 0
+    };
+  });
+}
+
+function categoryCapsules(receipt: MonthlyReceiptStat) {
+  const entries = categoryMixEntries(receipt);
+  if (receipt.totalYen <= 0 || entries.length === 0) {
+    return Array.from({ length: CAPSULE_COUNT }, () => NEUTRAL_CAPSULE_COLOR);
+  }
+
+  const total = entries.reduce((sum, entry) => sum + entry.amountYen, 0) || 1;
+  const exact = entries.map((entry) => (entry.amountYen / total) * CAPSULE_COUNT);
+  const floors = exact.map(Math.floor);
+  let used = floors.reduce((sum, value) => sum + value, 0);
+  const order = exact
+    .map((value, index) => ({ index, remainder: value - floors[index] }))
+    .sort((a, b) => b.remainder - a.remainder);
+
+  for (let index = 0; used < CAPSULE_COUNT; index += 1, used += 1) {
+    floors[order[index % order.length].index] += 1;
+  }
+
+  const output: string[] = [];
+  entries.forEach((entry, index) => {
+    for (let count = 0; count < floors[index]; count += 1) {
+      output.push(entry.color);
+    }
+  });
+
+  while (output.length < CAPSULE_COUNT) {
+    output.push(NEUTRAL_CAPSULE_COLOR);
+  }
+
+  return output.slice(0, CAPSULE_COUNT);
+}
+
+function categoryMixEntries(receipt: MonthlyReceiptStat): CapsuleEntry[] {
+  const rawEntries = PRIMARY_CATEGORIES
+    .map((category) => ({
+      amountYen: receipt.categoryAmounts[category.id],
+      categoryId: category.id,
+      color: category.color,
+      label: category.label
+    }))
+    .filter((entry) => entry.amountYen > 0)
+    .sort((a, b) => b.amountYen - a.amountYen || a.label.localeCompare(b.label));
+
+  const otherEntry = rawEntries.find((entry) => entry.categoryId === 'other');
+  const namedEntries = rawEntries.filter((entry) => entry.categoryId !== 'other');
+  const shouldAggregateOther = rawEntries.length > DASHBOARD_CATEGORY_LIMIT;
+
+  if (!shouldAggregateOther) {
+    return [
+      ...namedEntries,
+      ...(otherEntry ? [{ ...otherEntry, color: OTHER_CATEGORY_COLOR }] : [])
+    ];
+  }
+
+  const visibleNamedEntries = namedEntries.slice(0, DASHBOARD_CATEGORY_LIMIT - 1);
+  const aggregateSources = [
+    ...namedEntries.slice(DASHBOARD_CATEGORY_LIMIT - 1),
+    ...(otherEntry ? [otherEntry] : [])
+  ];
+  const otherAmount = aggregateSources.reduce((sum, entry) => sum + entry.amountYen, 0);
+
+  return [
+    ...visibleNamedEntries,
+    ...(otherAmount > 0 ? [{
+      amountYen: otherAmount,
+      categoryId: 'other' as PrimaryCategoryId,
+      color: OTHER_CATEGORY_COLOR,
+      label: categoryLabel('other')
+    }] : [])
+  ];
+}
+
+function formatMonthDelta(receipt: MonthlyReceiptStat) {
+  if (receipt.comparison.percentage === null) {
+    return { color: colors.subtle, label: '· —' };
+  }
+
+  const percentage = Math.round(Math.abs(receipt.comparison.percentage));
+  if (receipt.comparison.direction === 'over') {
+    return { color: colors.danger, label: `▲ ${percentage}%` };
+  }
+  if (receipt.comparison.direction === 'under') {
+    return { color: colors.success, label: `▼ ${percentage}%` };
+  }
+
+  return { color: colors.subtle, label: `· ${percentage}%` };
+}
+
 function rowTitle(expense: Expense) {
   const resolvedCategory = resolveCategory(expense);
   return expense.note?.trim() || resolvedCategory.label;
@@ -816,6 +1139,14 @@ function formatCreatedAt(value: string) {
   return `${formatHistoryDate(date.toISOString().slice(0, 10))} ${timeFormatter.format(date)}`;
 }
 
+function formatMonthAbbreviation(monthKey: string) {
+  return monthAbbreviationFormatter.format(parseDateString(`${monthKey}-01`));
+}
+
+function formatShortMonthWithYear(monthKey: string) {
+  return shortMonthWithYearFormatter.format(parseDateString(`${monthKey}-01`));
+}
+
 function parseDateString(dateString: string) {
   const [year, month, day] = dateString.split('-').map(Number);
   return new Date(year, month - 1, day);
@@ -838,93 +1169,182 @@ function isDateString(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
+function isMonthString(value: string) {
+  return /^\d{4}-\d{2}$/.test(value);
+}
+
 function uniqueUserIds(userIds: string[]) {
   return [...new Set(userIds.filter(Boolean))];
 }
 
 const localStyles = StyleSheet.create({
-  categoryCaption: {
-    color: colors.muted,
-    flex: 1,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 11,
-    fontWeight: '700',
-    lineHeight: 15,
-    minWidth: 0
+  amountColumn: {
+    textAlign: 'right',
+    width: 76
   },
-  categoryCaptionDot: {
-    borderRadius: 4,
-    height: 8,
-    width: 8
-  },
-  categoryCaptionRow: {
+  backLink: {
     alignItems: 'center',
+    alignSelf: 'flex-start',
     flexDirection: 'row',
-    gap: 7,
+    gap: 2,
+    marginBottom: 7
+  },
+  backLinkPressed: {
+    opacity: 0.55
+  },
+  backText: {
+    color: colors.accent,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 20
+  },
+  capsule: {
+    borderRadius: theme.radii.pill,
+    flex: 1,
+    height: 16,
     minWidth: 0
   },
-  categoryMixBar: {
-    backgroundColor: 'rgba(42,39,34,0.08)',
-    borderRadius: 5,
+  capsuleRow: {
+    alignItems: 'center',
+    flex: 1,
     flexDirection: 'row',
-    height: 10,
-    overflow: 'hidden',
-    width: '100%'
+    gap: 2,
+    height: 16,
+    minWidth: 0
   },
-  categoryMixEmpty: {
-    backgroundColor: 'rgba(42,39,34,0.10)',
-    flex: 1
+  chevronColumn: {
+    width: 10
   },
-  categoryMixSegment: {
-    minWidth: 2
+  detailDivider: {
+    backgroundColor: colors.line,
+    height: 1,
+    marginLeft: 82
   },
-  dropdownCard: {
-    gap: 10,
-    padding: 14
+  emptyCard: {
+    gap: 8,
+    padding: 18
   },
   emptyState: {
     gap: 12
   },
-  filterArea: {
-    gap: 8
+  historySubtitle: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.mono,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    lineHeight: 16
   },
-  filterControls: {
+  historyTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 30
+  },
+  ledgerColumnHeader: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.03)',
+    borderBottomColor: colors.line,
+    borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 10,
-    width: '100%'
+    paddingHorizontal: 18,
+    paddingVertical: 12
   },
-  headerContent: {
-    gap: 18
-  },
-  listContent: {
-    gap: 0
-  },
-  monthAnchor: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 54
-  },
-  monthSwipeArea: {
-    gap: 18
-  },
-  monthTitle: {
-    color: colors.primaryDark,
+  ledgerColumnText: {
+    color: colors.subtle,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 24,
+    fontSize: 9,
     fontWeight: '700',
-    lineHeight: 31
+    letterSpacing: 1,
+    lineHeight: 12
   },
-  monthTitleGroup: {
+  ledgerContent: {
+    gap: 13
+  },
+  ledgerHeader: {
+    gap: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 4
+  },
+  ledgerTable: {
+    borderRadius: theme.radii.surface,
+    overflow: 'hidden',
+    padding: 0
+  },
+  mixColumn: {
+    flex: 1,
+    minWidth: 0
+  },
+  monthAmountBlock: {
+    alignItems: 'flex-end',
+    gap: 2,
+    width: 76
+  },
+  monthChevron: {
+    width: 10
+  },
+  monthCode: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    width: 42
+  },
+  monthCodeCurrent: {
+    color: colors.accent
+  },
+  monthColumn: {
+    width: 42
+  },
+  monthDelta: {
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 13
+  },
+  monthLedgerRow: {
     alignItems: 'center',
+    borderBottomColor: colors.glassBorder,
+    borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 10,
-    justifyContent: 'center',
-    minWidth: 0,
-    width: '100%'
+    minHeight: 56,
+    paddingHorizontal: 18,
+    paddingVertical: 11
+  },
+  monthLedgerRowPressed: {
+    backgroundColor: 'rgba(42,39,34,0.04)'
+  },
+  monthTotal: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17,
+    textAlign: 'right'
   },
   pressed: {
     opacity: 0.76
+  },
+  recordsContent: {
+    gap: 0
+  },
+  recordsHeader: {
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingBottom: 10
+  },
+  recordsMonthTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 25,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 31
   },
   sectionDate: {
     color: colors.ink,
@@ -937,11 +1357,6 @@ const localStyles = StyleSheet.create({
     flex: 1,
     gap: 2,
     minWidth: 0
-  },
-  detailDivider: {
-    backgroundColor: colors.line,
-    height: 1,
-    marginLeft: 82
   },
   sectionDetailSegment: {
     backgroundColor: colors.surface,
@@ -999,133 +1414,86 @@ const localStyles = StyleSheet.create({
   },
   sectionWeekday: {
     color: colors.muted,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 12,
-    fontWeight: '600',
-    lineHeight: 17
+    fontFamily: fontFamilies.mono,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    lineHeight: 14
   },
-  summaryAmount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 42,
-    fontWeight: '700',
-    letterSpacing: 0,
-    lineHeight: 52
+  trendAverage: {
+    color: colors.muted,
+    fontFamily: fontFamilies.mono,
+    fontSize: 10.5,
+    lineHeight: 14,
+    textAlign: 'right'
   },
-  summaryCard: {
-    gap: 12,
+  trendBar: {
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+    flex: 1,
+    minHeight: 4
+  },
+  trendBars: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 3,
+    height: 50,
+    marginTop: 14
+  },
+  trendCard: {
+    borderRadius: theme.radii.surface,
     paddingHorizontal: 18,
-    paddingVertical: 16
+    paddingVertical: 17
   },
-  summaryCount: {
+  trendHead: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between'
+  },
+  trendLabel: {
+    color: colors.subtle,
+    flex: 1,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    lineHeight: 13,
+    minWidth: 0
+  },
+  trendTick: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.mono,
+    fontSize: 9.5,
+    lineHeight: 13
+  },
+  trendTickCurrent: {
+    color: colors.accent
+  },
+  trendTicks: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8
+  },
+  yearBand: {
+    alignItems: 'baseline',
+    backgroundColor: 'rgba(192,137,46,0.07)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 11
+  },
+  yearLabel: {
     color: colors.ink,
     fontFamily: fontFamilies.monoExtraBold,
-    fontSize: 44,
+    fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 0,
-    lineHeight: 50
+    letterSpacing: 1,
+    lineHeight: 18
   },
-  summaryCountBlock: {
-    alignItems: 'baseline',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 9,
-    minWidth: 0
-  },
-  summaryLeadRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    gap: 12,
-    justifyContent: 'space-between'
-  },
-  summaryLabel: {
+  yearSummary: {
     color: colors.muted,
-    fontFamily: fontFamilies.bold,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    lineHeight: 17,
-    textTransform: 'uppercase'
-  },
-  summaryLabelRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6
-  },
-  summaryMeta: {
-    color: colors.subtle,
-    flexShrink: 1,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10.5,
-    fontWeight: '700',
-    lineHeight: 15,
-    minWidth: 0,
-    textAlign: 'right'
-  },
-  summaryMetaRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    gap: 10,
-    justifyContent: 'space-between',
-    minWidth: 0
-  },
-  summaryRecords: {
-    color: colors.muted,
-    fontFamily: fontFamilies.bold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20
-  },
-  summarySmallAmount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 17,
-    fontWeight: '700',
-    lineHeight: 22,
-    textAlign: 'right'
-  },
-  summarySmallLabel: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.bold,
-    fontSize: 10.5,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    lineHeight: 14,
-    textTransform: 'uppercase'
-  },
-  summaryStatsRow: {
-    flexDirection: 'row',
-    gap: 10
-  },
-  summaryStatTile: {
-    backgroundColor: 'rgba(241,236,227,0.68)',
-    borderColor: colors.line,
-    borderRadius: 12,
-    borderWidth: 1,
-    flex: 1,
-    gap: 4,
-    minWidth: 0,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  summaryStatValue: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20
-  },
-  summaryTotalBlock: {
-    alignItems: 'flex-end',
-    gap: 3,
-    minWidth: 116
-  },
-  topBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 16,
-    justifyContent: 'space-between'
+    fontFamily: fontFamilies.mono,
+    fontSize: 11,
+    lineHeight: 15
   }
 });

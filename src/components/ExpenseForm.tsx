@@ -1,29 +1,24 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { createElement, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  Keyboard,
-  Platform,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   useWindowDimensions,
-  type LayoutChangeEvent
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+  type PanResponderInstance
 } from 'react-native';
+import Animated, { Easing, interpolateColor, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  AndroidKeyboardDoneButton,
-  KEYBOARD_DONE_ACCESSORY_ID
-} from '@/src/components/KeyboardDoneAccessory';
-import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollView';
-import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { BentoCard } from '@/src/components/ui';
+import { colors, fontFamilies, theme } from '@/src/components/styles';
 import {
   DEFAULT_CATEGORY_SPLIT_RATIO,
   PRIMARY_CATEGORIES,
@@ -31,11 +26,23 @@ import {
   categoryIconName,
   categoryLabel,
   resolveCategory,
-  subcategoryPresets
+  subcategoryPresets,
+  type PrimaryCategoryId
 } from '@/src/lib/categorySystem';
 import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
+import {
+  buildWeekStrip,
+  calculateSplitAmounts,
+  complementShareAmounts,
+  dateSummary,
+  deriveSplitBackfill,
+  parseDateString,
+  sanitizeWholeNumber,
+  updateKeypadBuffer,
+  wrapIndex,
+  type KeypadKey
+} from '@/src/lib/expenseFormHelpers';
 import { displayName, todayDateString } from '@/src/lib/format';
-import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { saveExpense } from '@/src/lib/ledger';
 import {
   activeRecurringSubcategoryKeys,
@@ -43,7 +50,6 @@ import {
 } from '@/src/lib/recurring';
 import type {
   Expense,
-  ExpenseOwnership,
   Ledger,
   LedgerMemberProfile,
   Profile,
@@ -60,133 +66,61 @@ type Props = {
   recurringRules?: RecurringExpenseRule[];
 };
 
-type SplitTextValues = Record<string, string>;
+type Step = 0 | 1 | 2 | 3 | 4;
+type FocusedInput = 'total' | string;
+type SplitMode = 'ratio' | 'amount';
 
-type WebDateInputChangeEvent = {
-  currentTarget?: { value?: string };
-  target?: { value?: string };
+type Shares = {
+  total: number;
+  byUserId: Record<string, number>;
 };
 
-const MIN_SAVE_BAR_HEIGHT = 86;
 const numberFormatter = new Intl.NumberFormat('en-US');
-const dateLabelFormatter = new Intl.DateTimeFormat('en-US', {
-  day: '2-digit',
-  month: 'short',
-  year: 'numeric'
-});
-const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
-  weekday: 'short'
-});
-
-function sanitizeWholeNumber(value: string) {
-  return value.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '');
-}
-
-function formatNumberInput(value: string) {
-  if (!value) {
-    return '';
-  }
-
-  return numberFormatter.format(Number(value));
-}
-
-function formatYenInput(value: string) {
-  return value ? `¥ ${formatNumberInput(value)}` : '¥ ';
-}
-
-function formatYenText(value: number) {
-  return `¥ ${numberFormatter.format(value)}`;
-}
+const KEYS: KeypadKey[] = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', 'del'];
+const WHEEL_ROW_HEIGHT = 46;
+const WHEEL_REPEAT_COUNT = 21;
+const WHEEL_MIDDLE_REPEAT = Math.floor(WHEEL_REPEAT_COUNT / 2);
+const WHEEL_CENTER_INSET = 92;
+const PROGRESS_DOT_CONFIG = {
+  duration: 240,
+  easing: Easing.out(Easing.cubic)
+};
+const SPLIT_CAPSULES = 20;
 
 function parsePositiveInteger(value: string) {
-  const trimmedValue = sanitizeWholeNumber(value.trim());
-  if (!trimmedValue) {
-    return null;
-  }
-
-  const parsed = Number(trimmedValue);
+  const parsed = Number(sanitizeWholeNumber(value));
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function parseNonNegativeInteger(value: string) {
-  const trimmedValue = sanitizeWholeNumber(value.trim());
-  if (!trimmedValue) {
-    return null;
+function formatYenText(value: number) {
+  return `¥${numberFormatter.format(Math.max(0, Math.round(value)))}`;
+}
+
+function splitPctFromShares(shares: Shares, firstMemberId: string | undefined) {
+  if (!firstMemberId || shares.total <= 0) {
+    return DEFAULT_CATEGORY_SPLIT_RATIO[0];
   }
 
-  const parsed = Number(trimmedValue);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+  return ((shares.byUserId[firstMemberId] || 0) / shares.total) * 100;
 }
 
-function calculateAmountsFromRatios(totalAmount: number, ratios: readonly [number, number]) {
-  const firstAmount = Math.round((totalAmount * ratios[0]) / 100);
-  return [firstAmount, totalAmount - firstAmount] as const;
-}
+function ProgressDot({ active }: { active: boolean }) {
+  const progress = useSharedValue(active ? 1 : 0);
 
-function toAmountValues(members: LedgerMemberProfile[], amounts: readonly [number, number]): SplitTextValues {
-  return Object.fromEntries(members.map((member, index) => [member.user_id, String(amounts[index] || 0)]));
-}
+  useEffect(() => {
+    progress.value = withTiming(active ? 1 : 0, PROGRESS_DOT_CONFIG);
+  }, [active, progress]);
 
-function toEmptySplitValues(members: LedgerMemberProfile[]): SplitTextValues {
-  return Object.fromEntries(members.map((member) => [member.user_id, '']));
-}
+  const animatedStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(
+      progress.value,
+      [0, 1],
+      ['rgba(42,39,34,0.16)', ACCENT]
+    ),
+    width: 5 + progress.value * 17
+  }));
 
-function initialsForName(name: string) {
-  return displayName(name).slice(0, 1).toUpperCase();
-}
-
-function parseDateString(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return null;
-  }
-
-  const [year, month, day] = value.split('-').map(Number);
-  const date = new Date(year, month - 1, day);
-  if (
-    date.getFullYear() !== year ||
-    date.getMonth() !== month - 1 ||
-    date.getDate() !== day
-  ) {
-    return null;
-  }
-
-  return date;
-}
-
-function formatDateString(date: Date) {
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0')
-  ].join('-');
-}
-
-function formatDisplayDate(dateString: string) {
-  const date = parseDateString(dateString);
-  if (!date) {
-    return dateString || 'Choose date';
-  }
-
-  return `${dateLabelFormatter.format(date)} (${weekdayFormatter.format(date)})`;
-}
-
-function WebDateInput({
-  max,
-  onChange,
-  value
-}: {
-  max: string;
-  onChange: (value: string) => void;
-  value: string;
-}) {
-  return createElement('input', {
-    'aria-label': 'Spent on date',
-    max,
-    onChange: (event: WebDateInputChangeEvent) => onChange(event.currentTarget?.value || event.target?.value || ''),
-    style: webDateInputStyle,
-    type: 'date',
-    value
-  });
+  return <Animated.View style={[localStyles.progressDot, animatedStyle]} />;
 }
 
 export function ExpenseForm({
@@ -198,53 +132,73 @@ export function ExpenseForm({
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const compactLayout = width < 680;
+  const compactLayout = width < 390;
+  const pagePaddingTop = Math.max(insets.top - 24, 0);
+  const pagePaddingBottom = Math.max(insets.bottom, 10);
+  const scrollRef = useRef<ScrollView>(null);
+  const wheelScrollRef = useRef<ScrollView>(null);
+  const [splitBarResponder, setSplitBarResponder] = useState<PanResponderInstance | null>(null);
+  const selectedCategoryIndexRef = useRef(0);
+  const stepRef = useRef<Step>(0);
+  const barRef = useRef<View>(null);
+  const barLeftRef = useRef(0);
+  const splitBarWidthRef = useRef(0);
+  const ratioFromPageXRef = useRef<(pageX: number) => void>(() => undefined);
+
   const sortedMembers = useMemo(() => members.slice(0, 2), [members]);
+  const memberIds = useMemo(() => sortedMembers.map((member) => member.user_id), [sortedMembers]);
+  const firstMemberId = memberIds[0];
+  const secondMemberId = memberIds[1];
   const memberColorById = useMemo(() => (
-    buildUserColorMap(sortedMembers.map((member) => member.user_id), currentUserId)
-  ), [currentUserId, sortedMembers]);
+    buildUserColorMap(memberIds, currentUserId)
+  ), [currentUserId, memberIds]);
+
   const initialCategory = useMemo(() => resolveCategory({
     categoryId: expense?.category_id,
     category: expense?.category,
     subcategory: expense?.subcategory
   }), [expense?.category, expense?.category_id, expense?.subcategory]);
-  const [amount, setAmount] = useState(expense ? String(expense.amount_yen) : '');
-  const [categoryId, setCategoryId] = useState<string>(expense ? initialCategory.categoryId : '');
-  const [subcategory, setSubcategory] = useState(initialCategory.subcategory || '');
-  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
-  const [paidBy, setPaidBy] = useState(expense?.paid_by || currentUserId);
-  const [ownership, setOwnership] = useState<ExpenseOwnership>(expense?.ownership || 'personal');
-  const [spentOn, setSpentOn] = useState(expense?.spent_on || todayDateString());
-  const [note, setNote] = useState(expense?.note || '');
-  const [submitting, setSubmitting] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [saveBarHeight, setSaveBarHeight] = useState(MIN_SAVE_BAR_HEIGHT);
-  const [nativeDatePickerOpen, setNativeDatePickerOpen] = useState(false);
-
-  const [amountSplitValues, setAmountSplitValues] = useState<SplitTextValues>(() => {
-    if (expense?.splits?.length) {
-      return Object.fromEntries(expense.splits.map((split) => [split.user_id, String(split.amount_yen)]));
-    }
-
-    const amountYen = parsePositiveInteger(amount);
-    if (amountYen && sortedMembers.length === 2) {
-      return toAmountValues(sortedMembers, calculateAmountsFromRatios(amountYen, DEFAULT_CATEGORY_SPLIT_RATIO));
-    }
-
-    return toEmptySplitValues(sortedMembers);
+  const defaultCategoryId = (expense ? initialCategory.categoryId : PRIMARY_CATEGORIES[0].id) as PrimaryCategoryId;
+  const defaultSubcategory = initialCategory.subcategory || subcategoryPresets(defaultCategoryId)[0] || '';
+  const initialAmount = expense ? String(expense.amount_yen) : '';
+  const initialTotal = parsePositiveInteger(initialAmount) || 0;
+  const initialSplit = deriveSplitBackfill({
+    memberIds,
+    ownership: expense?.ownership,
+    paidBy: expense?.paid_by || currentUserId,
+    splits: expense?.splits,
+    totalAmount: initialTotal
   });
-  const [lastEditedAmountUserId, setLastEditedAmountUserId] = useState<string | null>(null);
-  const [splitValuesTouched, setSplitValuesTouched] = useState(false);
 
+  const [step, setStep] = useState<Step>(0);
+  const [amountBuffer, setAmountBuffer] = useState(initialAmount);
+  const [spentOn, setSpentOn] = useState(expense?.spent_on || todayDateString());
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [categoryId, setCategoryId] = useState<PrimaryCategoryId>(defaultCategoryId);
+  const [subcategory, setSubcategory] = useState(defaultSubcategory);
+  const [splitMode, setSplitMode] = useState<SplitMode>('ratio');
+  const [splitPct, setSplitPct] = useState(initialTotal > 0 ? initialSplit.splitPct : DEFAULT_CATEGORY_SPLIT_RATIO[0]);
+  const [focusedInput, setFocusedInput] = useState<FocusedInput>('total');
+  const [manualShareUserId, setManualShareUserId] = useState<string | null>(null);
+  const [shareBuffer, setShareBuffer] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [splitBarWidth, setSplitBarWidth] = useState(0);
+
+  const today = todayDateString();
+  const amountYen = parsePositiveInteger(amountBuffer) || 0;
+  const selectedCategoryIndex = Math.max(0, PRIMARY_CATEGORIES.findIndex((category) => category.id === categoryId));
+  const selectedCategory = PRIMARY_CATEGORIES[selectedCategoryIndex] || PRIMARY_CATEGORIES[0];
+  const wheelRows = useMemo(() => (
+    Array.from({ length: WHEEL_REPEAT_COUNT * PRIMARY_CATEGORIES.length }, (_, absoluteIndex) => ({
+      absoluteIndex,
+      category: PRIMARY_CATEGORIES[absoluteIndex % PRIMARY_CATEGORIES.length]
+    }))
+  ), []);
   const activeFixedSubcategoryKeys = useMemo(
     () => activeRecurringSubcategoryKeys(recurringRules),
     [recurringRules]
   );
   const currentSubcategoryPresets = useMemo(() => {
-    if (!categoryId) {
-      return [];
-    }
-
     const selectedSubcategory = subcategory.trim();
     return subcategoryPresets(categoryId).filter((option) => {
       if (expense?.subcategory === option || selectedSubcategory === option) {
@@ -254,160 +208,218 @@ export function ExpenseForm({
       return !activeFixedSubcategoryKeys.has(recurringRuleSubcategoryKey(categoryId, option));
     });
   }, [activeFixedSubcategoryKeys, categoryId, expense?.subcategory, subcategory]);
-
-  const hasSavedSharedSplits = expense?.ownership === 'shared' && Boolean(expense.splits.length);
-  const canApplyDefaultSplits = !splitValuesTouched && !hasSavedSharedSplits;
-  const saveBarPaddingBottom = Math.max(insets.bottom, 12);
-  const formBottomPadding = Math.max(saveBarHeight, MIN_SAVE_BAR_HEIGHT) + 24;
-  const amountYen = parsePositiveInteger(amount) || 0;
-  const amountDisplayValue = formatYenInput(amount);
-  const today = todayDateString();
-  const validationMessage = validateForm();
-  const canSave = !validationMessage && !submitting;
-  const selectedDate = parseDateString(spentOn) || parseDateString(today) || new Date();
-  const isEditing = Boolean(expense);
-  const isGeneratedExpense = Boolean(expense?.recurring_rule_id);
   const matchesActiveFixedSubcategory = useMemo(() => {
     const trimmedSubcategory = subcategory.trim();
-    if (!categoryId || !trimmedSubcategory || isGeneratedExpense) {
+    if (!categoryId || !trimmedSubcategory || expense?.recurring_rule_id) {
       return false;
     }
 
     return activeFixedSubcategoryKeys.has(recurringRuleSubcategoryKey(categoryId, trimmedSubcategory));
-  }, [activeFixedSubcategoryKeys, categoryId, isGeneratedExpense, subcategory]);
+  }, [activeFixedSubcategoryKeys, categoryId, expense?.recurring_rule_id, subcategory]);
+  const weekStrip = useMemo(() => buildWeekStrip({
+    selectedDateString: spentOn,
+    todayDateString: today,
+    weekOffset
+  }), [spentOn, today, weekOffset]);
+  const shares = currentShares();
+  const effectiveSplitPct = splitPctFromShares(shares, firstMemberId);
+  const keypadVisible = step === 0 || (step === 4 && splitMode === 'amount' && focusedInput !== 'total');
+  const canContinue = step !== 0 || amountYen > 0;
+  const isEditing = Boolean(expense);
+  const footerLabel = submitting ? 'Saving...' : step === 4 ? 'Save record' : 'Continue';
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSubscription = Keyboard.addListener(showEvent, () => {
-      setKeyboardVisible(true);
-    });
-    const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
-    });
+    if (step === 2) {
+      const targetIndex = WHEEL_MIDDLE_REPEAT * PRIMARY_CATEGORIES.length + selectedCategoryIndexRef.current;
+      requestAnimationFrame(() => {
+        wheelScrollRef.current?.scrollTo({
+          animated: false,
+          y: targetIndex * WHEEL_ROW_HEIGHT
+        });
+      });
+    }
+  }, [step]);
 
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
+  useEffect(() => {
+    setSplitBarResponder(PanResponder.create({
+      onStartShouldSetPanResponder: () => stepRef.current === 4,
+      onStartShouldSetPanResponderCapture: () => stepRef.current === 4,
+      onMoveShouldSetPanResponder: (_, gestureState) => (
+        stepRef.current === 4 &&
+        Math.abs(gestureState.dx) > 3 &&
+        Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+      ),
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => (
+        stepRef.current === 4 &&
+        Math.abs(gestureState.dx) > 3 &&
+        Math.abs(gestureState.dx) > Math.abs(gestureState.dy)
+      ),
+      onPanResponderGrant: (event) => {
+        barRef.current?.measureInWindow((x) => {
+          barLeftRef.current = x;
+          ratioFromPageXRef.current(event.nativeEvent.pageX);
+        });
+      },
+      onPanResponderMove: (event) => {
+        ratioFromPageXRef.current(event.nativeEvent.pageX);
+      },
+      onPanResponderRelease: (event) => {
+        ratioFromPageXRef.current(event.nativeEvent.pageX);
+      },
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true
+    }));
   }, []);
 
-  function syncAmountComplement(userId: string, value: string, totalAmount: number) {
-    if (sortedMembers.length !== 2) {
-      return;
+  function currentShares(): Shares {
+    const empty = Object.fromEntries(memberIds.map((memberId) => [memberId, 0]));
+    if (!firstMemberId || !secondMemberId || amountYen <= 0) {
+      return { total: amountYen, byUserId: empty };
     }
 
-    const enteredAmount = parseNonNegativeInteger(value);
-    if (enteredAmount === null) {
-      return;
+    if (splitMode === 'amount' && manualShareUserId) {
+      return {
+        total: amountYen,
+        byUserId: {
+          ...empty,
+          ...complementShareAmounts({
+            memberIds,
+            totalAmount: amountYen,
+            userId: manualShareUserId,
+            value: shareBuffer
+          })
+        }
+      };
     }
 
-    const otherMember = sortedMembers.find((member) => member.user_id !== userId);
-    if (!otherMember) {
-      return;
-    }
-
-    const boundedAmount = Math.min(enteredAmount, totalAmount);
-    setAmountSplitValues((current) => ({
-      ...current,
-      [userId]: String(boundedAmount),
-      [otherMember.user_id]: String(totalAmount - boundedAmount)
-    }));
-  }
-
-  function applyDefaultSplits(nextAmount = amount) {
-    setLastEditedAmountUserId(null);
-
-    const nextAmountYen = parsePositiveInteger(nextAmount);
-    if (nextAmountYen) {
-      setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, DEFAULT_CATEGORY_SPLIT_RATIO)));
-    } else {
-      setAmountSplitValues(toEmptySplitValues(sortedMembers));
-    }
-  }
-
-  function selectCategory(nextCategoryId: string) {
-    setCategoryId(nextCategoryId);
-    setSubcategory('');
-    setCategoryMenuOpen(false);
-    if (ownership === 'shared' && canApplyDefaultSplits) {
-      applyDefaultSplits();
-    }
-  }
-
-  function toggleCategoryMenu() {
-    setCategoryMenuOpen((current) => !current);
-  }
-
-  function handleAmountChange(value: string) {
-    const nextAmount = sanitizeWholeNumber(value);
-    setAmount(nextAmount);
-
-    const nextAmountYen = parsePositiveInteger(nextAmount);
-    if (!nextAmountYen) {
-      if (ownership === 'shared') {
-        setAmountSplitValues(toEmptySplitValues(sortedMembers));
+    const [firstAmount, secondAmount] = calculateSplitAmounts(amountYen, splitPct);
+    return {
+      total: amountYen,
+      byUserId: {
+        ...empty,
+        [firstMemberId]: firstAmount,
+        [secondMemberId]: secondAmount
       }
+    };
+  }
+
+  function dismissForm() {
+    if (router.canGoBack()) {
+      router.back();
       return;
     }
 
-    if (ownership !== 'shared') {
+    router.replace('/(tabs)/history');
+  }
+
+  function goStep(nextStep: Step) {
+    setStep(nextStep);
+    if (nextStep === 0) {
+      setFocusedInput('total');
+      scrollRef.current?.scrollTo({ animated: true, y: 0 });
+    }
+  }
+
+  function pressKey(key: KeypadKey) {
+    if (submitting) {
       return;
     }
 
-    if (lastEditedAmountUserId) {
-      syncAmountComplement(lastEditedAmountUserId, amountSplitValues[lastEditedAmountUserId] || '', nextAmountYen);
+    if (step === 4 && splitMode === 'amount' && focusedInput !== 'total') {
+      setShareBuffer((current) => {
+        const nextValue = updateKeypadBuffer(current, key);
+        const boundedValue = Math.min(Number(nextValue || 0), amountYen);
+        return nextValue ? String(boundedValue) : '';
+      });
       return;
     }
 
-    setAmountSplitValues(toAmountValues(sortedMembers, calculateAmountsFromRatios(nextAmountYen, DEFAULT_CATEGORY_SPLIT_RATIO)));
+    setAmountBuffer((current) => updateKeypadBuffer(current, key));
   }
 
-  function clearAmount() {
-    handleAmountChange('');
+  function selectCategoryByIndex(index: number) {
+    const nextCategory = PRIMARY_CATEGORIES[wrapIndex(index, PRIMARY_CATEGORIES.length)];
+    setCategoryId(nextCategory.id);
+    setSubcategory(nextCategory.subcategories[0] || '');
   }
 
-  function selectOwnership(nextOwnership: ExpenseOwnership) {
-    if (nextOwnership === 'shared' && ownership !== 'shared' && canApplyDefaultSplits) {
-      applyDefaultSplits();
+  function confirmCategory() {
+    setStep(3);
+  }
+
+  function syncWheelSelection(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    const absoluteIndex = Math.round(event.nativeEvent.contentOffset.y / WHEEL_ROW_HEIGHT);
+    const categoryIndex = wrapIndex(absoluteIndex, PRIMARY_CATEGORIES.length);
+    selectCategoryByIndex(categoryIndex);
+
+    const middleIndex = WHEEL_MIDDLE_REPEAT * PRIMARY_CATEGORIES.length + categoryIndex;
+    if (Math.abs(absoluteIndex - middleIndex) > PRIMARY_CATEGORIES.length * 2) {
+      requestAnimationFrame(() => {
+        wheelScrollRef.current?.scrollTo({
+          animated: false,
+          y: middleIndex * WHEEL_ROW_HEIGHT
+        });
+      });
+    }
+  }
+
+  function setRatio(nextPct: number) {
+    setSplitMode('ratio');
+    setFocusedInput('total');
+    setManualShareUserId(null);
+    setSplitPct(Math.max(0, Math.min(100, nextPct)));
+  }
+
+  function focusShare(userId: string) {
+    const currentAmount = shares.byUserId[userId] || 0;
+    setStep(4);
+    setSplitMode('amount');
+    setFocusedInput(userId);
+    setManualShareUserId(userId);
+    setShareBuffer(String(currentAmount));
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 80);
+  }
+
+  function selectDay(dateString: string, isFuture: boolean) {
+    if (isFuture) {
+      return;
     }
 
-    setOwnership(nextOwnership);
+    setSpentOn(dateString);
+    setStep(2);
   }
 
-  function setAmountSplitValue(userId: string, value: string) {
-    const nextValue = sanitizeWholeNumber(value);
-    setSplitValuesTouched(true);
-    setLastEditedAmountUserId(userId);
-    setAmountSplitValues((current) => ({ ...current, [userId]: nextValue }));
-
-    const currentAmountYen = parsePositiveInteger(amount);
-    if (currentAmountYen) {
-      syncAmountComplement(userId, nextValue, currentAmountYen);
+  function handleContinue() {
+    if (submitting || !canContinue) {
+      return;
     }
+
+    if (step === 0) {
+      setStep(2);
+      return;
+    }
+
+    if (step === 4) {
+      void submit();
+      return;
+    }
+
+    setStep((current) => Math.min(4, current + 1) as Step);
   }
 
-  function buildSplits(totalAmount: number) {
-    if (ownership === 'personal') {
-      return [];
-    }
-
-    if (sortedMembers.length !== 2) {
+  function buildSplits() {
+    if (!firstMemberId || !secondMemberId) {
       throw new Error('Shared expenses require two ledger members');
     }
 
-    const splitAmounts = sortedMembers.map((member) => parseNonNegativeInteger(amountSplitValues[member.user_id] || ''));
-    if (splitAmounts.some((splitAmount) => splitAmount === null)) {
-      throw new Error('Split amounts must be non-negative whole yen values');
-    }
-
-    const splits = sortedMembers.map((member, index) => ({
+    const splits = sortedMembers.map((member) => ({
       user_id: member.user_id,
-      amount_yen: splitAmounts[index] || 0
+      amount_yen: shares.byUserId[member.user_id] || 0
     }));
-
     const splitTotal = splits.reduce((sum, split) => sum + split.amount_yen, 0);
-    if (splitTotal !== totalAmount) {
+    if (splitTotal !== amountYen) {
       throw new Error('Split amounts must add up to the total amount');
     }
 
@@ -415,8 +427,7 @@ export function ExpenseForm({
   }
 
   function validateForm() {
-    const currentAmountYen = parsePositiveInteger(amount);
-    if (!currentAmountYen) {
+    if (!amountYen) {
       return 'Enter an amount greater than 0';
     }
 
@@ -432,30 +443,19 @@ export function ExpenseForm({
       return 'Future dates are not allowed';
     }
 
-    if (ownership === 'shared') {
-      try {
-        buildSplits(currentAmountYen);
-      } catch (splitError) {
-        return splitError instanceof Error ? splitError.message : 'Check split values';
-      }
+    try {
+      buildSplits();
+    } catch (splitError) {
+      return splitError instanceof Error ? splitError.message : 'Check split values';
     }
 
     return null;
   }
 
-  function dismissForm() {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace('/(tabs)/history');
-    }
-  }
-
   async function submit(skipFixedSubcategoryConfirm = false) {
-    const currentAmountYen = parsePositiveInteger(amount);
-    const currentValidationMessage = validateForm();
-    if (!currentAmountYen || currentValidationMessage) {
-      Alert.alert('Save Failed', currentValidationMessage || 'Check the form values');
+    const validationMessage = validateForm();
+    if (validationMessage) {
+      Alert.alert('Save Failed', validationMessage);
       return;
     }
 
@@ -477,20 +477,19 @@ export function ExpenseForm({
     }
 
     setSubmitting(true);
-
     try {
       await saveExpense({
         id: expense?.id,
         ledgerId: ledger.id,
-        amountYen: currentAmountYen,
+        amountYen,
         categoryId,
         category: categoryLabel(categoryId),
         subcategory: subcategory.trim() || null,
-        paidBy,
-        ownership,
+        paidBy: expense?.paid_by || currentUserId,
+        ownership: 'shared',
         spentOn,
-        note,
-        splits: buildSplits(currentAmountYen)
+        note: expense ? expense.note : '',
+        splits: buildSplits()
       });
 
       dismissForm();
@@ -501,862 +500,1126 @@ export function ExpenseForm({
     }
   }
 
-  function handleNativeDateChange(event: DateTimePickerEvent, nextDate?: Date) {
-    if (Platform.OS === 'android') {
-      setNativeDatePickerOpen(false);
-    }
+  function handleSplitBarLayout(event: LayoutChangeEvent) {
+    setSplitBarWidth(event.nativeEvent.layout.width);
+  }
 
-    if (event.type === 'dismissed' || !nextDate) {
+  function ratioFromPageX(pageX: number) {
+    const currentBarWidth = splitBarWidthRef.current;
+    if (currentBarWidth <= 0) {
       return;
     }
 
-    setSpentOn(formatDateString(nextDate));
+    const progress = Math.max(0, Math.min(1, (pageX - barLeftRef.current) / currentBarWidth));
+    setRatio(Math.round(progress * SPLIT_CAPSULES) * 5);
   }
 
-  function handleSaveBarLayout(event: LayoutChangeEvent) {
-    setSaveBarHeight(event.nativeEvent.layout.height);
+  useEffect(() => {
+    stepRef.current = step;
+    selectedCategoryIndexRef.current = selectedCategoryIndex;
+    splitBarWidthRef.current = splitBarWidth;
+    ratioFromPageXRef.current = ratioFromPageX;
+  });
+
+  if (sortedMembers.length < 2) {
+    return (
+      <View style={[localStyles.page, { paddingBottom: insets.bottom, paddingTop: insets.top }]}>
+        <View style={localStyles.header}>
+          <Pressable accessibilityLabel="Close expense form" onPress={dismissForm} style={localStyles.iconButton}>
+            <Ionicons color={colors.muted} name="close" size={22} />
+          </Pressable>
+        </View>
+        <View style={localStyles.center}>
+          <Text selectable style={localStyles.errorText}>Shared expenses require two ledger members.</Text>
+        </View>
+      </View>
+    );
   }
 
   return (
-    <View style={styles.page}>
-      <KeyboardAwareScrollView
-        style={styles.page}
+    <View style={[localStyles.page, { paddingBottom: pagePaddingBottom, paddingTop: pagePaddingTop }]}>
+      {renderHeader()}
+      <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[
-          styles.content,
-          localStyles.content,
-          { paddingBottom: formBottomPadding }
+          localStyles.stack,
+          compactLayout && localStyles.stackCompact,
+          { paddingBottom: keypadVisible ? 10 : 18 }
+        ]}
+        contentInsetAdjustmentBehavior="never"
+        keyboardShouldPersistTaps="handled"
+        scrollEnabled={step !== 2}
+        showsVerticalScrollIndicator={false}
+      >
+        {renderAmountCard()}
+        {renderDateCard()}
+        {renderCategoryCard()}
+        {renderDetailCard()}
+        {renderSplitCard()}
+      </ScrollView>
+      {keypadVisible ? renderKeypad() : null}
+      {renderFooter()}
+    </View>
+  );
+
+  function renderHeader() {
+    return (
+      <View style={localStyles.header}>
+        <Pressable accessibilityLabel="Close expense form" onPress={dismissForm} style={({ pressed }) => [localStyles.iconButton, pressed && localStyles.pressed]}>
+          <Ionicons color={colors.muted} name="close" size={22} />
+        </Pressable>
+        <View style={localStyles.headerTitleBlock}>
+          <Text style={localStyles.titleKicker}>{isEditing ? 'EDIT RECORD' : 'NEW RECORD'}</Text>
+          <View style={localStyles.progressRow}>
+            {[0, 1, 2, 3, 4].map((item) => (
+              <ProgressDot active={step === item} key={item} />
+            ))}
+          </View>
+        </View>
+        <View style={localStyles.headerSpacer} />
+      </View>
+    );
+  }
+
+  function renderAccordionCard(cardStep: Step, children: React.ReactNode) {
+    const onCategory = step === 2;
+    return (
+      <View
+        style={[
+          localStyles.card,
+          step === cardStep && localStyles.cardActive,
+          onCategory && cardStep !== 2 && localStyles.cardDimmed,
+          onCategory && cardStep === 2 && localStyles.cardBare
         ]}
       >
-        <BentoCard variant="form" style={localStyles.amountCard}>
-          <View style={localStyles.cardHeaderRow}>
-            <Text style={localStyles.inputTitle}>Amount</Text>
-            {amount ? (
-              <Pressable
-                accessibilityLabel="Clear amount"
-                onPress={clearAmount}
-                style={localStyles.clearButton}
-              >
-                <Ionicons color={colors.muted} name="close" size={24} />
-              </Pressable>
-            ) : (
-              <View style={localStyles.clearButtonPlaceholder} />
-            )}
-          </View>
-          <TextInput
-            accessibilityLabel="Expense amount"
-            inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-            inputMode="numeric"
-            keyboardType="number-pad"
-            onChangeText={handleAmountChange}
-            placeholder="¥ 0"
-            placeholderTextColor={colors.subtle}
-            returnKeyType="done"
-            selection={{ end: amountDisplayValue.length, start: amountDisplayValue.length }}
-            style={localStyles.amountInput}
-            submitBehavior="blurAndSubmit"
-            value={amountDisplayValue}
-          />
-        </BentoCard>
+        {children}
+      </View>
+    );
+  }
 
-        <View style={[localStyles.sectionStack, compactLayout && localStyles.sectionStackCompact]}>
-          <BentoCard variant="form" style={[localStyles.categoryCard, compactLayout && localStyles.fullWidthField]}>
-            <Text style={localStyles.inputTitle}>Category</Text>
-            {isGeneratedExpense ? (
-              <View style={localStyles.generatedNotice}>
-                <Ionicons color={colors.primaryDark} name="repeat-outline" size={18} />
-                <Text style={localStyles.generatedNoticeText}>Generated from fixed monthly expense</Text>
-              </View>
-            ) : null}
-            <Pressable
-              accessibilityLabel="Choose category"
-              onPress={() => runAfterKeyboardDismiss(toggleCategoryMenu, { delayMs: 80 })}
-              style={({ pressed }) => [
-                localStyles.categoryTrigger,
-                categoryMenuOpen && localStyles.controlActive,
-                pressed && localStyles.pressed
-              ]}
-            >
-              <View style={localStyles.categoryInputBox}>
-                <View style={localStyles.categorySelectedContent}>
-                  <Ionicons
-                    color={categoryId ? categoryColor(categoryId) : colors.muted}
-                    name={categoryId ? categoryIconName(categoryId) : 'help-circle-outline'}
-                    size={22}
-                  />
-                  <Text
-                    ellipsizeMode="tail"
-                    numberOfLines={1}
-                    style={[localStyles.categoryValue, !categoryId && localStyles.categoryPlaceholder]}
-                  >
-                    {categoryId ? categoryLabel(categoryId) : 'Choose a category'}
-                  </Text>
-                </View>
-                <Ionicons color={colors.ink} name={categoryMenuOpen ? 'chevron-up' : 'chevron-down'} size={22} />
-              </View>
-            </Pressable>
-            {categoryMenuOpen ? (
-              <View style={localStyles.dropdownMenu}>
-                {PRIMARY_CATEGORIES.map((option) => {
-                  const selected = option.id === categoryId;
-                  return (
-                    <Pressable
-                      accessibilityLabel={`Select ${option.label}`}
-                      key={option.id}
-                      onPress={() => runAfterKeyboardDismiss(() => selectCategory(option.id))}
-                      style={({ pressed }) => [
-                        localStyles.dropdownOption,
-                        selected && localStyles.dropdownOptionActive,
-                        pressed && localStyles.pressed
-                      ]}
-                    >
-                      <Ionicons color={option.color} name={option.icon} size={20} />
-                      <Text style={[localStyles.dropdownOptionText, selected && localStyles.dropdownOptionTextActive]}>
-                        {option.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
-
-            <View style={localStyles.subcategoryBlock}>
-              <Text style={styles.upperLabel}>Subcategory</Text>
-              <ScrollView
-                horizontal
-                keyboardShouldPersistTaps="handled"
-                showsHorizontalScrollIndicator={false}
-                style={localStyles.subcategoryScroller}
-              >
-                <View style={localStyles.subcategoryChipRow}>
-                  {currentSubcategoryPresets.map((option) => {
-                    const selected = option === subcategory.trim();
-                    return (
-                      <Pressable
-                        key={option}
-                        onPress={() => runAfterKeyboardDismiss(() => setSubcategory(selected ? '' : option))}
-                        style={({ pressed }) => [
-                          localStyles.subcategoryChip,
-                          selected && localStyles.subcategoryChipActive,
-                          pressed && localStyles.pressed
-                        ]}
-                      >
-                        <Text style={[localStyles.subcategoryChipText, selected && localStyles.subcategoryChipTextActive]}>
-                          {option}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-              <TextInput
-                accessibilityLabel="Expense subcategory"
-                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                onChangeText={setSubcategory}
-                placeholder="Optional tag"
-                placeholderTextColor={colors.subtle}
-                returnKeyType="done"
-                style={localStyles.subcategoryInput}
-                submitBehavior="blurAndSubmit"
-                value={subcategory}
-              />
-            </View>
-          </BentoCard>
-
-          <BentoCard variant="form" style={[localStyles.paidByCard, compactLayout && localStyles.fullWidthField]}>
-            <Text style={localStyles.inputTitle}>Paid By</Text>
-            <View style={localStyles.memberSelector}>
-              {sortedMembers.map((member) => {
-                const selected = member.user_id === paidBy;
-                const name = displayName(member.profile.display_name);
-                const accent = memberColorById.get(member.user_id) || DEFAULT_USER_COLOR;
-                return (
-                  <Pressable
-                    accessibilityLabel={`Paid by ${name}`}
-                    accessibilityRole="button"
-                    key={member.user_id}
-                    onPress={() => runAfterKeyboardDismiss(() => setPaidBy(member.user_id))}
-                    style={({ pressed }) => [
-                      localStyles.memberOption,
-                      selected && { borderColor: accent, backgroundColor: accent },
-                      pressed && localStyles.pressed
-                    ]}
-                  >
-                    <View style={[
-                      localStyles.avatar,
-                      {
-                        backgroundColor: selected ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.72)',
-                        borderColor: selected ? 'rgba(255,255,255,0.72)' : accent
-                      }
-                    ]}>
-                      <Text style={[localStyles.avatarText, { color: accent }]}>
-                        {initialsForName(name)}
-                      </Text>
-                    </View>
-                    <Text ellipsizeMode="tail" numberOfLines={1} style={[localStyles.memberName, selected && localStyles.memberNameSelected]}>
-                      {name}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </BentoCard>
+  function renderCollapsedRow(cardStep: Step, label: string, value: React.ReactNode) {
+    return (
+      <Pressable accessibilityRole="button" onPress={() => goStep(cardStep)} style={({ pressed }) => [localStyles.row, pressed && localStyles.rowPressed]}>
+        <View style={localStyles.rowLeft}>
+          <View style={[localStyles.sideBar, step === cardStep && localStyles.sideBarActive]} />
+          <Text style={[localStyles.rowLabel, step === cardStep && localStyles.rowLabelActive]}>{label}</Text>
         </View>
+        <View style={localStyles.rowRight}>
+          {value}
+          <Ionicons color={step === cardStep ? ACCENT : '#C7BDAE'} name={step === cardStep ? 'chevron-up' : 'chevron-down'} size={15} />
+        </View>
+      </Pressable>
+    );
+  }
 
-        <BentoCard variant="form" style={localStyles.ownershipCard}>
-          <View accessibilityLabel="Expense ownership" style={localStyles.ownershipSelector}>
-            {[
-              { label: 'Personal', value: 'personal' as const },
-              { label: 'Shared', value: 'shared' as const }
-            ].map((option) => {
-              const selected = option.value === ownership;
-              return (
+  function renderAmountCard() {
+    return renderAccordionCard(0, (
+      <Pressable accessibilityLabel="Edit amount" accessibilityRole="button" onPress={() => goStep(0)} style={({ pressed }) => [localStyles.amountRow, pressed && localStyles.rowPressed]}>
+        <View style={localStyles.rowLeft}>
+          <View style={[localStyles.sideBar, step === 0 && localStyles.sideBarActive]} />
+          <Text style={[localStyles.rowLabel, step === 0 && localStyles.rowLabelActive]}>AMOUNT</Text>
+        </View>
+        <View style={localStyles.amountValue}>
+          <Text style={[localStyles.amountYen, amountYen <= 0 && localStyles.amountValueEmpty]}>¥</Text>
+          <Text style={[localStyles.amountNumber, amountYen <= 0 && localStyles.amountValueEmpty]}>
+            {amountYen > 0 ? numberFormatter.format(amountYen) : '0'}
+          </Text>
+        </View>
+      </Pressable>
+    ));
+  }
+
+  function renderDateCard() {
+    return renderAccordionCard(1, (
+      <>
+        {renderCollapsedRow(1, 'DATE', <Text style={localStyles.rowValue}>{dateSummary(spentOn, today)}</Text>)}
+        {step === 1 ? (
+          <View style={localStyles.cardBody}>
+            <View style={localStyles.weekHeader}>
+              <Text style={localStyles.bodyHint}>Pick a day</Text>
+              <View style={localStyles.weekNav}>
+                <Pressable accessibilityLabel="Previous week" onPress={() => setWeekOffset((current) => current + 1)} style={localStyles.weekNavButton}>
+                  <Ionicons color={colors.muted} name="chevron-back" size={16} />
+                </Pressable>
+                <Text style={localStyles.weekLabel}>{weekStrip.weekLabel}</Text>
+                <Pressable accessibilityLabel="Next week" onPress={() => setWeekOffset((current) => Math.max(0, current - 1))} style={[localStyles.weekNavButton, weekOffset === 0 && localStyles.weekNavButtonDisabled]}>
+                  <Ionicons color={weekOffset === 0 ? '#C7BDAE' : colors.muted} name="chevron-forward" size={16} />
+                </Pressable>
+              </View>
+            </View>
+            <View style={localStyles.weekGrid}>
+              {weekStrip.days.map((day) => (
                 <Pressable
-                  accessibilityLabel={`${option.label} expense`}
+                  accessibilityLabel={`${day.dateString}${day.isFuture ? ', future date disabled' : ''}`}
                   accessibilityRole="button"
-                  key={option.value}
-                  onPress={() => runAfterKeyboardDismiss(() => selectOwnership(option.value))}
+                  disabled={day.isFuture}
+                  key={day.dateString}
+                  onPress={() => selectDay(day.dateString, day.isFuture)}
                   style={({ pressed }) => [
-                    localStyles.ownershipOption,
-                    selected && localStyles.ownershipOptionActive,
-                    pressed && localStyles.pressed
+                    localStyles.dayChip,
+                    day.isToday && localStyles.dayChipToday,
+                    day.isSelected && localStyles.dayChipSelected,
+                    day.isFuture && localStyles.dayChipDisabled,
+                    pressed && !day.isFuture && localStyles.pressed
                   ]}
                 >
-                  <Text style={[localStyles.ownershipText, selected && localStyles.ownershipTextActive]}>
-                    {option.label}
+                  <Text style={[localStyles.dayWeekday, day.isSelected && localStyles.dayTextSelected]}>{day.weekdayInitial}</Text>
+                  <Text style={[localStyles.dayNumber, day.isSelected && localStyles.dayNumberSelected]}>{day.dayNumber}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+      </>
+    ));
+  }
+
+  function renderCategoryCard() {
+    if (step !== 2) {
+      return renderAccordionCard(2, renderCollapsedRow(2, 'CATEGORY', (
+        <>
+          <Ionicons color={categoryColor(categoryId)} name={categoryIconName(categoryId)} size={17} />
+          <Text numberOfLines={1} style={localStyles.rowValue}>{categoryLabel(categoryId)}</Text>
+        </>
+      )));
+    }
+
+    const wheelContent = (
+      <View
+        accessibilityLabel={`Category picker, selected ${selectedCategory.label}`}
+        accessibilityRole="adjustable"
+        style={localStyles.wheel}
+      >
+        <View style={localStyles.wheelBand} />
+        <ScrollView
+          bounces={false}
+          contentContainerStyle={localStyles.wheelScrollContent}
+          decelerationRate="fast"
+          disableIntervalMomentum
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          onMomentumScrollEnd={syncWheelSelection}
+          ref={wheelScrollRef}
+          scrollEventThrottle={16}
+          showsVerticalScrollIndicator={false}
+          snapToAlignment="start"
+          snapToInterval={WHEEL_ROW_HEIGHT}
+          style={localStyles.wheelScroller}
+        >
+          <View>
+            {wheelRows.map(({ absoluteIndex, category }) => {
+              const categoryIndex = absoluteIndex % PRIMARY_CATEGORIES.length;
+              return (
+                <Pressable
+                  accessibilityLabel={`Select ${category.label}`}
+                  accessibilityRole="button"
+                  key={absoluteIndex}
+                  onPress={() => {
+                    if (categoryIndex === selectedCategoryIndex) {
+                      confirmCategory();
+                      return;
+                    }
+
+                    selectCategoryByIndex(categoryIndex);
+                    wheelScrollRef.current?.scrollTo({
+                      animated: true,
+                      y: absoluteIndex * WHEEL_ROW_HEIGHT
+                    });
+                  }}
+                  style={({ pressed }) => [localStyles.wheelOption, pressed && localStyles.pressed]}
+                >
+                  <View style={[localStyles.categoryIconBubble, { backgroundColor: `${category.color}20` }]}>
+                    <Ionicons color={category.color} name={category.icon} size={18} />
+                  </View>
+                  <Text numberOfLines={1} style={localStyles.wheelOptionText}>
+                    {category.label}
                   </Text>
                 </Pressable>
               );
             })}
           </View>
-        </BentoCard>
+        </ScrollView>
+        <View pointerEvents="none" style={[localStyles.wheelFade, localStyles.wheelFadeTop]} />
+        <View pointerEvents="none" style={[localStyles.wheelFade, localStyles.wheelFadeBottom]} />
+      </View>
+    );
 
-        {ownership === 'shared' ? (
-          <BentoCard variant="form" style={localStyles.splitCard}>
-            <Text style={styles.upperLabel}>Split Method</Text>
+    return renderAccordionCard(2, (
+      <View style={localStyles.wheelWrap}>
+        <View style={localStyles.wheelLabel}>
+          <View style={[localStyles.sideBar, localStyles.sideBarActive]} />
+          <Text style={[localStyles.rowLabel, localStyles.rowLabelActive]}>CATEGORY</Text>
+        </View>
+        {wheelContent}
+      </View>
+    ));
+  }
 
-            <View style={localStyles.splitRows}>
-              {sortedMembers.map((member) => {
-                const name = displayName(member.profile.display_name);
-                const accent = memberColorById.get(member.user_id) || DEFAULT_USER_COLOR;
-                const inputValue = formatNumberInput(amountSplitValues[member.user_id] || '');
+  function renderDetailCard() {
+    return renderAccordionCard(3, (
+      <>
+        {renderCollapsedRow(3, 'DETAIL', <Text numberOfLines={1} style={localStyles.rowValue}>{subcategory || 'Choose detail'}</Text>)}
+        {step === 3 ? (
+          <View style={localStyles.cardBody}>
+            <View style={localStyles.detailHeader}>
+              <View style={[localStyles.detailTick, { backgroundColor: selectedCategory.color }]} />
+              <Text style={[localStyles.detailCategory, { color: selectedCategory.color }]}>{selectedCategory.label.toUpperCase()}</Text>
+              <Text style={localStyles.detailCaption}>DETAIL</Text>
+            </View>
+            <View style={localStyles.tagWrap}>
+              {currentSubcategoryPresets.map((option) => {
+                const selected = option === subcategory.trim();
                 return (
-                  <View key={member.user_id} style={localStyles.splitRow}>
-                    <View style={localStyles.splitMember}>
-                      <View style={[localStyles.splitAvatar, { borderColor: accent }]}>
-                        <Text style={[localStyles.splitAvatarText, { color: accent }]}>{initialsForName(name)}</Text>
-                      </View>
-                      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.splitName}>
-                        {name}
-                      </Text>
-                    </View>
-
-                    <View style={localStyles.splitInputShell}>
-                      <Text style={localStyles.splitInputPrefix}>¥</Text>
-                      <TextInput
-                        accessibilityLabel={`${name} split amount`}
-                        inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-                        inputMode="numeric"
-                        keyboardType="number-pad"
-                        onChangeText={(value) => setAmountSplitValue(member.user_id, value)}
-                        placeholder="0"
-                        placeholderTextColor={colors.subtle}
-                        returnKeyType="done"
-                        style={[localStyles.splitInput, { color: accent }]}
-                        submitBehavior="blurAndSubmit"
-                        value={inputValue}
-                      />
-                    </View>
-                  </View>
+                  <Pressable
+                    accessibilityLabel={`Select ${option}`}
+                    accessibilityRole="button"
+                    key={option}
+                    onPress={() => {
+                      setSubcategory(option);
+                      setStep(4);
+                    }}
+                    style={({ pressed }) => [
+                      localStyles.tagChip,
+                      selected && { backgroundColor: selectedCategory.color, borderColor: selectedCategory.color },
+                      pressed && localStyles.pressed
+                    ]}
+                  >
+                    <Text style={[localStyles.tagText, selected && localStyles.tagTextSelected]}>{option}</Text>
+                  </Pressable>
                 );
               })}
             </View>
-
-            <View style={localStyles.totalRow}>
-              <Text style={localStyles.totalLabel}>Total</Text>
-              <Text style={localStyles.totalAmount}>{formatYenText(amountYen)}</Text>
-            </View>
-          </BentoCard>
+          </View>
         ) : null}
+      </>
+    ));
+  }
 
-        <View style={[localStyles.twoColumnRow, compactLayout && localStyles.twoColumnRowCompact]}>
-          <BentoCard variant="form" style={[localStyles.fieldCard, compactLayout && localStyles.fullWidthField]}>
-            <Text style={styles.upperLabel}>Spent On</Text>
-            {Platform.OS === 'web' ? (
-              <WebDateInput max={today} onChange={setSpentOn} value={spentOn} />
-            ) : (
-              <>
-                <Pressable
-                  accessibilityLabel="Choose spent on date"
-                  onPress={() => runAfterKeyboardDismiss(() => setNativeDatePickerOpen((current) => !current))}
-                  style={({ pressed }) => [localStyles.dateTrigger, pressed && localStyles.pressed]}
-                >
-                  <Ionicons color={colors.ink} name="calendar-outline" size={24} />
-                  <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.dateText}>
-                    {formatDisplayDate(spentOn)}
-                  </Text>
-                  <Ionicons color={colors.ink} name={nativeDatePickerOpen ? 'chevron-up' : 'chevron-down'} size={22} />
-                </Pressable>
-                {nativeDatePickerOpen ? (
-                  <DateTimePicker
-                    display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                    maximumDate={parseDateString(today) || undefined}
-                    mode="date"
-                    onChange={handleNativeDateChange}
-                    value={selectedDate}
+  function renderSplitCard() {
+    const firstMember = sortedMembers[0];
+    const secondMember = sortedMembers[1];
+    const firstColor = memberColorById.get(firstMember.user_id) || DEFAULT_USER_COLOR;
+    const secondColor = memberColorById.get(secondMember.user_id) || DEFAULT_USER_COLOR;
+    const firstAmount = shares.byUserId[firstMember.user_id] || 0;
+    const secondAmount = shares.byUserId[secondMember.user_id] || 0;
+    const firstPct = shares.total > 0 ? Math.round((firstAmount / shares.total) * 100) : Math.round(effectiveSplitPct);
+    const secondPct = Math.max(0, 100 - firstPct);
+    const splitSummary = firstAmount === shares.total && shares.total > 0
+      ? `${displayName(firstMember.profile.display_name)}'s expense`
+      : secondAmount === shares.total && shares.total > 0
+        ? `${displayName(secondMember.profile.display_name)}'s expense`
+        : `${formatYenText(firstAmount)} · ${formatYenText(secondAmount)}`;
+
+    return renderAccordionCard(4, (
+      <>
+        {renderCollapsedRow(4, 'SPLIT', <Text numberOfLines={1} style={localStyles.rowValue}>{splitSummary}</Text>)}
+        {step === 4 ? (
+          <View style={localStyles.cardBody}>
+            <View style={localStyles.splitReadout}>
+              {renderReadoutMember(firstMember, firstColor, firstPct, 'left')}
+              {renderReadoutMember(secondMember, secondColor, secondPct, 'right')}
+            </View>
+            <View
+              ref={barRef}
+              onLayout={handleSplitBarLayout}
+              style={localStyles.capBar}
+              {...(splitBarResponder?.panHandlers || {})}
+            >
+              {Array.from({ length: SPLIT_CAPSULES }, (_, index) => {
+                const activeFirst = index < Math.round(effectiveSplitPct / 5);
+                return (
+                  <View
+                    key={index}
+                    style={[
+                      localStyles.cap,
+                      {
+                        backgroundColor: activeFirst ? firstColor : secondColor,
+                        opacity: activeFirst ? 0.96 : 0.9
+                      }
+                    ]}
                   />
-                ) : null}
-              </>
-            )}
-          </BentoCard>
+                );
+              })}
+            </View>
+            {renderSplitScale()}
+            <View style={[localStyles.memberCards, compactLayout && localStyles.memberCardsCompact]}>
+              {renderMemberShareCard(firstMember, firstColor, firstAmount, firstPct)}
+              {renderMemberShareCard(secondMember, secondColor, secondAmount, secondPct)}
+            </View>
+          </View>
+        ) : null}
+      </>
+    ));
+  }
 
-          <BentoCard variant="form" style={[localStyles.fieldCard, compactLayout && localStyles.fullWidthField]}>
-            <Text style={styles.upperLabel}>Note (Optional)</Text>
-            <TextInput
-              accessibilityLabel="Expense note"
-              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-              multiline
-              onChangeText={setNote}
-              placeholder="Optional"
-              placeholderTextColor={colors.subtle}
-              style={localStyles.noteInput}
-              value={note}
-            />
-          </BentoCard>
+  function renderReadoutMember(member: LedgerMemberProfile, accent: string, pct: number, side: 'left' | 'right') {
+    const name = displayName(member.profile.display_name);
+    return (
+      <View style={localStyles.readoutMember}>
+        {side === 'left' ? <View style={[localStyles.readoutDot, { backgroundColor: accent }]} /> : null}
+        {side === 'left' ? <Text numberOfLines={1} style={localStyles.readoutName}>{name}</Text> : null}
+        <Text style={localStyles.readoutPct}>{pct}%</Text>
+        {side === 'right' ? <Text numberOfLines={1} style={localStyles.readoutName}>{name}</Text> : null}
+        {side === 'right' ? <View style={[localStyles.readoutDot, { backgroundColor: accent }]} /> : null}
+      </View>
+    );
+  }
+
+  function renderSplitScale() {
+    return (
+      <View accessibilityLabel="Split scale with minor ticks every 2 percent and major ticks every 10 percent" style={localStyles.splitScale}>
+        <View style={localStyles.splitScaleTicks}>
+          {Array.from({ length: 51 }, (_, index) => {
+            const isMajor = index % 5 === 0;
+            return (
+              <View
+                key={index}
+                style={[
+                  localStyles.splitScaleTick,
+                  isMajor && localStyles.splitScaleTickMajor
+                ]}
+              />
+            );
+          })}
         </View>
-
-        <AndroidKeyboardDoneButton />
-      </KeyboardAwareScrollView>
-
-      <View
-        onLayout={handleSaveBarLayout}
-        pointerEvents={keyboardVisible ? 'none' : 'auto'}
-        style={[
-          localStyles.saveBar,
-          keyboardVisible && localStyles.saveBarKeyboardHidden,
-          {
-            bottom: 0,
-            paddingBottom: saveBarPaddingBottom
-          }
-        ]}
-      >
-        <View style={localStyles.actionRow}>
-          <Pressable
-            accessibilityLabel="Cancel expense form"
-            onPress={() => runAfterKeyboardDismiss(dismissForm)}
-            style={({ pressed }) => [localStyles.cancelButton, pressed && localStyles.pressed]}
-          >
-            <Text style={localStyles.cancelButtonText}>Cancel</Text>
-          </Pressable>
-          <Pressable
-            accessibilityLabel={isEditing ? 'Save changes' : 'Save expense'}
-            disabled={!canSave}
-            onPress={() => runAfterKeyboardDismiss(submit)}
-            style={({ pressed }) => [
-              localStyles.saveButton,
-              !canSave && localStyles.saveButtonDisabled,
-              pressed && canSave && localStyles.pressed
-            ]}
-          >
-            <Text style={localStyles.saveButtonText}>
-              {submitting ? 'Saving...' : isEditing ? 'Save Changes' : 'Save Expense'}
+        <View style={localStyles.splitScaleLabels}>
+          {Array.from({ length: 11 }, (_, index) => (
+            <Text key={index} style={localStyles.splitScaleLabel}>
+              {index * 10}
             </Text>
-          </Pressable>
+          ))}
         </View>
       </View>
-    </View>
-  );
+    );
+  }
+
+  function renderMemberShareCard(member: LedgerMemberProfile, accent: string, amount: number, pct: number) {
+    const name = displayName(member.profile.display_name);
+    const focused = splitMode === 'amount' && focusedInput === member.user_id;
+    const full = shares.total > 0 && amount === shares.total;
+    const zero = shares.total > 0 && amount === 0;
+    const tag = full ? 'Covers the full bill' : zero ? 'Owes nothing' : `${pct}% of the bill`;
+
+    return (
+      <Pressable
+        accessibilityLabel={`Edit ${name} share amount`}
+        accessibilityRole="button"
+        onPress={() => focusShare(member.user_id)}
+        style={({ pressed }) => [
+          localStyles.memberCard,
+          focused && localStyles.memberCardFocused,
+          full && { backgroundColor: accent, borderColor: accent },
+          zero && localStyles.memberCardZero,
+          pressed && localStyles.pressed
+        ]}
+      >
+        <View style={localStyles.memberCardHeader}>
+          <View style={[localStyles.memberDot, { backgroundColor: full ? '#FFFDF7' : accent }]} />
+          <Text numberOfLines={1} style={[localStyles.memberName, full && localStyles.memberNameFull]}>{name}</Text>
+          <Text style={[localStyles.keyingCue, focused && localStyles.keyingCueActive]}>KEYING</Text>
+        </View>
+        <View style={localStyles.memberAmountRow}>
+          <Text style={[localStyles.memberYen, full && localStyles.memberTextFull, zero && localStyles.memberTextZero]}>¥</Text>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={[localStyles.memberAmount, full && localStyles.memberTextFull, zero && localStyles.memberTextZero]}>
+            {numberFormatter.format(amount)}
+          </Text>
+        </View>
+        <Text numberOfLines={1} style={[localStyles.memberTag, full && localStyles.memberTagFull]}>{tag}</Text>
+      </Pressable>
+    );
+  }
+
+  function renderKeypad() {
+    const target = step === 0
+      ? 'ENTERING TOTAL'
+      : `ENTERING ${displayName(sortedMembers.find((member) => member.user_id === focusedInput)?.profile.display_name).toUpperCase()}'S SHARE`;
+
+    return (
+      <View style={localStyles.keypad}>
+        <Text style={localStyles.keypadTarget}>{target}</Text>
+        <View style={localStyles.keys}>
+          {KEYS.map((key) => (
+            <Pressable
+              accessibilityLabel={key === 'del' ? 'Delete digit' : `Input ${key}`}
+              accessibilityRole="button"
+              key={key}
+              onPress={() => pressKey(key)}
+              style={({ pressed }) => [
+                localStyles.key,
+                key === 'del' && localStyles.keyDelete,
+                pressed && localStyles.keyPressed
+              ]}
+            >
+              <Text style={[localStyles.keyText, key === 'del' && localStyles.keyDeleteText]}>
+                {key === 'del' ? '⌫' : key}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    );
+  }
+
+  function renderFooter() {
+    return (
+      <View style={localStyles.footer}>
+        <Pressable
+          accessibilityLabel={step === 4 ? 'Save record' : 'Continue'}
+          accessibilityRole="button"
+          disabled={!canContinue || submitting}
+          onPress={handleContinue}
+          style={({ pressed }) => [
+            localStyles.footerButton,
+            (!canContinue || submitting) && localStyles.footerButtonDisabled,
+            pressed && canContinue && !submitting && localStyles.pressed
+          ]}
+        >
+          {step === 4 ? <Ionicons color="#FFFDF7" name="checkmark" size={18} /> : null}
+          <Text style={localStyles.footerButtonText}>{footerLabel}</Text>
+          {step !== 4 ? <Ionicons color="#FFFDF7" name="arrow-forward" size={18} /> : null}
+        </Pressable>
+      </View>
+    );
+  }
 }
 
-const webDateInputStyle = {
-  backgroundColor: 'rgba(255,255,255,0.86)',
-  border: `1px solid ${colors.line}`,
-  borderRadius: theme.radii.control,
-  color: colors.ink,
-  fontFamily: `${fontFamilies.mono}, ${fontFamilies.fallback}`,
-  fontSize: 16,
-  minHeight: 48,
-  outline: 'none',
-  padding: '10px 12px',
-  width: '100%'
-};
+const PAPER = '#EFE9DF';
+const ACCENT = '#C0892E';
+const HERO = '#3A322A';
+const INK = '#2A2722';
+const MUTED = '#9A8F80';
+const HAIRLINE = 'rgba(42,39,34,0.07)';
 
 const localStyles = StyleSheet.create({
-  actionRow: {
+  amountNumber: {
+    color: INK,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 30
+  },
+  amountRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 12
+    height: 58,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16
   },
-  amountCard: {
-    gap: 0,
-    minHeight: 92,
-    paddingBottom: 12,
-    paddingHorizontal: 18,
-    paddingTop: 10
+  amountValue: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 2
   },
-  amountInput: {
-    color: colors.primaryDark,
+  amountValueEmpty: {
+    color: 'rgba(42,39,34,0.28)'
+  },
+  amountYen: {
+    color: INK,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 40,
-    fontWeight: '700',
-    letterSpacing: 0,
-    minHeight: 46,
-    paddingVertical: 0
-  },
-  avatar: {
-    alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1.5,
-    height: 32,
-    justifyContent: 'center',
-    width: 32
-  },
-  avatarText: {
-    fontFamily: fontFamilies.bold,
-    fontSize: 15,
+    fontSize: 18,
     fontWeight: '700'
   },
-  cancelButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.82)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.control,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 56,
-    paddingHorizontal: 20
+  bodyHint: {
+    color: MUTED,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12.5
   },
-  cancelButtonText: {
-    color: colors.ink,
+  cap: {
+    borderRadius: 5,
+    flex: 1,
+    height: 32,
+    minWidth: 8
+  },
+  capBar: {
+    flexDirection: 'row',
+    gap: 3,
+    paddingBottom: 8,
+    paddingTop: 10
+  },
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    borderColor: HAIRLINE,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden'
+  },
+  cardActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(42,39,34,0.05)',
+    boxShadow: '0 16px 36px -18px rgba(42,39,34,0.30)'
+  },
+  cardBare: {
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    boxShadow: 'none'
+  },
+  cardBody: {
+    borderTopColor: 'rgba(42,39,34,0.06)',
+    borderTopWidth: 1,
+    padding: 16,
+    paddingTop: 12
+  },
+  cardDimmed: {
+    filter: [{ blur: 3 }],
+    opacity: 0.5
+  },
+  categoryIconBubble: {
+    alignItems: 'center',
+    borderRadius: 11,
+    height: 34,
+    justifyContent: 'center',
+    width: 34
+  },
+  center: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24
+  },
+  dayChip: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderColor: HAIRLINE,
+    borderRadius: 13,
+    borderWidth: 1,
+    flex: 1,
+    gap: 3,
+    minHeight: 54,
+    paddingVertical: 8
+  },
+  dayChipDisabled: {
+    opacity: 0.34
+  },
+  dayChipSelected: {
+    backgroundColor: HERO,
+    borderColor: HERO
+  },
+  dayChipToday: {
+    backgroundColor: 'rgba(192,137,46,0.16)',
+    borderColor: 'rgba(192,137,46,0.4)'
+  },
+  dayNumber: {
+    color: INK,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 18
+  },
+  dayNumberSelected: {
+    color: '#FFFDF7'
+  },
+  dayTextSelected: {
+    color: 'rgba(255,253,247,0.55)'
+  },
+  dayWeekday: {
+    color: '#A89E90',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 8,
+    fontWeight: '700'
+  },
+  detailCaption: {
+    color: '#C0B9AC',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 1
+  },
+  detailCategory: {
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 1
+  },
+  detailHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 11
+  },
+  detailTick: {
+    borderRadius: 99,
+    height: 14,
+    width: 5
+  },
+  errorText: {
+    color: colors.danger,
     fontFamily: fontFamilies.semiBold,
     fontSize: 16,
-    fontWeight: '600'
+    fontWeight: '600',
+    textAlign: 'center'
   },
-  cardHeaderRow: {
+  footer: {
+    backgroundColor: PAPER,
+    paddingHorizontal: 16,
+    paddingTop: 11
+  },
+  footerButton: {
     alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 36
-  },
-  categoryCard: {
-    flex: 1,
-    gap: 10,
-    minHeight: 104,
-    minWidth: 0,
-    padding: 16
-  },
-  categoryInputBox: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.82)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.surface,
-    borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between',
-    minHeight: 54,
-    minWidth: 0,
-    paddingHorizontal: 14
-  },
-  categorySelectedContent: {
-    alignItems: 'center',
-    flex: 1,
+    backgroundColor: ACCENT,
+    borderRadius: 16,
+    boxShadow: '0 14px 28px -10px rgba(192,137,46,0.6)',
     flexDirection: 'row',
     gap: 9,
-    minWidth: 0
+    height: 54,
+    justifyContent: 'center',
+    width: '100%'
   },
-  categoryTrigger: {
+  footerButtonDisabled: {
+    backgroundColor: 'rgba(42,39,34,0.10)',
+    boxShadow: 'none'
+  },
+  footerButtonText: {
+    color: '#FFFDF7',
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  header: {
     alignItems: 'center',
-    borderColor: 'transparent',
-    borderRadius: theme.radii.control,
-    borderWidth: 1,
     flexDirection: 'row',
-    gap: 0,
-    minHeight: 50
+    justifyContent: 'space-between',
+    paddingBottom: 8,
+    paddingHorizontal: 18,
+    paddingTop: 0
   },
-  categoryValue: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
+  headerSpacer: {
+    height: 34,
+    width: 34
+  },
+  headerTitleBlock: {
+    alignItems: 'center'
+  },
+  iconButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.06)',
+    borderRadius: 11,
+    height: 34,
+    justifyContent: 'center',
+    width: 34
+  },
+  key: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 13,
+    boxShadow: '0 1px 2px rgba(42,39,34,0.06)',
+    flexBasis: '31%',
+    flexGrow: 1,
+    height: 44,
+    justifyContent: 'center'
+  },
+  keyDelete: {
+    backgroundColor: 'rgba(42,39,34,0.04)',
+    boxShadow: 'none'
+  },
+  keyDeleteText: {
+    color: MUTED
+  },
+  keyPressed: {
+    backgroundColor: 'rgba(42,39,34,0.10)'
+  },
+  keyText: {
+    color: INK,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 19,
     fontWeight: '700'
   },
-  categoryPlaceholder: {
-    color: colors.muted,
-    fontFamily: fontFamilies.semiBold,
-    fontWeight: '600'
+  keypad: {
+    backgroundColor: PAPER,
+    borderTopColor: 'rgba(42,39,34,0.07)',
+    borderTopWidth: 1,
+    paddingBottom: 4,
+    paddingHorizontal: 16,
+    paddingTop: 9
   },
-  clearButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(42,39,34,0.05)',
-    borderRadius: 18,
-    height: 36,
-    justifyContent: 'center',
-    width: 36
-  },
-  clearButtonPlaceholder: {
-    height: 36,
-    width: 36
-  },
-  content: {
-    maxWidth: 760
-  },
-  controlActive: {
-    borderColor: colors.secondary
-  },
-  dateText: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.monoSemiBold,
-    fontSize: 16,
-    fontWeight: '600'
-  },
-  dateTrigger: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 48
-  },
-  dropdownMenu: {
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.control,
-    borderWidth: 1,
-    overflow: 'hidden',
-    ...theme.shadow
-  },
-  dropdownOption: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 46,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  dropdownOptionActive: {
-    backgroundColor: colors.tint
-  },
-  dropdownOptionText: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.regular,
-    fontSize: 15
-  },
-  dropdownOptionTextActive: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
-    fontWeight: '700'
-  },
-  fieldCard: {
-    flex: 1,
-    gap: 10,
-    minHeight: 96,
-    minWidth: 0,
-    padding: 18
-  },
-  fullWidthField: {
-    width: '100%'
-  },
-  generatedNotice: {
-    alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderColor: colors.secondary,
-    borderRadius: 10,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8
-  },
-  generatedNoticeText: {
-    color: colors.primaryDark,
-    flex: 1,
-    fontFamily: fontFamilies.bold,
-    fontSize: 12,
+  keypadTarget: {
+    color: '#A89E90',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 8.5,
     fontWeight: '700',
-    lineHeight: 17
+    letterSpacing: 1,
+    paddingBottom: 8,
+    textAlign: 'center'
   },
-  inputTitle: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
-    fontSize: 14,
+  keyingCue: {
+    color: ACCENT,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 8,
     fontWeight: '700',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase'
+    letterSpacing: 0.8,
+    marginLeft: 'auto',
+    opacity: 0
   },
-  memberName: {
-    color: colors.ink,
+  keyingCueActive: {
+    opacity: 1
+  },
+  keys: {
+    display: 'flex',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7
+  },
+  memberAmount: {
+    color: INK,
     flex: 1,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 14,
-    fontWeight: '600'
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 0,
+    lineHeight: 28
   },
-  memberNameSelected: {
-    color: '#FFFFFF'
+  memberAmountRow: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 1,
+    marginTop: 8
   },
-  memberOption: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.62)',
-    borderColor: 'transparent',
-    borderRadius: theme.radii.pill,
+  memberCard: {
+    backgroundColor: '#FFFFFF',
+    borderColor: 'rgba(42,39,34,0.10)',
+    borderRadius: 15,
     borderWidth: 1.5,
     flex: 1,
-    flexDirection: 'row',
-    gap: 8,
-    minHeight: 42,
     minWidth: 0,
-    paddingHorizontal: 9
+    padding: 13,
+    paddingTop: 12
   },
-  memberSelector: {
+  memberCardFocused: {
+    borderColor: ACCENT,
+    boxShadow: '0 8px 18px -8px rgba(192,137,46,0.55)'
+  },
+  memberCardHeader: {
     alignItems: 'center',
-    backgroundColor: 'rgba(42,39,34,0.03)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.pill,
-    borderWidth: 1,
     flexDirection: 'row',
-    gap: 6,
-    padding: 3
+    gap: 6
   },
-  noteInput: {
-    color: colors.ink,
-    fontFamily: fontFamilies.regular,
-    fontSize: 16,
-    minHeight: 50,
-    paddingVertical: 0,
-    textAlignVertical: 'top'
+  memberCardZero: {
+    backgroundColor: 'rgba(42,39,34,0.035)',
+    borderColor: 'transparent'
   },
-  ownershipCard: {
-    padding: 12
+  memberCards: {
+    flexDirection: 'row',
+    gap: 9,
+    marginTop: 13
   },
-  ownershipOption: {
-    alignItems: 'center',
-    borderColor: 'transparent',
-    borderRadius: theme.radii.pill,
-    borderWidth: 1,
+  memberCardsCompact: {
+    flexDirection: 'column'
+  },
+  memberDot: {
+    borderRadius: 3,
+    height: 9,
+    width: 9
+  },
+  memberName: {
+    color: colors.muted,
     flex: 1,
-    justifyContent: 'center',
-    minHeight: 36,
-    paddingHorizontal: 14
-  },
-  ownershipOptionActive: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent
-  },
-  ownershipSelector: {
-    alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderColor: colors.line,
-    borderRadius: theme.radii.pill,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 4,
-    padding: 4
-  },
-  ownershipText: {
-    color: colors.ink,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  ownershipTextActive: {
-    color: '#FFFFFF',
     fontFamily: fontFamilies.bold,
+    fontSize: 12.5,
     fontWeight: '700'
   },
-  paidByCard: {
-    flex: 1,
-    gap: 10,
-    minHeight: 104,
-    minWidth: 0,
-    padding: 16
+  memberNameFull: {
+    color: '#FFFDF7'
   },
-  subcategoryBlock: {
-    gap: 8
-  },
-  subcategoryChip: {
-    backgroundColor: 'rgba(255,255,255,0.72)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.pill,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 34,
-    paddingHorizontal: 11
-  },
-  subcategoryChipActive: {
-    backgroundColor: colors.tint,
-    borderColor: colors.secondary
-  },
-  subcategoryChipRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingRight: 4
-  },
-  subcategoryChipText: {
-    color: colors.ink,
+  memberTag: {
+    color: '#B9AF9F',
     fontFamily: fontFamilies.semiBold,
-    fontSize: 12,
-    fontWeight: '600'
+    fontSize: 10.5,
+    fontWeight: '600',
+    marginTop: 6
   },
-  subcategoryChipTextActive: {
-    color: colors.primaryDark,
-    fontFamily: fontFamilies.bold,
+  memberTagFull: {
+    color: 'rgba(255,253,247,0.82)'
+  },
+  memberTextFull: {
+    color: '#FFFDF7'
+  },
+  memberTextZero: {
+    color: '#C2B9AB'
+  },
+  memberYen: {
+    color: MUTED,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 13,
     fontWeight: '700'
   },
-  subcategoryInput: {
-    backgroundColor: 'rgba(255,255,255,0.86)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.control,
-    borderWidth: 1,
-    color: colors.ink,
-    fontFamily: fontFamilies.regular,
-    fontSize: 15,
-    minHeight: 44,
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  subcategoryScroller: {
-    flexGrow: 0
+  page: {
+    backgroundColor: PAPER,
+    flex: 1
   },
   pressed: {
     opacity: 0.72
   },
-  saveBar: {
-    backgroundColor: 'rgba(255,255,255,0.90)',
-    borderColor: colors.glassBorder,
-    borderTopWidth: 1,
-    left: 0,
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    position: 'absolute',
-    right: 0,
-    ...theme.shadow
+  progressDot: {
+    backgroundColor: 'rgba(42,39,34,0.16)',
+    borderRadius: 3,
+    height: 5,
+    width: 5
   },
-  saveBarKeyboardHidden: {
-    opacity: 0,
-    transform: [{ translateY: MIN_SAVE_BAR_HEIGHT + 24 }]
-  },
-  saveButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primaryDark,
-    borderRadius: theme.radii.control,
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 56,
-    paddingHorizontal: 18
-  },
-  saveButtonDisabled: {
-    backgroundColor: 'rgba(42,39,34,0.18)'
-  },
-  saveButtonText: {
-    color: '#FFFFFF',
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 16,
-    fontWeight: '600'
-  },
-  sectionStack: {
+  progressRow: {
     flexDirection: 'row',
-    gap: 18
+    gap: 5,
+    marginTop: 7
   },
-  sectionStackCompact: {
-    flexDirection: 'column'
+  readoutDot: {
+    borderRadius: 3,
+    height: 9,
+    width: 9
   },
-  splitAvatar: {
+  readoutMember: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.72)',
-    borderRadius: 20,
-    borderWidth: 1.5,
-    height: 40,
-    justifyContent: 'center',
-    width: 40
-  },
-  splitAvatarText: {
-    fontFamily: fontFamilies.bold,
-    fontSize: 18,
-    fontWeight: '700'
-  },
-  splitCard: {
-    gap: 12,
-    padding: 18
-  },
-  splitInput: {
-    flex: 1,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: 0,
-    minHeight: 42,
-    paddingVertical: 0,
-    textAlign: 'right'
-  },
-  splitInputPrefix: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoSemiBold,
-    fontSize: 17,
-    fontWeight: '600'
-  },
-  splitInputShell: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.86)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.control,
-    borderWidth: 1,
-    flex: 0.72,
     flexDirection: 'row',
     gap: 6,
-    maxWidth: 190,
-    minWidth: 126,
-    paddingHorizontal: 12
-  },
-  splitMember: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 10,
+    maxWidth: '48%',
     minWidth: 0
   },
-  splitName: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 16,
-    fontWeight: '600'
+  readoutName: {
+    color: colors.muted,
+    flexShrink: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 12,
+    fontWeight: '700'
   },
-  splitRow: {
+  readoutPct: {
+    color: INK,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 12,
+    fontWeight: '800'
+  },
+  row: {
     alignItems: 'center',
-    borderBottomColor: colors.line,
-    borderBottomWidth: 1,
     flexDirection: 'row',
-    gap: 10,
-    minHeight: 64,
-    paddingVertical: 8
+    height: 50,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16
   },
-  splitRows: {
-    borderColor: colors.line,
-    borderRadius: theme.radii.surface,
-    borderWidth: 1,
-    overflow: 'hidden',
+  rowLabel: {
+    color: MUTED,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 1.5
+  },
+  rowLabelActive: {
+    color: ACCENT
+  },
+  rowLeft: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 11
+  },
+  rowPressed: {
+    backgroundColor: 'rgba(42,39,34,0.02)'
+  },
+  rowRight: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 1,
+    gap: 8,
+    justifyContent: 'flex-end',
+    minWidth: 0
+  },
+  rowValue: {
+    color: INK,
+    flexShrink: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 14.5,
+    fontWeight: '700'
+  },
+  sideBar: {
+    backgroundColor: '#D8CEBF',
+    borderRadius: 99,
+    height: 13,
+    width: 5
+  },
+  sideBarActive: {
+    backgroundColor: ACCENT,
+    height: 20
+  },
+  splitReadout: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 9
+  },
+  splitScale: {
+    marginTop: 6,
+    paddingHorizontal: 1
+  },
+  splitScaleLabel: {
+    color: '#B0A698',
+    flex: 1,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 8,
+    fontWeight: '700',
+    lineHeight: 10,
+    textAlign: 'center'
+  },
+  splitScaleLabels: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginHorizontal: -11,
+    marginTop: 2
+  },
+  splitScaleTick: {
+    backgroundColor: 'rgba(42,39,34,0.18)',
+    borderRadius: 1,
+    height: 5,
+    width: 1
+  },
+  splitScaleTickMajor: {
+    backgroundColor: 'rgba(42,39,34,0.34)',
+    height: 11,
+    width: 1.5
+  },
+  splitScaleTicks: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 11
+  },
+  stack: {
+    alignSelf: 'center',
+    gap: 9,
+    maxWidth: 480,
+    paddingHorizontal: 16,
+    paddingTop: 2,
+    width: '100%'
+  },
+  stackCompact: {
     paddingHorizontal: 12
   },
-  totalAmount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoSemiBold,
-    fontSize: 19,
+  tagChip: {
+    alignItems: 'center',
+    borderColor: 'rgba(42,39,34,0.16)',
+    borderRadius: theme.radii.pill,
+    borderWidth: 1,
+    minHeight: 34,
+    paddingHorizontal: 15,
+    paddingVertical: 8
+  },
+  tagText: {
+    color: '#7A7064',
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 13,
     fontWeight: '600'
   },
-  totalLabel: {
-    color: colors.ink,
-    fontFamily: fontFamilies.regular,
-    fontSize: 18
+  tagTextSelected: {
+    color: '#FFFFFF',
+    fontFamily: fontFamilies.bold,
+    fontWeight: '700'
   },
-  totalRow: {
+  tagWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7
+  },
+  titleKicker: {
+    color: INK,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    lineHeight: 20
+  },
+  weekGrid: {
+    flexDirection: 'row',
+    gap: 5
+  },
+  weekHeader: {
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between'
+    justifyContent: 'space-between',
+    marginBottom: 11
   },
-  twoColumnRow: {
+  weekLabel: {
+    color: colors.muted,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 11,
+    fontWeight: '700',
+    minWidth: 62,
+    textAlign: 'center'
+  },
+  weekNav: {
+    alignItems: 'center',
     flexDirection: 'row',
-    gap: 18
+    gap: 10
   },
-  twoColumnRowCompact: {
-    flexDirection: 'column'
+  weekNavButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.05)',
+    borderRadius: 8,
+    height: 26,
+    justifyContent: 'center',
+    width: 26
+  },
+  weekNavButtonDisabled: {
+    opacity: 0.45
+  },
+  wheel: {
+    flex: 1,
+    height: 230,
+    overflow: 'hidden',
+    position: 'relative'
+  },
+  wheelBand: {
+    backgroundColor: 'rgba(42,39,34,0.05)',
+    borderRadius: 12,
+    height: 46,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 92
+  },
+  wheelFade: {
+    height: WHEEL_CENTER_INSET,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    zIndex: 2
+  },
+  wheelFadeBottom: {
+    backgroundColor: 'rgba(239,233,223,0.90)',
+    bottom: 0,
+    opacity: 0.8
+  },
+  wheelFadeTop: {
+    backgroundColor: 'rgba(239,233,223,0.90)',
+    opacity: 0.8,
+    top: 0
+  },
+  wheelLabel: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 11,
+    width: 116
+  },
+  wheelOption: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    height: 46,
+    paddingLeft: 12,
+    paddingRight: 8
+  },
+  wheelOptionText: {
+    color: '#8A8073',
+    flex: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 15,
+    fontWeight: '600'
+  },
+  wheelScrollContent: {
+    paddingBottom: WHEEL_CENTER_INSET,
+    paddingTop: WHEEL_CENTER_INSET
+  },
+  wheelScroller: {
+    flex: 1
+  },
+  wheelWrap: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 8
   }
 });

@@ -1,5 +1,14 @@
 import { buildUserColorMap, DEFAULT_USER_COLOR, OTHER_CATEGORY_COLOR } from './entityColors';
-import { categoryColor, categoryLabel, PRIMARY_CATEGORIES, resolveCategory, type PrimaryCategoryId } from './categorySystem';
+import {
+  categoryColor,
+  categoryIconName,
+  categoryLabel,
+  getPrimaryCategory,
+  PRIMARY_CATEGORIES,
+  resolveCategory,
+  type CategoryIconName,
+  type PrimaryCategoryId
+} from './categorySystem';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, todayDateString } from './format';
 import type { Expense, LedgerMemberProfile, RecurringExpenseRule } from '../types/database';
 
@@ -10,6 +19,7 @@ export type CategoryStat = {
   amountYen: number;
   percentage: number;
   color: string;
+  detailKey: string;
   sourceCategories?: string[];
 };
 
@@ -47,6 +57,63 @@ type ComparisonStat = {
   percentage: number | null;
   direction: 'under' | 'over' | 'same';
   label: string;
+};
+
+export type AmountComparisonDirection = 'new' | 'over' | 'same' | 'under';
+
+export type AmountComparisonStat = {
+  deltaYen: number;
+  direction: AmountComparisonDirection;
+  label: string;
+  percentage: number | null;
+  previousAmountYen: number;
+};
+
+export type CategoryDetailBreakdownKind = 'category' | 'subcategory';
+
+export type CategoryDetailBreakdownItem = {
+  amountYen: number;
+  color: string;
+  icon: CategoryIconName;
+  key: string;
+  label: string;
+  percentage: number;
+};
+
+export type CategoryDetailDailyStat = {
+  amountYen: number;
+  date: string;
+  isPeak: boolean;
+  label: string;
+};
+
+export type CategoryDetailMemberSplit = {
+  amountYen: number;
+  color: string;
+  percentage: number;
+  userId: string;
+};
+
+export type CategoryDetailStat = {
+  amountYen: number;
+  averagePerDayYen: number;
+  breakdown: CategoryDetailBreakdownItem[];
+  breakdownKind: CategoryDetailBreakdownKind;
+  category: string;
+  color: string;
+  comparison: AmountComparisonStat;
+  daily: CategoryDetailDailyStat[];
+  detailKey: string;
+  icon: CategoryIconName;
+  memberSplits: CategoryDetailMemberSplit[];
+  shareOfTotal: number;
+  sourceCategories: string[];
+  topDay: {
+    amountYen: number;
+    date: string | null;
+    label: string;
+  };
+  transactions: number;
 };
 
 export type DashboardPeriodNavigation = {
@@ -134,13 +201,15 @@ type DashboardStats = {
 };
 
 export type DashboardPeriodStats = DashboardStats & {
+  categoryDetails: CategoryDetailStat[];
   dailyUserSeries: DailyUserStat[];
   comparison: ComparisonStat;
   dateRange: DashboardDateRange;
+  getCategoryDetail: (detailKey: string | null | undefined) => CategoryDetailStat | null;
   memberTotals: MemberPeriodStat[];
 };
 
-const DASHBOARD_CATEGORY_LIMIT = 5;
+const DASHBOARD_CATEGORY_LIMIT = 6;
 const DASHBOARD_OTHER_CATEGORY_COLOR = OTHER_CATEGORY_COLOR;
 
 const monthFormatter = new Intl.DateTimeFormat('en', {
@@ -307,7 +376,7 @@ function resolveMonthDateRange(monthKey: string): DashboardDateRange {
     comparisonStartDateString: comparisonStartString,
     comparisonEndDateString: comparisonEndString,
     label: formatMonthLabel(effectiveMonthKey),
-    comparisonLabel: `less than ${formatShortMonthLabel(comparisonMonthKey)}`
+    comparisonLabel: `vs ${formatShortMonthLabel(comparisonMonthKey)}`
   };
 }
 
@@ -362,20 +431,36 @@ export function buildDashboardPeriodStats(input: {
     endDateString: dateRange.endDateString,
     userIds
   });
-
-  return {
+  const categories = buildDashboardCategoryStats({
+    expenses: periodExpenses,
+    totalYen
+  });
+  const categoryDetailInput = {
+    categories,
+    comparisonExpenses,
+    currentUserId: input.currentUserId,
+    dateRange,
+    otherUserId: input.otherUserId,
+    periodExpenses,
+    today: input.today,
+    totalYen
+  };
+  const stats = {
     totalYen,
     count: periodExpenses.length,
-    categories: buildDashboardCategoryStats({
-      expenses: periodExpenses,
-      totalYen
-    }),
+    categories,
     dailySeries: buildDailySeries(dateRange.effectiveMonthKey, dateRange.endDateString, amountsByDate(periodExpenses)),
     dailyUserSeries,
     comparison: buildComparisonStat(totalYen, previousTotalYen, dateRange.comparisonLabel),
     dateRange,
+    getCategoryDetail: (detailKey: string | null | undefined) => buildDashboardCategoryDetail(categoryDetailInput, detailKey),
     memberTotals
   };
+
+  return Object.defineProperty(stats, 'categoryDetails', {
+    enumerable: true,
+    get: () => buildDashboardCategoryDetails(categoryDetailInput)
+  }) as DashboardPeriodStats;
 }
 
 export function buildDashboardHeatDays(input: {
@@ -648,9 +733,209 @@ function buildDashboardCategoryStats(input: {
       color: index === DASHBOARD_CATEGORY_LIMIT - 1 && shouldAggregateOther
         ? DASHBOARD_OTHER_CATEGORY_COLOR
         : categoryColor(categoryId),
+      detailKey: detailKeyForSourceCategories(sourceCategories),
       sourceCategories
     };
   });
+}
+
+type DashboardCategoryDetailInput = {
+  categories: CategoryStat[];
+  comparisonExpenses: Expense[];
+  currentUserId: string | null;
+  dateRange: DashboardDateRange;
+  otherUserId: string | null;
+  periodExpenses: Expense[];
+  today?: Date | string;
+  totalYen: number;
+};
+
+type DashboardCategoryDetailContext = {
+  dates: string[];
+  denominatorDays: number;
+  userColorById: Map<string, string>;
+  userIds: string[];
+};
+
+function buildDashboardCategoryDetails(input: DashboardCategoryDetailInput): CategoryDetailStat[] {
+  const context = createDashboardCategoryDetailContext(input);
+  return input.categories.map((category) => buildDashboardCategoryDetailForCategory(input, context, category));
+}
+
+function buildDashboardCategoryDetail(
+  input: DashboardCategoryDetailInput,
+  detailKey: string | null | undefined
+): CategoryDetailStat | null {
+  if (!detailKey) {
+    return null;
+  }
+
+  const category = input.categories.find((item) => item.detailKey === detailKey);
+  if (!category) {
+    return null;
+  }
+
+  return buildDashboardCategoryDetailForCategory(
+    input,
+    createDashboardCategoryDetailContext(input),
+    category
+  );
+}
+
+function createDashboardCategoryDetailContext(input: DashboardCategoryDetailInput): DashboardCategoryDetailContext {
+  const userIds = [input.currentUserId, input.otherUserId].filter((userId): userId is string => Boolean(userId));
+  return {
+    dates: dateStringsInRange(input.dateRange.startDateString, input.dateRange.endDateString),
+    denominatorDays: dashboardAverageDayCount(input.dateRange, input.today),
+    userColorById: buildUserColorMap(userIds, input.currentUserId),
+    userIds
+  };
+}
+
+function buildDashboardCategoryDetailForCategory(
+  input: DashboardCategoryDetailInput,
+  context: DashboardCategoryDetailContext,
+  category: CategoryStat
+): CategoryDetailStat {
+  const sourceCategories = category.sourceCategories?.length
+    ? category.sourceCategories
+    : [resolveCategory({ category: category.category }).categoryId];
+  const sourceCategorySet = new Set(sourceCategories);
+  const categoryExpenses = input.periodExpenses.filter((expense) => sourceCategorySet.has(expenseCategoryId(expense)));
+  const previousAmountYen = input.comparisonExpenses
+    .filter((expense) => sourceCategorySet.has(expenseCategoryId(expense)))
+    .reduce((sum, expense) => sum + expense.amount_yen, 0);
+  const dailyAmountsByDate = amountsByDate(categoryExpenses);
+  const peakAmountYen = Math.max(0, ...context.dates.map((date) => dailyAmountsByDate.get(date) || 0));
+  const peakDate = context.dates.find((date) => (dailyAmountsByDate.get(date) || 0) === peakAmountYen && peakAmountYen > 0) || null;
+  const memberSplits = context.userIds.map((userId) => {
+    const amountYen = categoryExpenses.reduce((sum, expense) => sum + amountForUser(expense, userId), 0);
+    return {
+      amountYen,
+      color: context.userColorById.get(userId) || DEFAULT_USER_COLOR,
+      percentage: category.amountYen > 0 ? (amountYen / category.amountYen) * 100 : 0,
+      userId
+    };
+  });
+  const isAggregate = sourceCategories.length > 1;
+
+  return {
+    amountYen: category.amountYen,
+    averagePerDayYen: Math.round(category.amountYen / context.denominatorDays),
+    breakdown: isAggregate
+      ? buildCategoryBreakdown(categoryExpenses, sourceCategories, category.amountYen)
+      : buildSubcategoryBreakdown(categoryExpenses, sourceCategories[0], category.amountYen),
+    breakdownKind: isAggregate ? 'category' : 'subcategory',
+    category: category.category,
+    color: category.color,
+    comparison: buildAmountComparison(category.amountYen, previousAmountYen),
+    daily: context.dates.map((date) => {
+      const amountYen = dailyAmountsByDate.get(date) || 0;
+      return {
+        amountYen,
+        date,
+        isPeak: peakAmountYen > 0 && amountYen === peakAmountYen,
+        label: String(Number(date.slice(8, 10)))
+      };
+    }),
+    detailKey: category.detailKey,
+    icon: categoryIconName(sourceCategories.length === 1 ? sourceCategories[0] : 'other'),
+    memberSplits,
+    shareOfTotal: input.totalYen > 0 ? (category.amountYen / input.totalYen) * 100 : 0,
+    sourceCategories,
+    topDay: {
+      amountYen: peakAmountYen,
+      date: peakDate,
+      label: peakDate ? String(Number(peakDate.slice(8, 10))) : '--'
+    },
+    transactions: categoryExpenses.length
+  };
+}
+
+function buildSubcategoryBreakdown(
+  expenses: Expense[],
+  categoryId: string,
+  totalYen: number
+): CategoryDetailBreakdownItem[] {
+  const amountsBySubcategory = new Map<string, number>();
+  const category = getPrimaryCategory(categoryId);
+  const presetOrder = new Map<string, number>(category.subcategories.map((subcategory, index) => [subcategory, index]));
+
+  for (const expense of expenses) {
+    const resolved = resolveCategory({
+      category: expense.category,
+      categoryId: expense.category_id,
+      subcategory: expense.subcategory
+    });
+    const label = resolved.subcategory || 'Uncategorized';
+    amountsBySubcategory.set(label, (amountsBySubcategory.get(label) || 0) + expense.amount_yen);
+  }
+
+  return [...amountsBySubcategory.entries()]
+    .sort((a, b) => {
+      const aOrder = presetOrder.get(a[0]) ?? Number.POSITIVE_INFINITY;
+      const bOrder = presetOrder.get(b[0]) ?? Number.POSITIVE_INFINITY;
+      if (aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+      return b[1] - a[1] || a[0].localeCompare(b[0]);
+    })
+    .map(([label, amountYen]) => ({
+      amountYen,
+      color: category.color,
+      icon: category.icon,
+      key: label,
+      label,
+      percentage: totalYen > 0 ? (amountYen / totalYen) * 100 : 0
+    }));
+}
+
+function buildCategoryBreakdown(
+  expenses: Expense[],
+  sourceCategories: string[],
+  totalYen: number
+): CategoryDetailBreakdownItem[] {
+  const amountsByCategory = new Map<string, number>();
+  for (const expense of expenses) {
+    const categoryId = expenseCategoryId(expense);
+    amountsByCategory.set(categoryId, (amountsByCategory.get(categoryId) || 0) + expense.amount_yen);
+  }
+
+  return sourceCategories
+    .map((categoryId) => ({
+      amountYen: amountsByCategory.get(categoryId) || 0,
+      category: getPrimaryCategory(categoryId)
+    }))
+    .filter((item) => item.amountYen > 0)
+    .map(({ amountYen, category }) => ({
+      amountYen,
+      color: category.color,
+      icon: category.icon,
+      key: category.id,
+      label: category.label,
+      percentage: totalYen > 0 ? (amountYen / totalYen) * 100 : 0
+    }));
+}
+
+function detailKeyForSourceCategories(sourceCategories: string[]) {
+  return sourceCategories.length === 1
+    ? sourceCategories[0]
+    : `aggregate:${sourceCategories.join('+')}`;
+}
+
+function dashboardAverageDayCount(dateRange: DashboardDateRange, today?: Date | string) {
+  const todayString = typeof today === 'string'
+    ? today
+    : today
+      ? formatDateString(startOfDay(today))
+      : todayDateString(DEFAULT_LEDGER_TIME_ZONE);
+  const clampedEndString = todayString < dateRange.startDateString
+    ? dateRange.startDateString
+    : todayString > dateRange.endDateString
+      ? dateRange.endDateString
+      : todayString;
+
+  return Math.max(1, daysBetween(parseDateString(dateRange.startDateString), parseDateString(clampedEndString)) + 1);
 }
 
 function buildReceiptLine(
@@ -674,25 +959,47 @@ function buildReceiptLine(
   };
 }
 
-function receiptMom(amountYen: number, previousAmountYen: number): { direction: ReceiptMomDirection; label: string } {
+function receiptMom(
+  amountYen: number,
+  previousAmountYen: number
+): { direction: ReceiptMomDirection; label: string; percentage: number | null } {
   if (previousAmountYen === 0 && amountYen === 0) {
-    return { direction: 'flat', label: '—' };
+    return { direction: 'flat', label: '—', percentage: null };
   }
 
   if (previousAmountYen === 0) {
-    return { direction: 'new', label: 'NEW' };
+    return { direction: 'new', label: 'NEW', percentage: null };
   }
 
   const percentage = Math.round(((amountYen - previousAmountYen) / previousAmountYen) * 100);
   if (percentage > 0) {
-    return { direction: 'up', label: `+${percentage}%` };
+    return { direction: 'up', label: `+${percentage}%`, percentage };
   }
 
   if (percentage < 0) {
-    return { direction: 'down', label: `−${Math.abs(percentage)}%` };
+    return { direction: 'down', label: `−${Math.abs(percentage)}%`, percentage };
   }
 
-  return { direction: 'flat', label: '0%' };
+  return { direction: 'flat', label: '0%', percentage };
+}
+
+export function buildAmountComparison(amountYen: number, previousAmountYen: number): AmountComparisonStat {
+  const deltaYen = amountYen - previousAmountYen;
+  const mom = receiptMom(amountYen, previousAmountYen);
+  const directionByReceiptDirection: Record<ReceiptMomDirection, AmountComparisonDirection> = {
+    down: 'under',
+    flat: 'same',
+    new: 'new',
+    up: 'over'
+  };
+
+  return {
+    deltaYen,
+    direction: directionByReceiptDirection[mom.direction],
+    label: mom.label,
+    percentage: mom.percentage,
+    previousAmountYen
+  };
 }
 
 function createEmptyCategoryAmounts(): Record<PrimaryCategoryId, number> {

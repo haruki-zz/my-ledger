@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildAmountComparison,
   buildDashboardHeatDays,
   buildDashboardDailyUserSeriesForCategories,
   buildDashboardPeriodStats,
@@ -76,9 +77,11 @@ describe('primary category system', () => {
   });
 
   it('places beauty, hobby, and sports as primary category subcategory presets', () => {
+    const foodDining = PRIMARY_CATEGORIES.find((category) => category.id === 'food_dining');
     const entertainment = PRIMARY_CATEGORIES.find((category) => category.id === 'entertainment');
     const shopping = PRIMARY_CATEGORIES.find((category) => category.id === 'shopping');
 
+    expect(foodDining?.subcategories).toContain('Convenience');
     expect(entertainment?.subcategories).toEqual(expect.arrayContaining(['Hobby', 'Sports']));
     expect(shopping?.subcategories).toContain('Beauty & Salon');
   });
@@ -156,7 +159,8 @@ describe('resolveDashboardDateRange', () => {
       startDateString: '2026-06-01',
       endDateString: '2026-06-30',
       comparisonStartDateString: '2026-05-01',
-      comparisonEndDateString: '2026-05-31'
+      comparisonEndDateString: '2026-05-31',
+      comparisonLabel: 'vs May'
     });
   });
 
@@ -212,6 +216,13 @@ describe('resolveDashboardDateRange', () => {
 });
 
 describe('buildDashboardPeriodStats', () => {
+  it('formats amount comparison edge cases for category detail badges', () => {
+    expect(buildAmountComparison(0, 0)).toMatchObject({ direction: 'same', label: '—', percentage: null });
+    expect(buildAmountComparison(500, 0)).toMatchObject({ direction: 'new', label: 'NEW', percentage: null });
+    expect(buildAmountComparison(1500, 1000)).toMatchObject({ direction: 'over', label: '+50%', percentage: 50 });
+    expect(buildAmountComparison(500, 1000)).toMatchObject({ direction: 'under', label: '−50%', percentage: -50 });
+  });
+
   it('attributes shared splits and personal expenses to users', () => {
     const stats = buildStats('month', [
       expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-06-01', splits: [600, 400] }),
@@ -276,14 +287,15 @@ describe('buildDashboardPeriodStats', () => {
     expect(stats.dailyUserSeries[19].totalAmountYen).toBe(0);
   });
 
-  it('aggregates category rows as top four plus Other', () => {
+  it('aggregates category rows as top five plus Other', () => {
     const stats = buildStats('month', [
-      expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
-      expense({ amountYen: 500, category: 'Food & Dining', spentOn: '2026-06-01' }),
-      expense({ amountYen: 400, category: 'Transport', spentOn: '2026-06-01' }),
-      expense({ amountYen: 300, category: 'Utilities', spentOn: '2026-06-01' }),
-      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-01' }),
-      expense({ amountYen: 100, category: 'Travel', spentOn: '2026-06-01' })
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-01' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-01' })
     ]);
 
     expect(stats.categories.map((category) => category.category)).toEqual([
@@ -291,23 +303,25 @@ describe('buildDashboardPeriodStats', () => {
       'Food & Dining',
       'Transport',
       'Utilities',
+      'Shopping',
       'Other'
     ]);
-    expect(stats.categories[4]).toMatchObject({
+    expect(stats.categories[5]).toMatchObject({
       amountYen: 300,
-      percentage: expect.closeTo(14.285, 2),
-      sourceCategories: ['shopping', 'travel']
+      percentage: expect.closeTo(10.714, 2),
+      sourceCategories: ['travel', 'healthcare']
     });
   });
 
   it('keeps daily series scoped to aggregated Other source categories', () => {
     const expenses = [
-      expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
-      expense({ amountYen: 500, category: 'Food & Dining', spentOn: '2026-06-01' }),
-      expense({ amountYen: 400, category: 'Transport', spentOn: '2026-06-01' }),
-      expense({ amountYen: 300, category: 'Utilities', spentOn: '2026-06-01' }),
-      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-02' }),
-      expense({ amountYen: 100, category: 'Travel', spentOn: '2026-06-03' })
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-02' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' })
     ];
     const stats = buildStats('month', expenses);
     const other = stats.categories.find((category) => category.category === 'Other');
@@ -323,15 +337,102 @@ describe('buildDashboardPeriodStats', () => {
     expect(series.slice(0, 3).map((day) => day.totalAmountYen)).toEqual([0, 200, 100]);
   });
 
+  it('builds category detail stats that reconcile with the donut row', () => {
+    const stats = buildStats('month', [
+      expense({ amountYen: 900, category: 'Food & Dining', spentOn: '2026-06-01', subcategory: 'Groceries' }),
+      expense({ amountYen: 300, category: 'Food & Dining', spentOn: '2026-06-03', subcategory: 'Restaurant' }),
+      expense({ amountYen: 800, category: 'Transport', spentOn: '2026-06-02' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-05-02' })
+    ]);
+    const foodRow = stats.categories.find((category) => category.category === 'Food & Dining');
+    const foodDetail = stats.categoryDetails.find((detail) => detail.detailKey === foodRow?.detailKey);
+
+    expect(foodRow).toMatchObject({ amountYen: 1200, detailKey: 'food_dining' });
+    expect(foodDetail).toMatchObject({
+      amountYen: 1200,
+      averagePerDayYen: 400,
+      breakdownKind: 'subcategory',
+      shareOfTotal: 60,
+      transactions: 2
+    });
+    expect(foodDetail?.comparison).toMatchObject({ direction: 'over', label: '+100%', previousAmountYen: 600 });
+    expect(foodDetail?.daily.slice(0, 3).map((day) => day.amountYen)).toEqual([900, 0, 300]);
+    expect(foodDetail?.topDay).toMatchObject({ amountYen: 900, date: '2026-06-01' });
+  });
+
+  it('uses resolved legacy category text in subcategory details', () => {
+    const stats = buildStats('month', [
+      expense({ amountYen: 1000, category: 'Rent', categoryId: null, spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Pet Supplies', categoryId: null, spentOn: '2026-06-02' })
+    ]);
+    const housing = stats.categoryDetails.find((detail) => detail.detailKey === 'housing');
+    const other = stats.categoryDetails.find((detail) => detail.detailKey === 'other');
+
+    expect(housing?.breakdown).toEqual([
+      expect.objectContaining({ amountYen: 1000, label: 'Rent' })
+    ]);
+    expect(other?.breakdown).toEqual([
+      expect.objectContaining({ amountYen: 400, label: 'Pet Supplies' })
+    ]);
+  });
+
+  it('uses a by-category breakdown for aggregated Other details', () => {
+    const stats = buildStats('month', [
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-02' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' }),
+      expense({ amountYen: 150, category: 'Travel', spentOn: '2026-05-03' })
+    ]);
+    const otherRow = stats.categories.find((category) => category.category === 'Other');
+    const otherDetail = stats.categoryDetails.find((detail) => detail.detailKey === otherRow?.detailKey);
+
+    expect(otherRow).toMatchObject({
+      amountYen: 300,
+      sourceCategories: ['travel', 'healthcare']
+    });
+    expect(otherDetail).toMatchObject({
+      breakdownKind: 'category',
+      sourceCategories: ['travel', 'healthcare']
+    });
+    expect(otherDetail?.breakdown.map((item) => [item.label, item.amountYen])).toEqual([
+      ['Travel', 200],
+      ['Healthcare', 100]
+    ]);
+    expect(otherDetail?.comparison).toMatchObject({ direction: 'over', label: '+100%', previousAmountYen: 150 });
+  });
+
+  it('builds single-user category split details', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 700, category: 'Utilities', ownership: 'personal', paidBy: CURRENT_USER_ID, spentOn: '2026-06-02' })
+      ],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: null,
+      today: '2026-06-03'
+    });
+    const detail = stats.categoryDetails.find((category) => category.detailKey === 'utilities');
+
+    expect(detail?.memberSplits).toEqual([
+      expect.objectContaining({ amountYen: 700, percentage: 100, userId: CURRENT_USER_ID })
+    ]);
+  });
+
   it('merges an existing Other category into the aggregated Other row', () => {
     const stats = buildStats('month', [
-      expense({ amountYen: 600, category: 'Housing', spentOn: '2026-06-01' }),
-      expense({ amountYen: 500, category: 'Food & Dining', spentOn: '2026-06-01' }),
-      expense({ amountYen: 400, category: 'Transport', spentOn: '2026-06-01' }),
-      expense({ amountYen: 300, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+      expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+      expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+      expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+      expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-02' }),
       expense({ amountYen: 250, category: 'Other', spentOn: '2026-06-02' }),
-      expense({ amountYen: 200, category: 'Shopping', spentOn: '2026-06-02' }),
-      expense({ amountYen: 100, category: 'Travel', spentOn: '2026-06-03' })
+      expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-03' }),
+      expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' })
     ]);
 
     expect(stats.categories.map((category) => category.category)).toEqual([
@@ -339,11 +440,12 @@ describe('buildDashboardPeriodStats', () => {
       'Food & Dining',
       'Transport',
       'Utilities',
+      'Shopping',
       'Other'
     ]);
-    expect(stats.categories[4]).toMatchObject({
+    expect(stats.categories[5]).toMatchObject({
       amountYen: 550,
-      sourceCategories: ['shopping', 'travel', 'other']
+      sourceCategories: ['travel', 'healthcare', 'other']
     });
   });
 
@@ -672,12 +774,14 @@ function ledgerMembers(): LedgerMemberProfile[] {
 function expense(input: {
   amountYen: number;
   category: string;
+  categoryId?: string | null;
   ownership?: 'personal' | 'shared';
   paidBy?: string;
   recurringMonth?: string;
   recurringRuleId?: string;
   spentOn: string;
   splits?: [number, number];
+  subcategory?: string | null;
 }): Expense {
   const ownership = input.ownership || 'shared';
   const paidBy = input.paidBy || CURRENT_USER_ID;
@@ -688,8 +792,8 @@ function expense(input: {
     ledger_id: 'ledger-1',
     amount_yen: input.amountYen,
     category: input.category,
-    category_id: mapLegacyCategoryToId(input.category),
-    subcategory: null,
+    category_id: input.categoryId === undefined ? mapLegacyCategoryToId(input.category) : input.categoryId,
+    subcategory: input.subcategory === undefined ? null : input.subcategory,
     recurring_rule_id: input.recurringRuleId || null,
     recurring_month: input.recurringMonth || null,
     paid_by: paidBy,

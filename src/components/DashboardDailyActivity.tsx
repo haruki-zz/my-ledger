@@ -4,19 +4,22 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
-  type LayoutChangeEvent
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent
 } from 'react-native';
 
-import { BentoCard, IconButton } from '@/src/components/ui';
+import { DashboardModule } from '@/src/components/DashboardModule';
 import { colors, fontFamilies } from '@/src/components/styles';
-import { heatLevelForAmount, type HeatDay } from '@/src/lib/stats';
 import { formatYen } from '@/src/lib/format';
+import { heatLevelForAmount, type HeatDay } from '@/src/lib/stats';
 
-type DailyActivityHeatmapProps = {
+type DashboardDailyActivityProps = {
   days: HeatDay[];
   monthKey: string;
   onViewHistoryDate: (date: string) => void;
@@ -45,26 +48,34 @@ const SCREEN_MARGIN = 8;
 const CARD_CLAMP_INSET = 6;
 const HEAT_COLORS = [
   'rgba(42,39,34,0.05)',
-  'rgba(192,137,46,0.22)',
-  'rgba(192,137,46,0.46)',
-  'rgba(176,122,30,0.74)',
+  'rgba(192,137,46,0.20)',
+  'rgba(192,137,46,0.42)',
+  'rgba(176,122,30,0.70)',
   '#8A5A12'
 ] as const;
-const HEAT_TEXT_COLORS = ['#9A8F80', '#6B5A38', '#5A4A2A', '#FFFFFF', '#FFFFFF'] as const;
+const HEAT_TEXT_COLORS = ['#C7BDAE', '#8A7A55', '#6B5A30', '#FFFDF7', '#FFFDF7'] as const;
+const STRIP_GAP = 5;
+const STRIP_TARGET_CELL_WIDTH = 30;
+const STRIP_MIN_CELL_WIDTH = 28;
 
-export function DailyActivityHeatmap({
+export function DashboardDailyActivity({
   days,
   monthKey,
   onViewHistoryDate,
   todayString
-}: DailyActivityHeatmapProps) {
+}: DashboardDailyActivityProps) {
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const stripRef = useRef<ScrollView | null>(null);
+  const stripSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stripProgrammaticSettle = useRef(false);
   const cardRef = useRef<View | null>(null);
   const cellRefs = useRef<Record<string, View | null>>({});
+  const [open, setOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<HeatDay | null>(null);
   const [selectedCellRect, setSelectedCellRect] = useState<Rect | null>(null);
   const [cardRect, setCardRect] = useState<Rect | null>(null);
   const [popoverHeight, setPopoverHeight] = useState(POPOVER_ESTIMATED_HEIGHT);
+  const [stripViewportWidth, setStripViewportWidth] = useState(0);
   const todayMonthKey = todayString.slice(0, 7);
   const isSelectedMonthCurrent = monthKey === todayMonthKey;
   const maxAmount = useMemo(
@@ -79,18 +90,22 @@ export function DailyActivityHeatmap({
       ), null),
     [days, monthKey, todayString]
   );
-  const leadingEmptyCount = monthKey ? mondayFirstColumn(monthKey) : 0;
-  const gridRows = useMemo(() => {
-    const items: (HeatDay | null)[] = [
-      ...Array.from({ length: leadingEmptyCount }, () => null),
-      ...days
-    ];
-    const rows: (HeatDay | null)[][] = [];
-    for (let index = 0; index < items.length; index += 7) {
-      rows.push(items.slice(index, index + 7));
+  const gridRows = useMemo(() => buildMonthGrid(days, monthKey), [days, monthKey]);
+  const stripMetrics = useMemo(() => {
+    if (stripViewportWidth <= 0) {
+      return {
+        cellWidth: STRIP_TARGET_CELL_WIDTH,
+        snapInterval: STRIP_TARGET_CELL_WIDTH + STRIP_GAP
+      };
     }
-    return rows.map((row) => row.length < 7 ? [...row, ...Array.from({ length: 7 - row.length }, () => null)] : row);
-  }, [days, leadingEmptyCount]);
+
+    const visibleCount = Math.max(1, Math.floor((stripViewportWidth + STRIP_GAP) / (STRIP_MIN_CELL_WIDTH + STRIP_GAP)));
+    const cellWidth = (stripViewportWidth - STRIP_GAP * Math.max(0, visibleCount - 1)) / visibleCount;
+    return {
+      cellWidth,
+      snapInterval: cellWidth + STRIP_GAP
+    };
+  }, [stripViewportWidth]);
   const popoverPosition = selectedCellRect
     ? computePopoverPosition({
         cardRect,
@@ -101,6 +116,20 @@ export function DailyActivityHeatmap({
       })
     : null;
   const cardMeasurementProps = Platform.OS === 'web' ? {} : { collapsable: false };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      stripRef.current?.scrollToEnd({ animated: false });
+    }, 80);
+
+    return () => clearTimeout(timer);
+  }, [days, monthKey, stripMetrics.snapInterval]);
+
+  useEffect(() => () => {
+    if (stripSettleTimer.current) {
+      clearTimeout(stripSettleTimer.current);
+    }
+  }, []);
 
   useEffect(() => {
     if (!selectedDay) {
@@ -155,85 +184,183 @@ export function DailyActivityHeatmap({
     closePopover();
   }
 
+  function handleStripLayout(event: LayoutChangeEvent) {
+    const nextWidth = event.nativeEvent.layout.width;
+    if (nextWidth <= 0) {
+      return;
+    }
+
+    setStripViewportWidth((current) => Math.abs(current - nextWidth) > 1 ? nextWidth : current);
+  }
+
+  function settleStrip(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    if (stripProgrammaticSettle.current) {
+      stripProgrammaticSettle.current = false;
+      return;
+    }
+
+    const interval = stripMetrics.snapInterval;
+    if (interval <= 0) {
+      return;
+    }
+
+    const rawOffset = event.nativeEvent.contentOffset.x;
+    const nextOffset = Math.max(0, Math.round(rawOffset / interval) * interval);
+    if (Math.abs(nextOffset - rawOffset) > 0.5) {
+      if (stripSettleTimer.current) {
+        clearTimeout(stripSettleTimer.current);
+      }
+      stripSettleTimer.current = setTimeout(() => {
+        stripProgrammaticSettle.current = true;
+        stripRef.current?.scrollTo({ animated: true, x: nextOffset });
+        stripSettleTimer.current = null;
+      }, 140);
+    }
+  }
+
+  function settleStripAfterDrag(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    const velocityX = event.nativeEvent.velocity?.x || 0;
+    if (Math.abs(velocityX) > 0.05) {
+      return;
+    }
+
+    settleStrip(event);
+  }
+
   return (
-    <BentoCard style={localStyles.card}>
-      <View ref={cardRef} {...cardMeasurementProps} style={localStyles.cardInner}>
-        <View style={localStyles.header}>
-          <View style={localStyles.titleRow}>
-            <Ionicons color={colors.primary} name="grid-outline" size={16} />
-            <Text style={localStyles.title}>Daily Activity</Text>
+    <>
+      <DashboardModule
+        detail={
+          <View ref={cardRef} {...cardMeasurementProps} style={localStyles.detail}>
+            <View style={localStyles.weekdayHeader}>
+              {WEEKDAY_LABELS.map((label, index) => (
+                <Text key={`${label}-${index}`} style={localStyles.weekdayText}>{label}</Text>
+              ))}
+            </View>
+
+            <View style={localStyles.grid}>
+              {gridRows.map((row, rowIndex) => (
+                <View key={`row-${rowIndex}`} style={localStyles.gridRow}>
+                  {row.map((day, columnIndex) => {
+                    if (!day) {
+                      return <View key={`empty-${rowIndex}-${columnIndex}`} style={localStyles.emptyCell} />;
+                    }
+
+                    const future = isSelectedMonthCurrent && day.date > todayString;
+                    const selected = selectedDay?.date === day.date;
+                    const level = heatLevelForAmount(day.amount, maxAmount);
+                    const isPeak = peakDay?.date === day.date && (peakDay?.amount || 0) > 0;
+                    const dayNumber = Number(day.date.slice(8, 10));
+
+                    return (
+                      <Pressable
+                        accessibilityLabel={`${formatFullDay(day.date)} ${formatYen(day.amount)}`}
+                        accessibilityRole="button"
+                        disabled={future}
+                        key={day.date}
+                        onPress={() => openPopover(day)}
+                        ref={(node) => {
+                          cellRefs.current[day.date] = node;
+                        }}
+                        style={({ pressed }) => [
+                          localStyles.cell,
+                          {
+                            backgroundColor: future ? 'transparent' : HEAT_COLORS[level],
+                            borderColor: future ? 'rgba(42,39,34,0.16)' : 'transparent',
+                            borderStyle: future ? 'dashed' : 'solid'
+                          },
+                          day.date === todayString && localStyles.todayCell,
+                          selected && localStyles.selectedCell,
+                          pressed && !future && localStyles.pressed
+                        ]}
+                      >
+                        <Text style={[
+                          localStyles.cellText,
+                          { color: future ? colors.subtle : HEAT_TEXT_COLORS[level] },
+                          future && localStyles.futureText
+                        ]}>
+                          {dayNumber}
+                        </Text>
+                        {isPeak ? (
+                          <View style={[
+                            localStyles.peakDot,
+                            level >= 3 && localStyles.peakDotLight
+                          ]} />
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
           </View>
-          <View style={localStyles.peakRow}>
-            <Ionicons color="#9A6A12" name="flame-outline" size={13} />
-            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.peakText}>
-              Peak <Text style={localStyles.peakDay}>{peakDay && peakDay.amount > 0 ? formatPeakDay(peakDay.date) : '--'}</Text>{' '}
-              <Text style={localStyles.peakAmount}>{formatYen(peakDay?.amount || 0)}</Text>
-            </Text>
+        }
+        footer={
+          <View style={localStyles.stripFooter}>
+            <Text style={localStyles.stripHint}>{formatMonthHint(monthKey)} · SWIPE</Text>
+            <View style={localStyles.heatLegend}>
+              <Text style={localStyles.scaleLabel}>less</Text>
+              {HEAT_COLORS.slice(1).map((color) => (
+                <View key={color} style={[localStyles.scaleDot, { backgroundColor: color }]} />
+              ))}
+              <Text style={localStyles.scaleLabel}>more</Text>
+            </View>
           </View>
-        </View>
-
-        <View style={localStyles.weekdayHeader}>
-          {WEEKDAY_LABELS.map((label, index) => (
-            <Text key={`${label}-${index}`} style={localStyles.weekdayText}>{label}</Text>
-          ))}
-        </View>
-
-        <View style={localStyles.grid}>
-          {gridRows.map((row, rowIndex) => (
-            <View key={`row-${rowIndex}`} style={localStyles.gridRow}>
-              {row.map((day, columnIndex) => {
-                if (!day) {
-                  return <View key={`empty-${rowIndex}-${columnIndex}`} style={localStyles.emptyCell} />;
-                }
-
+        }
+        onToggle={() => setOpen((current) => !current)}
+        open={open}
+        summary={
+          <View style={localStyles.summary}>
+            <ScrollView
+              horizontal
+              onLayout={handleStripLayout}
+              onMomentumScrollEnd={settleStrip}
+              onScrollEndDrag={settleStripAfterDrag}
+              ref={stripRef}
+              showsHorizontalScrollIndicator={false}
+              style={localStyles.stripViewport}
+              contentContainerStyle={localStyles.stripContent}
+            >
+              {days.map((day) => {
                 const future = isSelectedMonthCurrent && day.date > todayString;
-                const selected = selectedDay?.date === day.date;
                 const level = heatLevelForAmount(day.amount, maxAmount);
-                const isPeak = peakDay?.date === day.date && (peakDay?.amount || 0) > 0;
                 const dayNumber = Number(day.date.slice(8, 10));
-
                 return (
-                  <Pressable
-                    accessibilityLabel={`${formatFullDay(day.date)} ${formatYen(day.amount)}`}
-                    accessibilityRole="button"
-                    disabled={future}
+                  <View
                     key={day.date}
-                    onPress={() => openPopover(day)}
-                    ref={(node) => {
-                      cellRefs.current[day.date] = node;
-                    }}
-                    style={({ pressed }) => [
-                      localStyles.cell,
+                    style={[
+                      localStyles.stripCell,
                       {
                         backgroundColor: future ? 'transparent' : HEAT_COLORS[level],
-                        borderColor: future ? 'rgba(42,39,34,0.12)' : 'transparent',
+                        borderColor: future ? 'rgba(42,39,34,0.16)' : 'transparent',
                         borderStyle: future ? 'dashed' : 'solid'
                       },
-                      day.date === todayString && localStyles.todayCell,
-                      selected && localStyles.selectedCell,
-                      pressed && !future && localStyles.pressed
+                      { width: stripMetrics.cellWidth },
+                      day.date === todayString && localStyles.todayCell
                     ]}
                   >
                     <Text style={[
-                      localStyles.cellText,
+                      localStyles.stripCellText,
                       { color: future ? colors.subtle : HEAT_TEXT_COLORS[level] },
                       future && localStyles.futureText
                     ]}>
                       {dayNumber}
                     </Text>
-                    {isPeak ? (
-                      <View style={[
-                        localStyles.peakDot,
-                        level >= 3 && localStyles.peakDotLight
-                      ]} />
-                    ) : null}
-                  </Pressable>
+                  </View>
                 );
               })}
-            </View>
-          ))}
-        </View>
-      </View>
+            </ScrollView>
+          </View>
+        }
+        summaryStat={
+          <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.headerStat}>
+            peak <Text style={localStyles.headerGold}>{peakDay && peakDay.amount > 0 ? formatPeakDay(peakDay.date) : '--'}</Text>
+            {' · '}
+            <Text style={localStyles.headerStrong}>{formatYen(peakDay?.amount || 0)}</Text>
+          </Text>
+        }
+        title="Daily Activity"
+      />
 
       <Modal
         animationType="fade"
@@ -266,14 +393,14 @@ export function DailyActivityHeatmap({
                     {formatYen(selectedDay.amount)}
                   </Text>
                 </View>
-                <IconButton
+                <Pressable
                   accessibilityLabel="Close daily activity details"
-                  icon="close"
+                  accessibilityRole="button"
                   onPress={closePopover}
-                  size="sm"
-                  tone="neutral"
-                  variant="ghost"
-                />
+                  style={({ pressed }) => [localStyles.closeButton, pressed && localStyles.pressed]}
+                >
+                  <Ionicons color={colors.ink} name="close" size={18} />
+                </Pressable>
               </View>
 
               <View style={localStyles.categoryList}>
@@ -323,8 +450,22 @@ export function DailyActivityHeatmap({
           ) : null}
         </Pressable>
       </Modal>
-    </BentoCard>
+    </>
   );
+}
+
+function buildMonthGrid(days: HeatDay[], monthKey: string) {
+  const leadingEmptyCount = monthKey ? mondayFirstColumn(monthKey) : 0;
+  const items: (HeatDay | null)[] = [
+    ...Array.from({ length: leadingEmptyCount }, () => null),
+    ...days
+  ];
+  const rows: (HeatDay | null)[][] = [];
+  for (let index = 0; index < items.length; index += 7) {
+    const row = items.slice(index, index + 7);
+    rows.push(row.length < 7 ? [...row, ...Array.from({ length: 7 - row.length }, () => null)] : row);
+  }
+  return rows;
 }
 
 function computePopoverPosition(input: {
@@ -375,7 +516,7 @@ function parseDateString(dateString: string) {
 
 function formatPeakDay(dateString: string) {
   const date = parseDateString(dateString);
-  return `${new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date)} ${date.getDate()}`;
+  return `${new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase()} ${date.getDate()}`;
 }
 
 function formatFullDay(dateString: string) {
@@ -393,15 +534,12 @@ function formatPopoverDate(dateString: string) {
   return `${weekday} · ${month} ${date.getDate()}`;
 }
 
+function formatMonthHint(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(year, month - 1, 1)).toUpperCase();
+}
+
 const localStyles = StyleSheet.create({
-  card: {
-    borderRadius: 18,
-    gap: 13,
-    padding: 16
-  },
-  cardInner: {
-    gap: 13
-  },
   caret: {
     backgroundColor: colors.surface,
     borderColor: colors.glassBorder,
@@ -459,9 +597,21 @@ const localStyles = StyleSheet.create({
   },
   cellText: {
     fontFamily: fontFamilies.monoBold,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     lineHeight: 14
+  },
+  closeButton: {
+    alignItems: 'center',
+    borderRadius: 12,
+    height: 34,
+    justifyContent: 'center',
+    width: 34
+  },
+  detail: {
+    gap: 7,
+    paddingBottom: 16,
+    paddingHorizontal: 16
   },
   divider: {
     backgroundColor: colors.line,
@@ -487,11 +637,27 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 5
   },
-  header: {
+  headerGold: {
+    color: '#8A5A12',
+    fontFamily: fontFamilies.monoBold,
+    fontWeight: '700'
+  },
+  headerStat: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.mono,
+    fontSize: 10,
+    lineHeight: 14,
+    maxWidth: 168
+  },
+  headerStrong: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontWeight: '700'
+  },
+  heatLegend: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'space-between'
+    gap: 4
   },
   historyButton: {
     alignItems: 'center',
@@ -548,16 +714,6 @@ const localStyles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
-  peakAmount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontWeight: '700'
-  },
-  peakDay: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
-    fontWeight: '700'
-  },
   peakDot: {
     backgroundColor: colors.accent,
     borderRadius: 1.5,
@@ -570,21 +726,6 @@ const localStyles = StyleSheet.create({
   },
   peakDotLight: {
     backgroundColor: 'rgba(255,255,255,0.85)'
-  },
-  peakRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexShrink: 1,
-    gap: 6,
-    minWidth: 0
-  },
-  peakText: {
-    color: colors.muted,
-    flexShrink: 1,
-    fontFamily: fontFamilies.regular,
-    fontSize: 11,
-    lineHeight: 15,
-    minWidth: 0
   },
   popover: {
     backgroundColor: colors.surface,
@@ -622,38 +763,70 @@ const localStyles = StyleSheet.create({
   popoverTop: {
     alignItems: 'flex-start',
     flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between'
+    gap: 10
   },
   pressed: {
-    opacity: 0.76
+    opacity: 0.72
+  },
+  scaleDot: {
+    borderRadius: 2,
+    height: 9,
+    width: 9
+  },
+  scaleLabel: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.mono,
+    fontSize: 9,
+    lineHeight: 12
   },
   scrim: {
-    backgroundColor: 'rgba(42,39,34,0.10)',
     flex: 1
   },
   selectedCell: {
-    borderColor: colors.primary,
-    borderWidth: 2,
-    zIndex: 2
+    opacity: 0.86
   },
-  title: {
-    color: '#7A6F60',
-    fontFamily: fontFamilies.bold,
-    fontSize: 11.5,
+  stripCell: {
+    alignItems: 'center',
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 30,
+    justifyContent: 'center',
+    width: STRIP_TARGET_CELL_WIDTH
+  },
+  stripCellText: {
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 15,
-    textTransform: 'uppercase'
+    lineHeight: 14
   },
-  titleRow: {
+  stripContent: {
+    gap: STRIP_GAP,
+    paddingVertical: 3
+  },
+  stripFooter: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 7
+    justifyContent: 'space-between',
+    paddingBottom: 16,
+    paddingHorizontal: 16
+  },
+  stripHint: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.mono,
+    fontSize: 9,
+    letterSpacing: 0.5,
+    lineHeight: 12
+  },
+  stripViewport: {
+    marginHorizontal: 16,
+    overflow: 'hidden'
+  },
+  summary: {
+    paddingBottom: 8,
+    paddingTop: 8
   },
   todayCell: {
-    borderColor: colors.accent,
-    borderWidth: 2
+    boxShadow: '0 0 0 2px #C0892E'
   },
   weekdayHeader: {
     flexDirection: 'row',
@@ -665,7 +838,6 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.monoBold,
     fontSize: 9,
     fontWeight: '700',
-    letterSpacing: 0.5,
     lineHeight: 13,
     textAlign: 'center'
   }

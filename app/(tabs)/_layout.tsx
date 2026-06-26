@@ -314,6 +314,14 @@ function ResponsiveTabBar({
           type: 'tabPress'
         });
 
+        if (route.name === 'history' && !event.defaultPrevented) {
+          navigation.navigate({
+            name: route.name,
+            params: { resetToLedger: String(Date.now()) }
+          });
+          return;
+        }
+
         if (!focused && !event.defaultPrevented) {
           navigation.navigate(route.name);
         }
@@ -375,7 +383,7 @@ function ResponsiveTabBar({
       style={[
         localStyles.bottomTabShell,
         {
-          bottom: insets.bottom + 10
+          bottom: Math.max(4, insets.bottom - 4)
         }
       ]}
     >
