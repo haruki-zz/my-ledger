@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -13,7 +12,7 @@ import {
   View,
   type AccessibilityActionEvent
 } from 'react-native';
-import Svg, { Defs, LinearGradient, Pattern, Polygon, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, Pattern, Polygon, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles } from '@/src/components/styles';
@@ -443,66 +442,53 @@ function ReceiptBody({
 
   return (
     <View style={localStyles.receiptBody}>
-      <Text style={localStyles.receiptMonth}>{receipt.label}</Text>
-      <Text style={localStyles.receiptMeta}>{receipt.records} records</Text>
+      <View style={localStyles.receiptHeader}>
+        <Text numberOfLines={1} style={localStyles.receiptMonth}>{receipt.label}</Text>
+        <View style={localStyles.receiptMetaGroup}>
+          <Text numberOfLines={1} style={localStyles.receiptMeta}>{receipt.records} records</Text>
+          <Text numberOfLines={1} style={localStyles.receiptMeta}>
+            daily avg {formatYen(receipt.dailyAverageYen)}
+          </Text>
+        </View>
+      </View>
       <Rule />
       <View style={localStyles.receiptColumns}>
         <Text style={localStyles.columnItem}>ITEM</Text>
         <Text style={localStyles.columnMom}>MoM</Text>
         <Text style={localStyles.columnAmount}>AMOUNT</Text>
       </View>
-      <View style={localStyles.itemsFrame}>
-        <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={localStyles.itemsList}>
-          {receipt.lines.map((line) => <ReceiptLine key={line.categoryId} line={line} />)}
-        </ScrollView>
-        <View pointerEvents="none" style={localStyles.itemsFade}>
-          <Svg height="18" width="100%">
-            <Defs>
-              <LinearGradient id="itemsFade" x1="0" x2="0" y1="0" y2="1">
-                <Stop offset="0" stopColor="#FFFDF7" stopOpacity="0" />
-                <Stop offset="1" stopColor="#FFFDF7" stopOpacity="1" />
-              </LinearGradient>
-            </Defs>
-            <Rect fill="url(#itemsFade)" height="18" width="100%" />
-          </Svg>
+      <View style={localStyles.itemsList}>
+        {receipt.lines.map((line) => <ReceiptLine key={line.categoryId} line={line} />)}
+      </View>
+      <Rule compact />
+      <CategoryShareBarcode lines={receipt.lines} />
+      <Rule compact />
+      <View style={localStyles.settlementModule}>
+        <Text style={localStyles.splitHeader}>SPLIT ADJUSTED</Text>
+        <ReceiptKeyValue
+          dotColor="#B25A3C"
+          label={currentUserName.toUpperCase()}
+          value={formatYen(receipt.alexAmountYen)}
+          valueColor="#B25A3C"
+        />
+        <ReceiptKeyValue
+          dotColor="#3F8A86"
+          label={otherUserName.toUpperCase()}
+          value={formatYen(receipt.minaAmountYen)}
+          valueColor="#3F8A86"
+        />
+        <View style={localStyles.settlementDivider} />
+        <View style={localStyles.totalRow}>
+          <Text style={localStyles.totalLabel}>TOTAL</Text>
+          <Text style={localStyles.totalValue}>{formatYen(receipt.totalYen)}</Text>
         </View>
-      </View>
-      <View style={localStyles.scrollCue}>
-        <Ionicons color={colors.subtle} name="chevron-down" size={12} />
-        <Text style={localStyles.scrollCueText}>SCROLL ALL 11 CATEGORIES</Text>
-      </View>
-      <Rule />
-      <ReceiptKeyValue label="DAILY AVG" value={formatYen(receipt.dailyAverageYen)} />
-      <ReceiptKeyValue label="CATEGORIES" value={`${receipt.activeCategoryCount} / 11 active`} />
-      <Rule />
-      <Text style={localStyles.splitHeader}>SPLIT 50/50 ADJUSTED</Text>
-      <ReceiptKeyValue
-        dotColor="#B25A3C"
-        label={`${currentUserName.toUpperCase()} · ${receipt.alexPercentage}%`}
-        value={formatYen(receipt.alexAmountYen)}
-        valueColor="#B25A3C"
-      />
-      <ReceiptKeyValue
-        dotColor="#3F8A86"
-        label={`${otherUserName.toUpperCase()} · ${receipt.minaPercentage}%`}
-        value={formatYen(receipt.minaAmountYen)}
-        valueColor="#3F8A86"
-      />
-      <Rule double />
-      <View style={localStyles.totalRow}>
-        <Text style={localStyles.totalLabel}>TOTAL</Text>
-        <Text style={localStyles.totalValue}>{formatYen(receipt.totalYen)}</Text>
-      </View>
-      <Text style={localStyles.comparisonLine}>
-        <Text style={[localStyles.comparisonStrong, { color: comparison.color }]}>
-          {comparison.symbol} {formatReceiptPercentage(receipt.comparison.percentage)} {comparison.word}
+        <Text style={localStyles.comparisonLine}>
+          <Text style={[localStyles.comparisonStrong, { color: comparison.color }]}>
+            {comparison.symbol} {formatReceiptPercentage(receipt.comparison.percentage)} {comparison.word}
+          </Text>
+          {' '}vs {receipt.comparison.label}
         </Text>
-        {' '}vs {receipt.comparison.label}
-      </Text>
-      <Rule />
-      <Text style={localStyles.footerText}>THANK YOU · KEEP IT FAIR</Text>
-      <Barcode seed={receipt.records + receipt.totalYen} />
-      <Text style={localStyles.receiptCode}>#{receipt.code} · SETTLED</Text>
+      </View>
     </View>
   );
 }
@@ -549,8 +535,8 @@ function ReceiptKeyValue({
   );
 }
 
-function Rule({ double }: { double?: boolean }) {
-  return <View style={double ? localStyles.ruleDouble : localStyles.rule} />;
+function Rule({ compact, double }: { compact?: boolean; double?: boolean }) {
+  return <View style={double ? localStyles.ruleDouble : compact ? localStyles.ruleCompact : localStyles.rule} />;
 }
 
 function TearEdge({ direction }: { direction: 'bottom' | 'top' }) {
@@ -567,12 +553,48 @@ function TearEdge({ direction }: { direction: 'bottom' | 'top' }) {
   );
 }
 
-function Barcode({ seed }: { seed: number }) {
-  const bars = useMemo(() => Array.from({ length: 44 }, (_, index) => 1 + ((seed + index * 7) % 3)), [seed]);
+function CategoryShareBarcode({ lines }: { lines: ReceiptCategoryLine[] }) {
+  const bars = useMemo(() => {
+    const widths = Array.from({ length: 46 }, (_, index) => 1 + ((index * 5 + 2) % 3));
+    const activeLines = lines.filter((line) => line.amountYen > 0);
+    const totalYen = activeLines.reduce((sum, line) => sum + line.amountYen, 0);
+
+    if (totalYen <= 0) {
+      return widths.map((width) => ({ color: 'rgba(42,39,34,0.22)', width }));
+    }
+
+    let runningShare = 0;
+    const segments = activeLines.map((line) => {
+      runningShare += line.amountYen / totalYen;
+      return {
+        color: line.color,
+        end: runningShare
+      };
+    });
+    const totalUnits = widths.reduce((sum, width) => sum + width, 0);
+    let usedUnits = 0;
+    let segmentIndex = 0;
+
+    return widths.map((width) => {
+      const center = (usedUnits + width / 2) / totalUnits;
+      usedUnits += width;
+      while (segmentIndex < segments.length - 1 && center > segments[segmentIndex].end) {
+        segmentIndex += 1;
+      }
+      return {
+        color: segments[segmentIndex]?.color || colors.primaryDark,
+        width
+      };
+    });
+  }, [lines]);
+
   return (
-    <View style={localStyles.barcode}>
-      {bars.map((width, index) => (
-        <View key={`${index}-${width}`} style={[localStyles.barcodeBar, { width }]} />
+    <View accessibilityLabel="Category spend share barcode" style={localStyles.barcode}>
+      {bars.map((bar, index) => (
+        <View
+          key={`${index}-${bar.width}-${bar.color}`}
+          style={[localStyles.barcodeBar, { backgroundColor: bar.color, width: bar.width }]}
+        />
       ))}
     </View>
   );
@@ -596,8 +618,8 @@ const localStyles = StyleSheet.create({
     gap: 2,
     height: 32,
     justifyContent: 'center',
-    marginBottom: 6,
-    marginTop: 10
+    marginBottom: 2,
+    marginTop: 2
   },
   barcodeBar: {
     backgroundColor: colors.primaryDark
@@ -649,16 +671,6 @@ const localStyles = StyleSheet.create({
     ...styles.section,
     width: '100%'
   },
-  footerText: {
-    color: colors.muted,
-    fontFamily: fontFamilies.bold,
-    fontSize: 9.5,
-    fontWeight: '700',
-    letterSpacing: 2,
-    lineHeight: 13,
-    marginTop: 6,
-    textAlign: 'center'
-  },
   itemAmount: {
     color: colors.ink,
     fontFamily: fontFamilies.monoBold,
@@ -697,19 +709,7 @@ const localStyles = StyleSheet.create({
     lineHeight: 17,
     minWidth: 0
   },
-  itemsFade: {
-    bottom: 0,
-    height: 18,
-    left: 0,
-    position: 'absolute',
-    right: 0
-  },
-  itemsFrame: {
-    maxHeight: 150,
-    position: 'relative'
-  },
   itemsList: {
-    maxHeight: 150,
     paddingRight: 6
   },
   keyLabel: {
@@ -804,18 +804,17 @@ const localStyles = StyleSheet.create({
     paddingTop: 22,
     width: RECEIPT_WIDTH
   },
-  receiptCode: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.mono,
-    fontSize: 9.5,
-    letterSpacing: 1.5,
-    lineHeight: 13,
-    textAlign: 'center'
-  },
   receiptColumns: {
     flexDirection: 'row',
     gap: 8,
     paddingRight: 6
+  },
+  receiptHeader: {
+    alignItems: 'baseline',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+    minWidth: 0
   },
   receiptItem: {
     alignItems: 'center',
@@ -828,18 +827,22 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.mono,
     fontSize: 10.5,
     lineHeight: 14,
-    marginTop: 2,
-    textAlign: 'center'
+    textAlign: 'right'
+  },
+  receiptMetaGroup: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: 1
   },
   receiptMonth: {
     color: colors.ink,
+    flexShrink: 1,
     fontFamily: fontFamilies.monoBold,
     fontSize: 18,
     fontWeight: '700',
     letterSpacing: 1.5,
     lineHeight: 23,
-    marginTop: 2,
-    textAlign: 'center'
+    minWidth: 0
   },
   receiptWrap: {
     shadowColor: colors.ink,
@@ -854,26 +857,18 @@ const localStyles = StyleSheet.create({
     height: 0,
     marginVertical: 11
   },
+  ruleCompact: {
+    borderColor: 'rgba(42,39,34,0.32)',
+    borderStyle: 'dashed',
+    borderTopWidth: 1,
+    height: 0,
+    marginVertical: 6
+  },
   ruleDouble: {
     borderColor: 'rgba(42,39,34,0.50)',
     borderTopWidth: 3,
     height: 0,
     marginVertical: 11
-  },
-  scrollCue: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 5,
-    justifyContent: 'center',
-    marginTop: 5
-  },
-  scrollCueText: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.bold,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 12
   },
   splitHeader: {
     color: colors.subtle,
@@ -883,6 +878,15 @@ const localStyles = StyleSheet.create({
     letterSpacing: 1.5,
     lineHeight: 12,
     marginBottom: 2
+  },
+  settlementDivider: {
+    backgroundColor: 'rgba(42,39,34,0.42)',
+    height: 2,
+    marginBottom: 8,
+    marginTop: 7
+  },
+  settlementModule: {
+    marginTop: 2
   },
   stack: {
     paddingTop: 8,
