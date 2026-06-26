@@ -17,6 +17,7 @@ import { SplashScreen, Stack, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { colors, fontFamilies } from '@/src/components/styles';
 import { AuthProvider } from '@/src/context/AuthContext';
@@ -44,15 +45,6 @@ export default function RootLayout() {
     }
   }, [fontError, fontsLoaded]);
 
-  function dismissExpense() {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace('/(tabs)/history');
-  }
-
   function dismissSettingsDetail() {
     if (router.canGoBack()) {
       router.back();
@@ -79,69 +71,65 @@ export default function RootLayout() {
   const settingsHeaderLeft = () => (
     <BackButton onPress={dismissSettingsDetail} />
   );
-  const expenseHeaderLeft = () => (
-    <BackButton onPress={dismissExpense} />
-  );
-
   return (
-    <AuthProvider>
-      <SyncProvider>
-        <LedgerProvider>
-          <StatusBar style="dark" />
-          <Stack
-            screenOptions={{
-              headerStyle: { backgroundColor: colors.bg },
-              headerShadowVisible: false,
-              headerBackButtonDisplayMode: 'minimal',
-              headerTitleStyle: {
-                color: colors.ink,
-                fontFamily: resolvedHeaderFont,
-                fontWeight: '700'
-              },
-              headerBackTitleStyle: {
-                fontFamily: resolvedRegularFont
-              }
-            }}
-          >
-            <Stack.Screen name="index" options={{ headerShown: false }} />
-            <Stack.Screen name="auth" options={{ title: 'Sign In' }} />
-            <Stack.Screen name="ledger" options={{ title: 'Shared Ledger' }} />
-            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-            {/* Settings detail screens */}
-            <Stack.Screen name="settings/ledgers" options={{ headerLeft: settingsHeaderLeft, title: 'Ledgers' }} />
-            <Stack.Screen
-              name="settings/recurring"
-              options={{
-                headerLeft: settingsHeaderLeft,
-                headerTitleAlign: 'center',
-                title: 'Fixed Expense'
+    <GestureHandlerRootView style={localStyles.gestureRoot}>
+      <AuthProvider>
+        <SyncProvider>
+          <LedgerProvider>
+            <StatusBar style="dark" />
+            <Stack
+              screenOptions={{
+                headerStyle: { backgroundColor: colors.bg },
+                headerShadowVisible: false,
+                headerBackButtonDisplayMode: 'minimal',
+                headerTitleStyle: {
+                  color: colors.ink,
+                  fontFamily: resolvedHeaderFont,
+                  fontWeight: '700'
+                },
+                headerBackTitleStyle: {
+                  fontFamily: resolvedRegularFont
+                }
               }}
-            />
-            <Stack.Screen name="settings/sync" options={{ headerLeft: settingsHeaderLeft, title: 'Sync Status' }} />
-            {/* Expense detail screens */}
-            <Stack.Screen
-              name="expenses/new"
-              options={{
-                headerLeft: expenseHeaderLeft,
-                headerRight: () => null,
-                headerTitleAlign: 'center',
-                presentation: 'modal',
-                title: 'Add Expense'
-              }}
-            />
-            <Stack.Screen
-              name="expenses/[id]"
-              options={{
-                headerLeft: expenseHeaderLeft,
-                headerRight: () => null,
-                headerTitleAlign: 'center',
-                title: 'Edit Expense'
-              }}
-            />
-          </Stack>
-        </LedgerProvider>
-      </SyncProvider>
-    </AuthProvider>
+            >
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="auth" options={{ title: 'Sign In' }} />
+              <Stack.Screen name="ledger" options={{ title: 'Shared Ledger' }} />
+              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              {/* Settings detail screens */}
+              <Stack.Screen name="settings/ledgers" options={{ headerLeft: settingsHeaderLeft, title: 'Ledgers' }} />
+              <Stack.Screen
+                name="settings/recurring"
+                options={{
+                  headerLeft: settingsHeaderLeft,
+                  headerTitleAlign: 'center',
+                  title: 'Fixed Expense'
+                }}
+              />
+              <Stack.Screen name="settings/sync" options={{ headerLeft: settingsHeaderLeft, title: 'Sync Status' }} />
+              {/* Expense detail screens */}
+              <Stack.Screen
+                name="expenses/new"
+                options={{
+                  gestureEnabled: false,
+                  headerShown: false,
+                  presentation: 'modal',
+                  title: 'Add Expense'
+                }}
+              />
+              <Stack.Screen
+                name="expenses/[id]"
+                options={{
+                  gestureEnabled: false,
+                  headerShown: false,
+                  title: 'Edit Expense'
+                }}
+              />
+            </Stack>
+          </LedgerProvider>
+        </SyncProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -152,6 +140,9 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: -4,
     width: 40
+  },
+  gestureRoot: {
+    flex: 1
   },
   pressed: {
     opacity: 0.76
