@@ -35,6 +35,7 @@ import {
 } from '@/src/lib/categorySystem';
 import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
+import { participantBadgeUserIds } from '@/src/lib/historyPresentation';
 import {
   deleteExpense,
   generateRecurringExpenses,
@@ -560,9 +561,7 @@ export default function HistoryScreen() {
   }
 
   const expenseBadges = useCallback((expense: Expense): ExpenseBadge[] => {
-    const participantIds = expense.ownership === 'shared' && expense.splits.length > 0
-      ? uniqueUserIds(expense.splits.map((split) => split.user_id))
-      : [expense.paid_by];
+    const participantIds = participantBadgeUserIds(expense);
 
     return participantIds.map((userId) => ({
       accent: userColorById.get(userId) || DEFAULT_USER_COLOR,
@@ -1171,10 +1170,6 @@ function isDateString(value: string) {
 
 function isMonthString(value: string) {
   return /^\d{4}-\d{2}$/.test(value);
-}
-
-function uniqueUserIds(userIds: string[]) {
-  return [...new Set(userIds.filter(Boolean))];
 }
 
 const localStyles = StyleSheet.create({
