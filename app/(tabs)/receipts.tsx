@@ -1,7 +1,6 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AccessibilityInfo,
   Animated,
   PanResponder,
   Pressable,
@@ -20,6 +19,7 @@ import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { displayName, formatYen } from '@/src/lib/format';
+import { useReduceMotion } from '@/src/lib/motion';
 import {
   getLastShownReceiptPrinterMonthKey,
   markReceiptPrinterShown,
@@ -76,7 +76,7 @@ export default function ReceiptsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
-  const [reduceMotion, setReduceMotion] = useState(false);
+  const reduceMotion = useReduceMotion();
   const [printerCheckState, setPrinterCheckState] = useState<PrinterCheckState>('checking');
   const [printerVisible, setPrinterVisible] = useState(false);
   const receiptTranslateX = useRef(new Animated.Value(0)).current;
@@ -230,20 +230,6 @@ export default function ReceiptsScreen() {
     state.loading,
     state.receipts
   ]));
-
-  useEffect(() => {
-    let mounted = true;
-    AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
-      if (mounted) {
-        setReduceMotion(enabled);
-      }
-    }).catch(() => undefined);
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
-    return () => {
-      mounted = false;
-      subscription.remove();
-    };
-  }, []);
 
   useEffect(() => {
     if (state.receipts.length === 0) {

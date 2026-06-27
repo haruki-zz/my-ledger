@@ -1,10 +1,12 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
 import type { GestureResponderEvent } from 'react-native';
+import Animated, { useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { displayName, formatCompactYen, formatYen } from '@/src/lib/format';
+import { motionDuration, motionDurations, motionEasings, useReduceMotion } from '@/src/lib/motion';
 import type { DailyUserStat } from '@/src/lib/stats';
 
 type DailyChartProps = {
@@ -40,8 +42,6 @@ const tooltipDateFormatter = new Intl.DateTimeFormat('en-US', {
   day: 'numeric',
   month: 'short'
 });
-const BAR_ANIMATION_DURATION_MS = 520;
-const BAR_ANIMATION_EASING = Easing.bezier(0.33, 1, 0.68, 1);
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
 export function DailyChart({
@@ -56,11 +56,10 @@ export function DailyChart({
   todayString
 }: DailyChartProps) {
   const maxAmount = Math.max(0, ...series.map((item) => item.totalAmountYen));
+  const reduceMotion = useReduceMotion();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [chartWidth, setChartWidth] = useState(WIDTH);
-  const [barProgress] = useState(() => new Animated.Value(0));
   const hideTooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const barAnimationSequence = useRef(0);
   const safeSelectedIndex = selectedIndex === null ? null : clamp(selectedIndex, 0, Math.max(0, series.length - 1));
   const labelIndexes = useMemo(() => labelIndexSet(series.length), [series.length]);
   const baseline = PADDING_TOP + PLOT_HEIGHT;
@@ -103,7 +102,6 @@ export function DailyChart({
       x: point.x
     }))
   ), [barWidth, points]);
-  const barScopeSignature = useMemo(() => series.map((item) => item.date).join('|'), [series]);
   const selectedPoint = safeSelectedIndex === null ? null : points[safeSelectedIndex];
   const tooltip = selectedPoint ? tooltipLayout(selectedPoint.x) : null;
 
@@ -120,36 +118,6 @@ export function DailyChart({
       clearTimeout(hideTooltipTimer.current);
     }
   }, []);
-
-  useEffect(() => {
-    if (barTargetGroups.length === 0) {
-      barProgress.stopAnimation();
-      barProgress.setValue(0);
-      return;
-    }
-
-    const sequence = barAnimationSequence.current + 1;
-    barAnimationSequence.current = sequence;
-    barProgress.stopAnimation();
-    barProgress.setValue(0);
-    Animated.timing(barProgress, {
-      duration: BAR_ANIMATION_DURATION_MS,
-      easing: BAR_ANIMATION_EASING,
-      toValue: 1,
-      useNativeDriver: false
-    }).start(({ finished }) => {
-      if (finished && barAnimationSequence.current === sequence) {
-        barProgress.setValue(1);
-      }
-    });
-
-    return () => {
-      if (barAnimationSequence.current === sequence) {
-        barAnimationSequence.current += 1;
-      }
-      barProgress.stopAnimation();
-    };
-  }, [barProgress, barScopeSignature, barTargetGroups.length]);
 
   if (series.length === 0 || maxAmount <= 0) {
     return (
@@ -228,42 +196,18 @@ export function DailyChart({
         </SvgText>
 
         {barTargetGroups.map((group) => (
-          <Fragment key={group.date}>
-            {group.currentTargetHeight > 0 ? (
-              <AnimatedRect
-                fill={currentUserColor}
-                height={barProgress.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, group.currentTargetHeight]
-                })}
-                opacity={todayString && group.date > todayString ? 0.25 : 1}
-                rx={3}
-                width={group.barWidth}
-                x={group.x - group.barWidth / 2}
-                y={barProgress.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [baseline, baseline - group.currentTargetHeight]
-                })}
-              />
-            ) : null}
-            {group.otherTargetHeight > 0 ? (
-              <AnimatedRect
-                fill={otherUserColor}
-                height={barProgress.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, group.otherTargetHeight]
-                })}
-                opacity={todayString && group.date > todayString ? 0.25 : 1}
-                rx={3}
-                width={group.barWidth}
-                x={group.x - group.barWidth / 2}
-                y={barProgress.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [baseline, baseline - group.currentTargetHeight - group.otherTargetHeight]
-                })}
-              />
-            ) : null}
-          </Fragment>
+          <ChartBarGroup
+            baseline={baseline}
+            currentColor={currentUserColor}
+            currentTargetHeight={group.currentTargetHeight}
+            future={Boolean(todayString && group.date > todayString)}
+            key={group.date}
+            otherColor={otherUserColor}
+            otherTargetHeight={group.otherTargetHeight}
+            reduceMotion={reduceMotion}
+            width={group.barWidth}
+            x={group.x}
+          />
         ))}
 
         {selectedPoint && tooltip ? (
@@ -296,6 +240,70 @@ export function DailyChart({
         ))}
       </Svg>
     </Pressable>
+  );
+}
+
+function ChartBarGroup({
+  baseline,
+  currentColor,
+  currentTargetHeight,
+  future,
+  otherColor,
+  otherTargetHeight,
+  reduceMotion,
+  width,
+  x
+}: {
+  baseline: number;
+  currentColor: string;
+  currentTargetHeight: number;
+  future: boolean;
+  otherColor: string;
+  otherTargetHeight: number;
+  reduceMotion: boolean;
+  width: number;
+  x: number;
+}) {
+  const currentHeight = useSharedValue(0);
+  const otherHeight = useSharedValue(0);
+
+  useEffect(() => {
+    const timingConfig = {
+      duration: motionDuration(motionDurations.data, reduceMotion),
+      easing: motionEasings.crisp
+    };
+    currentHeight.value = withTiming(currentTargetHeight, timingConfig);
+    otherHeight.value = withTiming(otherTargetHeight, timingConfig);
+  }, [currentHeight, currentTargetHeight, otherHeight, otherTargetHeight, reduceMotion]);
+
+  const currentProps = useAnimatedProps(() => ({
+    height: currentHeight.value,
+    y: baseline - currentHeight.value
+  }));
+  const otherProps = useAnimatedProps(() => ({
+    height: otherHeight.value,
+    y: baseline - currentHeight.value - otherHeight.value
+  }));
+
+  return (
+    <>
+      <AnimatedRect
+        animatedProps={currentProps}
+        fill={currentColor}
+        opacity={future ? 0.25 : 1}
+        rx={3}
+        width={width}
+        x={x - width / 2}
+      />
+      <AnimatedRect
+        animatedProps={otherProps}
+        fill={otherColor}
+        opacity={future ? 0.25 : 1}
+        rx={3}
+        width={width}
+        x={x - width / 2}
+      />
+    </>
   );
 }
 

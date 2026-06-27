@@ -1,10 +1,13 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { DailyChart } from '@/src/components/DailyChart';
 import { DashboardModule } from '@/src/components/DashboardModule';
+import { motionLayoutTransition } from '@/src/components/motion';
 import { colors, fontFamilies } from '@/src/components/styles';
 import { displayName, formatCompactYen } from '@/src/lib/format';
+import { useReduceMotion } from '@/src/lib/motion';
 import type { DailyUserStat } from '@/src/lib/stats';
 
 type DashboardDailyTrendProps = {
@@ -113,29 +116,15 @@ function TrendPreview({
           const future = item.date > todayString;
 
           return (
-            <View
+            <PreviewBar
+              currentColor={currentUserColor}
+              currentHeight={currentPx}
+              future={future}
+              hasOther={Boolean(otherUserId)}
               key={item.date}
-              style={[
-                localStyles.previewBar,
-                {
-                  height: totalPx,
-                  opacity: future ? 0.25 : 1
-                }
-              ]}
-            >
-              {otherUserId ? <View style={[localStyles.previewOther, { backgroundColor: otherUserColor }]} /> : null}
-              {currentPx > 0 ? (
-                <View
-                  style={[
-                    localStyles.previewCurrent,
-                    {
-                      backgroundColor: currentUserColor,
-                      height: currentPx
-                    }
-                  ]}
-                />
-              ) : null}
-            </View>
+              otherColor={otherUserColor}
+              totalHeight={totalPx}
+            />
           );
         })}
       </View>
@@ -146,6 +135,51 @@ function TrendPreview({
         <Text style={localStyles.previewFooterText}>{lastLabel}</Text>
       </View>
     </>
+  );
+}
+
+function PreviewBar({
+  currentColor,
+  currentHeight,
+  future,
+  hasOther,
+  otherColor,
+  totalHeight
+}: {
+  currentColor: string;
+  currentHeight: number;
+  future: boolean;
+  hasOther: boolean;
+  otherColor: string;
+  totalHeight: number;
+}) {
+  const reduceMotion = useReduceMotion();
+
+  return (
+    <Animated.View
+      layout={motionLayoutTransition(reduceMotion)}
+      style={[
+        localStyles.previewBar,
+        {
+          height: totalHeight,
+          opacity: future ? 0.25 : 1
+        }
+      ]}
+    >
+      {hasOther ? <View style={[localStyles.previewOther, { backgroundColor: otherColor }]} /> : null}
+      {currentHeight > 0 ? (
+        <Animated.View
+          layout={motionLayoutTransition(reduceMotion)}
+          style={[
+            localStyles.previewCurrent,
+            {
+              backgroundColor: currentColor,
+              height: currentHeight
+            }
+          ]}
+        />
+      ) : null}
+    </Animated.View>
   );
 }
 

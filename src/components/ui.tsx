@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Animated,
+  Animated as RNAnimated,
   PanResponder,
   Platform,
   Pressable,
@@ -17,6 +17,11 @@ import {
   type ViewProps,
   type ViewStyle
 } from 'react-native';
+import Reanimated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming
+} from 'react-native-reanimated';
 
 import {
   ExpenseContextMenu,
@@ -31,6 +36,7 @@ import {
   type ExpenseRowCardContentData
 } from '@/src/components/ExpenseRowCardContent';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
+import { motionDuration, motionDurations, motionEasings, useReduceMotion } from '@/src/lib/motion';
 
 export type { ExpenseBadge } from '@/src/components/ExpenseRowCardContent';
 
@@ -104,7 +110,7 @@ type GestureCoordinationState = {
   swipeActionHandled: boolean;
 };
 
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+const AnimatedPressable = RNAnimated.createAnimatedComponent(Pressable);
 const SWIPE_ACTION_WIDTH = 96;
 const SWIPE_TRIGGER_DISTANCE = SWIPE_ACTION_WIDTH * 0.9;
 const SWIPE_MAX_TRANSLATE = SWIPE_ACTION_WIDTH + 20;
@@ -145,30 +151,34 @@ export function PillTabs<T extends string>({
   onChange,
   style
 }: PillTabsProps<T>) {
+  const reduceMotion = useReduceMotion();
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
-  const [indicatorTranslate] = useState(() => new Animated.Value(0));
   const [trackWidth, setTrackWidth] = useState(0);
+  const indicatorTranslate = useSharedValue(0);
+  const indicatorWidth = useSharedValue(0);
   const indicatorInset = 3;
   const segmentWidth = options.length > 0 && trackWidth > 0 ? (trackWidth - indicatorInset * 2) / options.length : 0;
-  const indicatorTransform = useMemo(
-    () => [{ translateX: indicatorTranslate }],
-    [indicatorTranslate]
-  );
 
   useEffect(() => {
     if (segmentWidth <= 0) {
-      indicatorTranslate.setValue(0);
+      indicatorTranslate.value = 0;
+      indicatorWidth.value = 0;
       return;
     }
 
-    Animated.spring(indicatorTranslate, {
-      damping: 18,
-      mass: 0.72,
-      stiffness: 190,
-      toValue: selectedIndex * segmentWidth,
-      useNativeDriver: true
-    }).start();
-  }, [indicatorTranslate, segmentWidth, selectedIndex]);
+    const timing = {
+      duration: motionDuration(motionDurations.tabs, reduceMotion),
+      easing: motionEasings.tab
+    };
+
+    indicatorTranslate.value = withTiming(selectedIndex * segmentWidth, timing);
+    indicatorWidth.value = withTiming(segmentWidth, timing);
+  }, [indicatorTranslate, indicatorWidth, reduceMotion, segmentWidth, selectedIndex]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorTranslate.value }],
+    width: indicatorWidth.value
+  }));
 
   function handleLayout(event: LayoutChangeEvent) {
     setTrackWidth(event.nativeEvent.layout.width);
@@ -181,15 +191,9 @@ export function PillTabs<T extends string>({
       style={[uiStyles.pillTrack, size === 'sm' && uiStyles.pillTrackSmall, style]}
     >
       {segmentWidth > 0 ? (
-        <Animated.View
+        <Reanimated.View
           pointerEvents="none"
-          style={[
-            uiStyles.pillIndicator,
-            {
-              transform: indicatorTransform,
-              width: segmentWidth
-            }
-          ]}
+          style={[uiStyles.pillIndicator, indicatorStyle]}
         />
       ) : null}
 
@@ -301,7 +305,7 @@ export function SwipeExpenseRow({
   onSplitBreakdown,
   onViewDetails
 }: SwipeExpenseRowProps) {
-  const [translateX] = useState(() => new Animated.Value(0));
+  const [translateX] = useState(() => new RNAnimated.Value(0));
   const [responder, setResponder] = useState<PanResponderInstance | null>(null);
   const [contextMenu, setContextMenu] = useState<ExpenseContextMenuState | null>(null);
   const rowRef = useRef<View | null>(null);
@@ -558,8 +562,8 @@ function clampSwipe(value: number) {
   return Math.max(-SWIPE_MAX_TRANSLATE, Math.min(SWIPE_MAX_TRANSLATE, value));
 }
 
-function resetSwipe(value: Animated.Value) {
-  Animated.spring(value, {
+function resetSwipe(value: RNAnimated.Value) {
+  RNAnimated.spring(value, {
     damping: 18,
     mass: 0.8,
     stiffness: 180,
@@ -568,8 +572,8 @@ function resetSwipe(value: Animated.Value) {
   }).start();
 }
 
-function currentAnimatedValue(value: Animated.Value) {
-  const readableValue = value as Animated.Value & {
+function currentAnimatedValue(value: RNAnimated.Value) {
+  const readableValue = value as RNAnimated.Value & {
     __getValue?: () => number;
     _value?: number;
   };

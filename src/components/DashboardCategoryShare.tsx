@@ -1,10 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 
-import { DashboardModule, useReduceMotion } from '@/src/components/DashboardModule';
+import { DashboardModule } from '@/src/components/DashboardModule';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
 import { formatCompactYen, formatYen } from '@/src/lib/format';
+import { motionDuration, motionDurations, motionEasings, useReduceMotion } from '@/src/lib/motion';
 import type { CategoryStat } from '@/src/lib/stats';
 
 type DashboardCategoryShareProps = {
@@ -17,8 +19,6 @@ type DashboardCategoryShareProps = {
 const CAPSULE_COUNT = 50;
 const BAR_STEP = 6;
 const RING_RADIUS = 60;
-const MORPH_DURATION_MS = 550;
-const MORPH_EASING = Easing.bezier(0.55, 0, 0.2, 1);
 
 export function DashboardCategoryShare({
   categories,
@@ -106,38 +106,28 @@ function CapsuleMorph({
   totalYen: number;
 }) {
   const reduceMotion = useReduceMotion();
-  const [heightProgress] = useState(() => new Animated.Value(open ? 1 : 0));
-  const [centerProgress] = useState(() => new Animated.Value(open ? 1 : 0));
-  const [capProgresses] = useState(() => Array.from({ length: CAPSULE_COUNT }, () => new Animated.Value(open ? 1 : 0)));
+  const morphProgress = useSharedValue(open ? 1 : 0);
+  const centerProgress = useSharedValue(open ? 1 : 0);
   const colorSlots = useMemo(() => buildCapsuleColors(categories), [categories]);
-  const signature = useMemo(() => categories.map((category) => `${category.detailKey}:${category.amountYen}:${category.color}`).join('|'), [categories]);
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(heightProgress, {
-        duration: reduceMotion ? 0 : MORPH_DURATION_MS,
-        easing: MORPH_EASING,
-        toValue: open ? 1 : 0,
-        useNativeDriver: false
-      }),
-      Animated.timing(centerProgress, {
-        delay: open && !reduceMotion ? 200 : 0,
-        duration: reduceMotion ? 0 : 350,
-        easing: Easing.out(Easing.quad),
-        toValue: open ? 1 : 0,
-        useNativeDriver: true
-      }),
-      ...capProgresses.map((progress, index) => (
-        Animated.timing(progress, {
-          delay: reduceMotion ? 0 : open ? index * 4 : (CAPSULE_COUNT - 1 - index) * 2,
-          duration: reduceMotion ? 0 : MORPH_DURATION_MS,
-          easing: MORPH_EASING,
-          toValue: open ? 1 : 0,
-          useNativeDriver: true
-        })
-      ))
-    ]).start();
-  }, [capProgresses, centerProgress, heightProgress, open, reduceMotion, signature]);
+    morphProgress.value = withTiming(open ? 1 : 0, {
+      duration: motionDuration(motionDurations.data, reduceMotion),
+      easing: motionEasings.emphasize
+    });
+    centerProgress.value = withTiming(open ? 1 : 0, {
+      duration: motionDuration(motionDurations.layout, reduceMotion),
+      easing: motionEasings.crisp
+    });
+  }, [centerProgress, morphProgress, open, reduceMotion]);
+
+  const morphStyle = useAnimatedStyle(() => ({
+    height: 30 + morphProgress.value * 142
+  }));
+
+  const centerStyle = useAnimatedStyle(() => ({
+    opacity: centerProgress.value
+  }));
 
   if (totalYen <= 0 || categories.length === 0) {
     return (
@@ -151,60 +141,68 @@ function CapsuleMorph({
     <Animated.View
       style={[
         localStyles.morph,
-        {
-          height: heightProgress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [30, 172]
-          })
-        }
+        morphStyle
       ]}
     >
-      {capProgresses.map((progress, index) => {
-        const angle = (index / CAPSULE_COUNT) * 360 - 90;
-        const angleRadians = (angle * Math.PI) / 180;
-        const barX = (index - (CAPSULE_COUNT - 1) / 2) * BAR_STEP;
-        const ringX = Math.cos(angleRadians) * RING_RADIUS;
-        const ringY = Math.sin(angleRadians) * RING_RADIUS;
+      {Array.from({ length: CAPSULE_COUNT }, (_, index) => (
+        <MorphCapsule
+          color={colorSlots[index] || colors.subtle}
+          index={index}
+          key={`cap-${index}`}
+          progress={morphProgress}
+          reduceMotion={reduceMotion}
+        />
+      ))}
 
-        return (
-          <Animated.View
-            key={`cap-${index}`}
-            style={[
-              localStyles.capsule,
-              {
-                backgroundColor: colorSlots[index] || colors.subtle,
-                transform: [
-                  {
-                    translateX: progress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [barX, ringX]
-                    })
-                  },
-                  {
-                    translateY: progress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, ringY]
-                    })
-                  },
-                  {
-                    rotate: progress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0deg', `${angle + 90}deg`]
-                    })
-                  }
-                ]
-              }
-            ]}
-          />
-        );
-      })}
-
-      <Animated.View style={[localStyles.centerLabel, { opacity: centerProgress }]}>
+      <Animated.View style={[localStyles.centerLabel, centerStyle]}>
         <Text style={localStyles.centerAmount}>{formatCompactYen(totalYen)}</Text>
         <Text style={localStyles.centerText}>Total</Text>
       </Animated.View>
     </Animated.View>
   );
+}
+
+function MorphCapsule({
+  color,
+  index,
+  progress,
+  reduceMotion
+}: {
+  color: string;
+  index: number;
+  progress: SharedValue<number>;
+  reduceMotion: boolean;
+}) {
+  const animatedColor = useSharedValue(color);
+  const angle = (index / CAPSULE_COUNT) * 360 - 90;
+  const angleRadians = (angle * Math.PI) / 180;
+  const barX = (index - (CAPSULE_COUNT - 1) / 2) * BAR_STEP;
+  const ringX = Math.cos(angleRadians) * RING_RADIUS;
+  const ringY = Math.sin(angleRadians) * RING_RADIUS;
+
+  useEffect(() => {
+    animatedColor.value = withTiming(color, {
+      duration: motionDuration(motionDurations.content, reduceMotion),
+      easing: motionEasings.standard
+    });
+  }, [animatedColor, color, reduceMotion]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    backgroundColor: animatedColor.value,
+    transform: [
+      {
+        translateX: barX + (ringX - barX) * progress.value
+      },
+      {
+        translateY: ringY * progress.value
+      },
+      {
+        rotate: `${(angle + 90) * progress.value}deg`
+      }
+    ]
+  }));
+
+  return <Animated.View style={[localStyles.capsule, animatedStyle]} />;
 }
 
 function buildCapsuleColors(categories: CategoryStat[]) {

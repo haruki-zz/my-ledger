@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AnimatedBarFill, AnimatedPercentFill } from '@/src/components/motion';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
 import { IconButton } from '@/src/components/ui';
 import { displayName, formatYen } from '@/src/lib/format';
@@ -43,7 +44,6 @@ type BlurFallbackBoundaryState = {
 
 const ENTER_DURATION_MS = 180;
 const EXIT_DURATION_MS = 130;
-const DETAIL_BAR_DURATION_MS = 560;
 const DISMISS_DRAG_DISTANCE = 70;
 const SHEET_HEIGHT_RATIO = 0.72;
 
@@ -53,7 +53,6 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
   const [renderedDetail, setRenderedDetail] = useState<CategoryDetailStat | null>(detail);
   const [closing, setClosing] = useState(false);
   const [transitionProgress] = useState(() => new Animated.Value(0));
-  const [detailProgress] = useState(() => new Animated.Value(0));
   const [dragY] = useState(() => new Animated.Value(0));
   const [sheetAtTop, setSheetAtTop] = useState(true);
   const memberNameById = useMemo(() => (
@@ -125,7 +124,6 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
     setRenderedDetail(detail);
     setClosing(false);
     dragY.setValue(0);
-    detailProgress.setValue(0);
     setSheetAtTop(true);
     transitionProgress.setValue(0);
     Animated.timing(transitionProgress, {
@@ -133,13 +131,7 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
       toValue: 1,
       useNativeDriver: true
     }).start();
-    Animated.timing(detailProgress, {
-      delay: 90,
-      duration: DETAIL_BAR_DURATION_MS,
-      toValue: 1,
-      useNativeDriver: false
-    }).start();
-  }, [detail, detailProgress, dragY, transitionProgress]);
+  }, [detail, dragY, transitionProgress]);
 
   useEffect(() => {
     if (visible || !renderedDetail || closing) {
@@ -300,7 +292,6 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
                     renderedDetail.breakdown.map((item) => (
                       <BreakdownRow
                         color={renderedDetail.breakdownKind === 'category' ? item.color : renderedDetail.color}
-                        progress={detailProgress}
                         item={item}
                         key={item.key}
                         maxAmountYen={maxBreakdownAmount}
@@ -312,7 +303,7 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
                 </View>
               </View>
 
-              <DailySpendChart color={renderedDetail.color} daily={renderedDetail.daily} progress={detailProgress} />
+              <DailySpendChart color={renderedDetail.color} daily={renderedDetail.daily} />
 
               {renderedDetail.memberSplits.length > 0 ? (
                 <View style={sheetStyles.section}>
@@ -387,12 +378,10 @@ function SectionHeader({ caption, title }: { caption?: string; title: string }) 
 
 function DailySpendChart({
   color,
-  daily,
-  progress
+  daily
 }: {
   color: string;
   daily: CategoryDetailDailyStat[];
-  progress: Animated.Value;
 }) {
   const maxAmount = Math.max(0, ...daily.map((day) => day.amountYen));
   const visibleDays = daily.length > 31 ? daily.slice(-31) : daily;
@@ -410,17 +399,12 @@ function DailySpendChart({
           const barHeight = maxAmount > 0 ? Math.max(3, Math.round((day.amountYen / maxAmount) * 72)) : 2;
           return (
             <View key={day.date} style={sheetStyles.barSlot}>
-              <Animated.View
-                style={[
-                  sheetStyles.bar,
-                  {
-                    backgroundColor: day.isPeak ? color : tint(color, '6B'),
-                    height: progress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [2, barHeight]
-                    })
-                  }
-                ]}
+              <AnimatedBarFill
+                axis="y"
+                color={day.isPeak ? color : tint(color, '6B')}
+                minSize={2}
+                size={barHeight}
+                style={sheetStyles.bar}
               />
             </View>
           );
@@ -462,13 +446,11 @@ function MemberSplitHalf({
 function BreakdownRow({
   color,
   item,
-  maxAmountYen,
-  progress
+  maxAmountYen
 }: {
   color: string;
   item: CategoryDetailBreakdownItem;
   maxAmountYen: number;
-  progress: Animated.Value;
 }) {
   const width = maxAmountYen > 0 ? Math.max(6, (item.amountYen / maxAmountYen) * 100) : 0;
 
@@ -485,18 +467,7 @@ function BreakdownRow({
         <Text style={sheetStyles.breakdownAmount}>{formatYen(item.amountYen)}</Text>
       </View>
       <View style={sheetStyles.breakdownTrack}>
-        <Animated.View
-          style={[
-            sheetStyles.breakdownFill,
-            {
-              backgroundColor: color,
-              width: progress.interpolate({
-                inputRange: [0, 1],
-                outputRange: ['0%', `${width}%`]
-              })
-            }
-          ]}
-        />
+        <AnimatedPercentFill color={color} percent={width} style={sheetStyles.breakdownFill} />
       </View>
     </View>
   );

@@ -8,8 +8,14 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
+  type LayoutChangeEvent
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CategoryDetailSheet } from '@/src/components/CategoryDetailSheet';
@@ -24,6 +30,7 @@ import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { buildUserColorMap, colorForDarkSurface, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, formatYen, todayDateString } from '@/src/lib/format';
+import { motionDuration, motionDurations, motionEasings, useReduceMotion } from '@/src/lib/motion';
 import { getSpendComparisonPresentation } from '@/src/lib/spendComparison';
 import { isIntentionalMonthSwipe } from '@/src/lib/swipe';
 import {
@@ -230,28 +237,7 @@ export default function DashboardScreen() {
                   />
                 </View>
 
-                <View style={localStyles.periodSegment}>
-                  {PERIOD_OPTIONS.map((option) => {
-                    const active = option.value === period;
-                    return (
-                      <Pressable
-                        accessibilityLabel={`Show ${periodLabel(option.value)} dashboard`}
-                        accessibilityRole="button"
-                        key={option.value}
-                        onPress={() => selectPeriod(option.value)}
-                        style={({ pressed }) => [
-                          localStyles.periodOption,
-                          active && localStyles.periodOptionActive,
-                          pressed && !active && localStyles.periodOptionPressed
-                        ]}
-                      >
-                        <Text style={[localStyles.periodText, active && localStyles.periodTextActive]}>
-                          {option.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <PeriodSegment onChange={selectPeriod} period={period} />
               </View>
 
               <View style={localStyles.heroAmountRow}>
@@ -354,6 +340,83 @@ export default function DashboardScreen() {
         onClose={closeCategoryDetail}
       />
     </>
+  );
+}
+
+function PeriodSegment({
+  onChange,
+  period
+}: {
+  onChange: (period: DashboardPeriod) => void;
+  period: DashboardPeriod;
+}) {
+  const reduceMotion = useReduceMotion();
+  const selectedIndex = Math.max(0, PERIOD_OPTIONS.findIndex((option) => option.value === period));
+  const [trackWidth, setTrackWidth] = useState(0);
+  const indicatorX = useSharedValue(0);
+  const indicatorWidth = useSharedValue(0);
+  const inset = 3;
+  const gap = 2;
+  const segmentWidth = trackWidth > 0
+    ? (trackWidth - inset * 2 - gap * (PERIOD_OPTIONS.length - 1)) / PERIOD_OPTIONS.length
+    : 0;
+
+  useEffect(() => {
+    if (segmentWidth <= 0) {
+      indicatorX.value = 0;
+      indicatorWidth.value = 0;
+      return;
+    }
+
+    const timing = {
+      duration: motionDuration(motionDurations.tabs, reduceMotion),
+      easing: motionEasings.tab
+    };
+
+    indicatorX.value = withTiming(selectedIndex * (segmentWidth + gap), timing);
+    indicatorWidth.value = withTiming(segmentWidth, timing);
+  }, [indicatorWidth, indicatorX, reduceMotion, segmentWidth, selectedIndex]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorX.value }],
+    width: indicatorWidth.value
+  }));
+
+  function handleLayout(event: LayoutChangeEvent) {
+    setTrackWidth(event.nativeEvent.layout.width);
+  }
+
+  return (
+    <View onLayout={handleLayout} style={localStyles.periodSegment}>
+      {segmentWidth > 0 ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[localStyles.periodIndicator, indicatorStyle]}
+        />
+      ) : null}
+
+      {PERIOD_OPTIONS.map((option) => {
+        const active = option.value === period;
+        return (
+          <Pressable
+            accessibilityLabel={`Show ${periodLabel(option.value)} dashboard`}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            style={({ pressed }) => [
+              localStyles.periodOption,
+              segmentWidth > 0 && { width: segmentWidth },
+              pressed && !active && localStyles.periodOptionPressed
+            ]}
+          >
+            <Text style={[localStyles.periodText, active && localStyles.periodTextActive]}>
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -641,13 +704,19 @@ const localStyles = StyleSheet.create({
     height: 24,
     justifyContent: 'center',
     minWidth: 27,
-    paddingHorizontal: 8
-  },
-  periodOptionActive: {
-    backgroundColor: 'rgba(255,253,247,0.92)'
+    paddingHorizontal: 8,
+    zIndex: 1
   },
   periodOptionPressed: {
     backgroundColor: 'rgba(255,253,247,0.12)'
+  },
+  periodIndicator: {
+    backgroundColor: 'rgba(255,253,247,0.92)',
+    borderRadius: 6,
+    bottom: 3,
+    left: 3,
+    position: 'absolute',
+    top: 3
   },
   periodSegment: {
     alignItems: 'center',
@@ -655,7 +724,9 @@ const localStyles = StyleSheet.create({
     borderRadius: 9,
     flexDirection: 'row',
     gap: 2,
-    padding: 3
+    overflow: 'hidden',
+    padding: 3,
+    position: 'relative'
   },
   periodText: {
     color: 'rgba(255,253,247,0.50)',

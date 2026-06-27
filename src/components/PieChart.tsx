@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import { useEffect, useMemo } from 'react';
+import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import Animated, { useAnimatedProps, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
 import Svg, { Circle, Path, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { iconNameForExpenseCategory } from '@/src/lib/categories';
 import { formatCompactYen, formatYen } from '@/src/lib/format';
+import { motionDuration, motionDurations, motionEasings, useReduceMotion } from '@/src/lib/motion';
 import type { CategoryStat } from '@/src/lib/stats';
 
 type PieChartProps = {
@@ -26,8 +28,6 @@ type AnchorPoint = {
 };
 
 const SEGMENT_GAP_LENGTH = 2;
-const DONUT_ANIMATION_DURATION_MS = 720;
-const DONUT_ANIMATION_EASING = Easing.bezier(0.33, 1, 0.68, 1);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
@@ -44,29 +44,27 @@ export function PieChart({
   const strokeWidth = outerRadius - innerRadius;
   const strokeRadius = (outerRadius + innerRadius) / 2;
   const circumference = 2 * Math.PI * strokeRadius;
+  const reduceMotion = useReduceMotion();
   const segments = useMemo(() => (
     totalYen > 0 ? buildSegments(categories, totalYen, center, strokeRadius, circumference) : []
   ), [categories, center, circumference, strokeRadius, totalYen]);
   const segmentSignature = useMemo(() => (
     segments.map((segment) => `${segment.category}:${segment.amountYen}:${segment.color}`).join('|')
   ), [segments]);
-  const [donutProgress] = useState(() => new Animated.Value(0));
+  const donutProgress = useSharedValue(0);
 
   useEffect(() => {
     if (segments.length === 0) {
-      donutProgress.setValue(0);
+      donutProgress.value = 0;
       return;
     }
 
-    donutProgress.stopAnimation();
-    donutProgress.setValue(0);
-    Animated.timing(donutProgress, {
-      duration: DONUT_ANIMATION_DURATION_MS,
-      easing: DONUT_ANIMATION_EASING,
-      toValue: 1,
-      useNativeDriver: false
-    }).start();
-  }, [donutProgress, segmentSignature, segments.length]);
+    donutProgress.value = 0;
+    donutProgress.value = withTiming(1, {
+      duration: motionDuration(motionDurations.large, reduceMotion),
+      easing: motionEasings.crisp
+    });
+  }, [donutProgress, reduceMotion, segmentSignature, segments.length]);
 
   if (totalYen <= 0 || categories.length === 0) {
     return (
@@ -91,34 +89,22 @@ export function PieChart({
         <Svg height={chartSize} viewBox={`0 0 ${chartSize} ${chartSize}`} width={chartSize}>
           <Circle cx={center} cy={center} fill={colors.tint} r={outerRadius} />
           {segments.length === 1 ? (
-            <AnimatedCircle
-              cx={center}
-              cy={center}
-              fill="none"
+            <DonutCircle
+              category={segments[0]}
+              center={center}
+              circumference={circumference}
               onPress={onCategoryPress ? (event) => handleCategoryPress(segments[0], event as unknown as GestureResponderEvent) : undefined}
-              r={strokeRadius}
-              stroke={segments[0].color}
-              strokeDasharray={`${circumference} ${circumference}`}
-              strokeDashoffset={donutProgress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [circumference, 0]
-              })}
+              progress={donutProgress}
+              radius={strokeRadius}
               strokeWidth={strokeWidth}
             />
           ) : (
             segments.map((segment) => (
-              <AnimatedPath
-                d={segment.path}
-                fill="none"
+              <DonutSegment
                 key={`${segment.category}-${segment.path}`}
                 onPress={onCategoryPress ? (event) => handleCategoryPress(segment, event as unknown as GestureResponderEvent) : undefined}
-                stroke={segment.color}
-                strokeDasharray={`${segment.segmentLength} ${segment.segmentLength}`}
-                strokeDashoffset={donutProgress.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [segment.segmentLength, 0]
-                })}
-                strokeLinecap="round"
+                progress={donutProgress}
+                segment={segment}
                 strokeWidth={strokeWidth}
               />
             ))
@@ -183,6 +169,71 @@ export function PieChart({
         })}
       </View>
     </View>
+  );
+}
+
+function DonutCircle({
+  category,
+  center,
+  circumference,
+  onPress,
+  progress,
+  radius,
+  strokeWidth
+}: {
+  category: PieSegment;
+  center: number;
+  circumference: number;
+  onPress?: (event: unknown) => void;
+  progress: SharedValue<number>;
+  radius: number;
+  strokeWidth: number;
+}) {
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: circumference * (1 - progress.value)
+  }));
+
+  return (
+    <AnimatedCircle
+      animatedProps={animatedProps}
+      cx={center}
+      cy={center}
+      fill="none"
+      onPress={onPress}
+      r={radius}
+      stroke={category.color}
+      strokeDasharray={`${circumference} ${circumference}`}
+      strokeWidth={strokeWidth}
+    />
+  );
+}
+
+function DonutSegment({
+  onPress,
+  progress,
+  segment,
+  strokeWidth
+}: {
+  onPress?: (event: unknown) => void;
+  progress: SharedValue<number>;
+  segment: PieSegment;
+  strokeWidth: number;
+}) {
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: segment.segmentLength * (1 - progress.value)
+  }));
+
+  return (
+    <AnimatedPath
+      animatedProps={animatedProps}
+      d={segment.path}
+      fill="none"
+      onPress={onPress}
+      stroke={segment.color}
+      strokeDasharray={`${segment.segmentLength} ${segment.segmentLength}`}
+      strokeLinecap="round"
+      strokeWidth={strokeWidth}
+    />
   );
 }
 

@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useReduceMotion } from '@/src/components/DashboardModule';
 import { completedAtForUser, isParticipant } from '@/src/components/TransferChecklistShared';
 import { IconButton } from '@/src/components/ui';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
@@ -24,6 +23,7 @@ import { categoryWithSubcategory } from '@/src/lib/categorySystem';
 import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import type { TransferConfirmationUpdate } from '@/src/lib/ledger';
+import { useReduceMotion } from '@/src/lib/motion';
 import { buildNetSummary, type NetSummary } from '@/src/lib/transferSummary';
 import type { LedgerMemberProfile, TransferChecklistItemRow } from '@/src/types/database';
 

@@ -3,10 +3,10 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  FlatList,
   Pressable,
   RefreshControl,
   ScrollView,
-  SectionList,
   StyleSheet,
   Text,
   View,
@@ -14,7 +14,15 @@ import {
   type NativeSyntheticEvent
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated from 'react-native-reanimated';
 
+import {
+  AnimatedChevron,
+  AnimatedSkeletonBlock,
+  motionCardResizeTransition,
+  motionPanelIn,
+  motionPanelOut
+} from '@/src/components/motion';
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { BentoCard, SwipeExpenseRow, type ExpenseBadge } from '@/src/components/ui';
 import {
@@ -36,6 +44,7 @@ import {
 import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import { participantBadgeUserIds } from '@/src/lib/historyPresentation';
+import { useReduceMotion } from '@/src/lib/motion';
 import {
   deleteExpense,
   generateRecurringExpenses,
@@ -124,7 +133,7 @@ export default function HistoryScreen() {
   const currentLedgerRef = useRef<Ledger | null>(null);
   const loadInFlightRef = useRef(false);
   const collapseDefaultsMonthRef = useRef<string | null>(null);
-  const sectionListRef = useRef<SectionList<FilteredExpense, HistorySection> | null>(null);
+  const recordsListRef = useRef<FlatList<HistorySection> | null>(null);
   const ledgerScrollRef = useRef<ScrollView | null>(null);
   const ledgerScrollOffsetRef = useRef(0);
   const scrolledTargetRef = useRef<string | null>(null);
@@ -425,21 +434,26 @@ export default function HistoryScreen() {
 
     return [...sectionMap.entries()].map(([date, items]) => ({
       count: items.length,
-      data: collapsedSections.has(date) ? [] : items,
+      data: items,
       date,
       totalYen: items.reduce((sum, item) => sum + item.displayAmountYen, 0)
     }));
-  }, [collapsedSections, filteredExpenses]);
+  }, [filteredExpenses]);
 
-  const scrollToTargetSection = useCallback((sectionIndex: number, animated: boolean) => {
-    sectionListRef.current?.scrollToLocation({
+  const scrollToTargetDate = useCallback((date: string, animated: boolean) => {
+    const targetIndex = sections.findIndex((section) => section.date === date);
+    if (targetIndex < 0) {
+      return false;
+    }
+
+    recordsListRef.current?.scrollToIndex({
       animated,
-      itemIndex: 0,
-      sectionIndex,
+      index: targetIndex,
       viewOffset: insets.top + 92,
       viewPosition: 0
     });
-  }, [insets.top]);
+    return true;
+  }, [insets.top, sections]);
 
   useEffect(() => {
     if (!selectedMonthKey || viewMode !== 'records') {
@@ -479,8 +493,7 @@ export default function HistoryScreen() {
       return;
     }
 
-    const sectionIndex = sections.findIndex((section) => section.date === targetDate);
-    if (sectionIndex < 0) {
+    if (!sections.some((section) => section.date === targetDate)) {
       return;
     }
 
@@ -500,12 +513,12 @@ export default function HistoryScreen() {
 
     scrolledTargetRef.current = scrollKey;
     requestAnimationFrame(() => {
-      scrollToTargetSection(sectionIndex, true);
+      scrollToTargetDate(targetDate, true);
     });
   }, [
     activeLedgerId,
     collapsedSections,
-    scrollToTargetSection,
+    scrollToTargetDate,
     sections,
     selectedMonthKey,
     targetDate,
@@ -612,7 +625,7 @@ export default function HistoryScreen() {
             firstMonthKey={startMonthKey}
           />
 
-          {loading ? null : monthlyReceipts.length === 0 ? (
+          {loading ? <HistoryLedgerSkeleton /> : monthlyReceipts.length === 0 ? (
             <BentoCard style={localStyles.emptyCard}>
               <Text style={styles.h2}>No Expenses Yet</Text>
               <Text style={styles.muted}>Tap the floating add button to create the first record.</Text>
@@ -633,11 +646,14 @@ export default function HistoryScreen() {
           )}
         </ScrollView>
       ) : (
-        <SectionList
-          ref={sectionListRef}
+        <FlatList
+          ref={recordsListRef}
+          data={sections}
           ListEmptyComponent={(
             <View style={localStyles.emptyState}>
-              {!loading && selectedMonthKey ? (
+              {loading ? (
+                <HistoryRecordsSkeleton />
+              ) : selectedMonthKey ? (
                 <BentoCard>
                   <Text style={styles.h2}>No Expenses This Month</Text>
                   <Text style={styles.muted}>There are no records for {formatMonthLabel(selectedMonthKey)}.</Text>
@@ -656,44 +672,29 @@ export default function HistoryScreen() {
           initialNumToRender={18}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
-          keyExtractor={({ expense }) => expense.id}
+          extraData={collapsedSections}
+          keyExtractor={(item) => item.date}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} />}
           onScrollToIndexFailed={() => {
             if (!targetDate || !selectedMonthKey || targetDate.slice(0, 7) !== selectedMonthKey) {
               return;
             }
 
-            const sectionIndex = sections.findIndex((section) => section.date === targetDate);
-            if (sectionIndex < 0) {
-              return;
-            }
-
-            setTimeout(() => scrollToTargetSection(sectionIndex, false), 250);
+            setTimeout(() => scrollToTargetDate(targetDate, false), 250);
           }}
-          renderItem={({ item, index, section }) => (
-            <SectionDetailRow
+          renderItem={({ item }) => (
+            <AnimatedDaySectionCard
+              collapsed={collapsedSections.has(item.date)}
               expenseBadges={expenseBadges}
-              first={index === 0}
-              item={item}
-              last={index === section.data.length - 1}
               onDelete={(expense) => confirmDelete(expense.id)}
               onEdit={(expense) => router.push(`/expenses/${expense.id}`)}
               onSplitBreakdown={setSplitSelection}
+              onToggle={() => toggleSection(item.date)}
               onViewDetails={setDetailSelection}
+              section={item}
             />
           )}
-          renderSectionHeader={({ section }) => (
-            <SectionHeader
-              collapsed={collapsedSections.has(section.date)}
-              count={section.count}
-              date={section.date}
-              onPress={() => toggleSection(section.date)}
-              totalYen={section.totalYen}
-            />
-          )}
-          sections={sections}
           showsVerticalScrollIndicator={false}
-          stickySectionHeadersEnabled={false}
           style={styles.page}
         />
       )}
@@ -790,6 +791,51 @@ function TrendCard({
         </Text>
       </View>
     </BentoCard>
+  );
+}
+
+function HistoryLedgerSkeleton() {
+  const barHeights = [46, 70, 38, 84, 58, 76];
+  const rows = [0, 1, 2, 3];
+
+  return (
+    <BentoCard style={localStyles.loadingCard}>
+      <View style={localStyles.loadingHeader}>
+        <AnimatedSkeletonBlock style={localStyles.loadingTitle} />
+        <AnimatedSkeletonBlock style={localStyles.loadingMeta} />
+      </View>
+      <View style={localStyles.loadingChart}>
+        {barHeights.map((height, index) => (
+          <AnimatedSkeletonBlock
+            key={`${height}-${index}`}
+            style={[localStyles.loadingBar, { height }]}
+          />
+        ))}
+      </View>
+      <View style={localStyles.loadingRows}>
+        {rows.map((row) => (
+          <View key={row} style={localStyles.loadingRow}>
+            <AnimatedSkeletonBlock style={localStyles.loadingMonth} />
+            <AnimatedSkeletonBlock style={localStyles.loadingMix} />
+            <AnimatedSkeletonBlock style={localStyles.loadingAmount} />
+          </View>
+        ))}
+      </View>
+    </BentoCard>
+  );
+}
+
+function HistoryRecordsSkeleton() {
+  return (
+    <View style={localStyles.recordsSkeleton}>
+      {[0, 1, 2].map((row) => (
+        <View key={row} style={localStyles.recordSkeletonGroup}>
+          <AnimatedSkeletonBlock style={localStyles.recordSkeletonHeader} />
+          <AnimatedSkeletonBlock style={localStyles.recordSkeletonRow} />
+          <AnimatedSkeletonBlock style={localStyles.recordSkeletonRowShort} />
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -915,7 +961,7 @@ function SectionHeader({
       onPress={onPress}
       style={({ pressed }) => [
         localStyles.sectionHeader,
-        collapsed ? localStyles.sectionHeaderCollapsed : localStyles.sectionHeaderExpanded,
+        !collapsed && localStyles.sectionHeaderExpanded,
         pressed && localStyles.pressed
       ]}
     >
@@ -927,9 +973,71 @@ function SectionHeader({
       </View>
       <View style={localStyles.sectionTotalBlock}>
         <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.sectionTotal}>{formatYen(totalYen)}</Text>
-        <Ionicons color={colors.ink} name={collapsed ? 'chevron-down' : 'chevron-up'} size={18} />
+        <AnimatedChevron color={colors.ink} open={!collapsed} size={18} />
       </View>
     </Pressable>
+  );
+}
+
+function AnimatedDaySectionCard({
+  collapsed,
+  expenseBadges,
+  onDelete,
+  onEdit,
+  onSplitBreakdown,
+  onToggle,
+  onViewDetails,
+  section
+}: {
+  collapsed: boolean;
+  expenseBadges: (expense: Expense) => ExpenseBadge[];
+  onDelete: (expense: Expense) => void;
+  onEdit: (expense: Expense) => void;
+  onSplitBreakdown: (item: FilteredExpense) => void;
+  onToggle: () => void;
+  onViewDetails: (item: FilteredExpense) => void;
+  section: HistorySection;
+}) {
+  const reduceMotion = useReduceMotion();
+  const resize = motionCardResizeTransition(reduceMotion);
+  const panelIn = motionPanelIn(reduceMotion);
+  const panelOut = motionPanelOut(reduceMotion);
+
+  return (
+    <Animated.View
+      layout={resize}
+      style={localStyles.sectionCard}
+    >
+      <SectionHeader
+        collapsed={collapsed}
+        count={section.count}
+        date={section.date}
+        onPress={onToggle}
+        totalYen={section.totalYen}
+      />
+
+      {!collapsed ? (
+        <Animated.View
+          entering={panelIn}
+          exiting={panelOut}
+          layout={resize}
+          style={localStyles.sectionDetailStack}
+        >
+          {section.data.map((item, index) => (
+            <SectionDetailRow
+              expenseBadges={expenseBadges}
+              first={index === 0}
+              item={item}
+              key={item.expense.id}
+              onDelete={onDelete}
+              onEdit={onEdit}
+              onSplitBreakdown={onSplitBreakdown}
+              onViewDetails={onViewDetails}
+            />
+          ))}
+        </Animated.View>
+      ) : null}
+    </Animated.View>
   );
 }
 
@@ -937,7 +1045,6 @@ function SectionDetailRow({
   expenseBadges,
   first,
   item,
-  last,
   onDelete,
   onEdit,
   onSplitBreakdown,
@@ -946,7 +1053,6 @@ function SectionDetailRow({
   expenseBadges: (expense: Expense) => ExpenseBadge[];
   first: boolean;
   item: FilteredExpense;
-  last: boolean;
   onDelete: (expense: Expense) => void;
   onEdit: (expense: Expense) => void;
   onSplitBreakdown: (item: FilteredExpense) => void;
@@ -958,11 +1064,7 @@ function SectionDetailRow({
   const tagColor = resolvedCategory.subcategory ? categoryColor(resolvedCategory.categoryId) : undefined;
 
   return (
-    <View style={[
-      localStyles.sectionDetailSegment,
-      first && localStyles.sectionDetailSegmentFirst,
-      last && localStyles.sectionDetailSegmentLast
-    ]}>
+    <View style={localStyles.sectionDetailSegment}>
       {!first ? <View style={localStyles.detailDivider} /> : null}
       <SwipeExpenseRow
         compact
@@ -1269,6 +1371,54 @@ const localStyles = StyleSheet.create({
     overflow: 'hidden',
     padding: 0
   },
+  loadingAmount: {
+    height: 12,
+    width: 72
+  },
+  loadingBar: {
+    alignSelf: 'flex-end',
+    borderRadius: 6,
+    flex: 1
+  },
+  loadingCard: {
+    gap: 16,
+    overflow: 'hidden',
+    padding: 18
+  },
+  loadingChart: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 8,
+    height: 92
+  },
+  loadingHeader: {
+    gap: 9
+  },
+  loadingMeta: {
+    height: 12,
+    width: 112
+  },
+  loadingMix: {
+    flex: 1,
+    height: 12
+  },
+  loadingMonth: {
+    height: 14,
+    width: 42
+  },
+  loadingRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 34
+  },
+  loadingRows: {
+    gap: 11
+  },
+  loadingTitle: {
+    height: 18,
+    width: 180
+  },
   mixColumn: {
     flex: 1,
     minWidth: 0
@@ -1333,6 +1483,24 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingBottom: 10
   },
+  recordSkeletonGroup: {
+    gap: 8
+  },
+  recordSkeletonHeader: {
+    height: 64,
+    width: '100%'
+  },
+  recordSkeletonRow: {
+    height: 68,
+    width: '100%'
+  },
+  recordSkeletonRowShort: {
+    height: 54,
+    width: '86%'
+  },
+  recordsSkeleton: {
+    gap: 14
+  },
   recordsMonthTitle: {
     color: colors.ink,
     fontFamily: fontFamilies.extraBold,
@@ -1340,6 +1508,16 @@ const localStyles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
     lineHeight: 31
+  },
+  sectionCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.glassBorder,
+    borderRadius: theme.radii.surface,
+    borderWidth: 1,
+    marginBottom: 14,
+    marginTop: 8,
+    overflow: 'hidden',
+    ...theme.daySectionShadow
   },
   sectionDate: {
     color: colors.ink,
@@ -1355,43 +1533,25 @@ const localStyles = StyleSheet.create({
   },
   sectionDetailSegment: {
     backgroundColor: colors.surface,
-    borderColor: colors.glassBorder,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
     overflow: 'hidden'
   },
-  sectionDetailSegmentFirst: {
-    ...theme.daySectionShadow
-  },
-  sectionDetailSegmentLast: {
-    borderBottomLeftRadius: 18,
-    borderBottomRightRadius: 18,
-    borderBottomWidth: 1,
-    marginBottom: 14
+  sectionDetailStack: {
+    backgroundColor: colors.surface,
+    overflow: 'hidden'
   },
   sectionHeader: {
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderColor: colors.glassBorder,
-    borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
     justifyContent: 'space-between',
-    marginTop: 8,
     minHeight: 64,
     paddingHorizontal: 18,
-    paddingVertical: 13,
-    ...theme.daySectionShadow
-  },
-  sectionHeaderCollapsed: {
-    borderRadius: theme.radii.surface,
-    marginBottom: 14
+    paddingVertical: 13
   },
   sectionHeaderExpanded: {
-    borderTopLeftRadius: theme.radii.surface,
-    borderTopRightRadius: theme.radii.surface,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0
+    borderBottomColor: colors.line,
+    borderBottomWidth: 1
   },
   sectionTotal: {
     color: colors.ink,
