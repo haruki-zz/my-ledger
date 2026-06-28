@@ -10,8 +10,12 @@ import {
   closedMonthKeys,
   filterCurrentMonthSettledExpenses,
   heatLevelForAmount,
+  heatScaleMaxForAmounts,
   resolveDashboardDateRange,
   resolveDashboardPeriodNavigation,
+  trendAmountForVisualRatio,
+  trendScaleMaxForAmounts,
+  trendVisualRatioForAmount,
   type DashboardPeriod
 } from './stats';
 import { EXPENSE_CATEGORIES, iconNameForExpenseCategory } from './categories';
@@ -626,6 +630,49 @@ describe('heatLevelForAmount', () => {
     expect(heatLevelForAmount(251, 1000)).toBe(2);
     expect(heatLevelForAmount(750, 1000)).toBe(3);
     expect(heatLevelForAmount(1000, 1000)).toBe(4);
+  });
+
+  it('supports a five-level active heat scale', () => {
+    expect(heatLevelForAmount(200, 1000, 5)).toBe(1);
+    expect(heatLevelForAmount(201, 1000, 5)).toBe(2);
+    expect(heatLevelForAmount(600, 1000, 5)).toBe(3);
+    expect(heatLevelForAmount(1000, 1000, 5)).toBe(5);
+  });
+});
+
+describe('heatScaleMaxForAmounts', () => {
+  it('caps heat scale with a high percentile so one outlier does not flatten the month', () => {
+    const scaleMax = heatScaleMaxForAmounts([0, 3000, 8000, 12000, 18000, 200000]);
+
+    expect(scaleMax).toBe(18000);
+    expect(heatLevelForAmount(3000, scaleMax, 5)).toBe(1);
+    expect(heatLevelForAmount(8000, scaleMax, 5)).toBe(3);
+    expect(heatLevelForAmount(12000, scaleMax, 5)).toBe(4);
+    expect(heatLevelForAmount(18000, scaleMax, 5)).toBe(5);
+    expect(heatLevelForAmount(200000, scaleMax, 5)).toBe(5);
+  });
+
+  it('uses the next highest day as the scale max for tiny samples with a large outlier', () => {
+    expect(heatScaleMaxForAmounts([5000, 9000, 100000])).toBe(9000);
+  });
+});
+
+describe('daily trend visual scaling', () => {
+  it('caps the visual scale so one large day does not flatten ordinary days', () => {
+    const scaleMax = trendScaleMaxForAmounts([0, 3000, 8000, 12000, 18000, 360000]);
+
+    expect(scaleMax).toBe(18000);
+    expect(trendVisualRatioForAmount(3000, scaleMax)).toBeGreaterThan(0.25);
+    expect(trendVisualRatioForAmount(8000, scaleMax)).toBeGreaterThan(0.55);
+    expect(trendVisualRatioForAmount(360000, scaleMax)).toBe(1);
+  });
+
+  it('can derive axis labels from the non-linear visual ratio', () => {
+    const scaleMax = 18000;
+    const midAmount = trendAmountForVisualRatio(0.5, scaleMax);
+
+    expect(midAmount).toBeGreaterThan(6000);
+    expect(midAmount).toBeLessThan(7000);
   });
 });
 

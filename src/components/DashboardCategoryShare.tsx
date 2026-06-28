@@ -61,6 +61,7 @@ export function DashboardCategoryShare({
           )}
         </View>
       }
+      expandOnCollapsedAreaPress
       measureKey={`category-share:${measureKey}`}
       middle={
         <CapsuleMorph

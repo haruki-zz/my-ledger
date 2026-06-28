@@ -121,7 +121,12 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
       return;
     }
 
+    const shouldRestartTransition = closing || renderedDetail?.detailKey !== detail.detailKey;
     setRenderedDetail(detail);
+    if (!shouldRestartTransition) {
+      return;
+    }
+
     setClosing(false);
     dragY.setValue(0);
     setSheetAtTop(true);
@@ -131,7 +136,7 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
       toValue: 1,
       useNativeDriver: true
     }).start();
-  }, [detail, dragY, transitionProgress]);
+  }, [closing, detail, dragY, renderedDetail?.detailKey, transitionProgress]);
 
   useEffect(() => {
     if (visible || !renderedDetail || closing) {

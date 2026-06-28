@@ -13,6 +13,8 @@ import { useReduceMotion } from '@/src/lib/motion';
 
 type DashboardModuleProps = {
   detail: ReactNode;
+  disableContentTransition?: boolean;
+  expandOnCollapsedAreaPress?: boolean;
   footer?: ReactNode;
   measureKey?: string;
   middle?: ReactNode;
@@ -25,6 +27,8 @@ type DashboardModuleProps = {
 
 export function DashboardModule({
   detail,
+  disableContentTransition = false,
+  expandOnCollapsedAreaPress = false,
   footer,
   measureKey,
   middle,
@@ -36,26 +40,33 @@ export function DashboardModule({
 }: DashboardModuleProps) {
   const reduceMotion = useReduceMotion();
   const layout = motionCardResizeTransition(reduceMotion);
-  const panelIn = motionPanelIn(reduceMotion);
-  const panelOut = motionPanelOut(reduceMotion);
+  const panelIn = disableContentTransition ? undefined : motionPanelIn(reduceMotion);
+  const panelOut = disableContentTransition ? undefined : motionPanelOut(reduceMotion);
   const contentKey = `${open ? 'detail' : 'summary'}:${measureKey || title}`;
+  const pressCollapsedArea = expandOnCollapsedAreaPress && !open;
+  const headerContent = (
+    <>
+      <View style={localStyles.headerLeft}>
+        <View style={localStyles.tick} />
+        <Text style={localStyles.title}>{title}</Text>
+      </View>
+      <View style={localStyles.headerRight}>
+        {summaryStat}
+        <AnimatedChevron open={open} />
+      </View>
+    </>
+  );
 
   return (
     <Animated.View layout={layout} style={localStyles.card}>
       <Pressable
         accessibilityLabel={`${open ? 'Collapse' : 'Expand'} ${title}`}
         accessibilityRole="button"
+        disabled={pressCollapsedArea}
         onPress={onToggle}
-        style={({ pressed }) => [localStyles.header, pressed && localStyles.headerPressed]}
+        style={({ pressed }) => [localStyles.header, pressed && !pressCollapsedArea && localStyles.headerPressed]}
       >
-        <View style={localStyles.headerLeft}>
-          <View style={localStyles.tick} />
-          <Text style={localStyles.title}>{title}</Text>
-        </View>
-        <View style={localStyles.headerRight}>
-          {summaryStat}
-          <AnimatedChevron open={open} />
-        </View>
+        {headerContent}
       </Pressable>
 
       {middle}
@@ -71,6 +82,18 @@ export function DashboardModule({
       </Animated.View>
 
       {footer}
+      {pressCollapsedArea ? (
+        <Pressable
+          accessibilityLabel={`Expand ${title}`}
+          accessibilityRole="button"
+          onPress={onToggle}
+          pointerEvents="box-only"
+          style={({ pressed }) => [
+            localStyles.collapsedHitOverlay,
+            pressed && localStyles.collapsedHitOverlayPressed
+          ]}
+        />
+      ) : null}
     </Animated.View>
   );
 }
@@ -82,10 +105,23 @@ const localStyles = StyleSheet.create({
     borderRadius: theme.radii.surface,
     borderWidth: 1,
     boxShadow: '0 16px 34px -18px rgba(42,39,34,0.20)',
-    overflow: 'hidden'
+    overflow: 'hidden',
+    position: 'relative'
   },
   collapseWrap: {
     overflow: 'hidden'
+  },
+  collapsedHitOverlay: {
+    borderRadius: theme.radii.surface,
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 2
+  },
+  collapsedHitOverlayPressed: {
+    backgroundColor: 'rgba(42,39,34,0.03)'
   },
   header: {
     alignItems: 'center',

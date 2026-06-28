@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
   type LayoutChangeEvent,
@@ -18,6 +20,7 @@ import {
 import Animated, { Easing, interpolateColor, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { KEYBOARD_DONE_ACCESSORY_ID, KeyboardDoneAccessory } from '@/src/components/KeyboardDoneAccessory';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
 import {
   DEFAULT_CATEGORY_SPLIT_RATIO,
@@ -382,6 +385,15 @@ export function ExpenseForm({
     }, 80);
   }
 
+  function revealCustomTagInput() {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 260);
+  }
+
   function selectDay(dateString: string, isFuture: boolean) {
     if (isFuture) {
       return;
@@ -540,6 +552,7 @@ export function ExpenseForm({
     <View style={[localStyles.page, { paddingBottom: pagePaddingBottom, paddingTop: pagePaddingTop }]}>
       {renderHeader()}
       <ScrollView
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         ref={scrollRef}
         contentContainerStyle={[
           localStyles.stack,
@@ -547,6 +560,7 @@ export function ExpenseForm({
           { paddingBottom: keypadVisible ? 10 : 18 }
         ]}
         contentInsetAdjustmentBehavior="never"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={step !== 2}
         showsVerticalScrollIndicator={false}
@@ -559,6 +573,7 @@ export function ExpenseForm({
       </ScrollView>
       {keypadVisible ? renderKeypad() : null}
       {renderFooter()}
+      <KeyboardDoneAccessory />
     </View>
   );
 
@@ -788,6 +803,28 @@ export function ExpenseForm({
                   </Pressable>
                 );
               })}
+            </View>
+            <View style={localStyles.customTagField}>
+              <Text style={localStyles.customTagLabel}>CUSTOM DETAIL</Text>
+              <TextInput
+                accessibilityLabel="Custom detail tag"
+                autoCapitalize="words"
+                autoCorrect={false}
+                inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+                maxLength={36}
+                onChangeText={setSubcategory}
+                onFocus={revealCustomTagInput}
+                onSubmitEditing={(event) => {
+                  if (event.nativeEvent.text.trim()) {
+                    setStep(4);
+                  }
+                }}
+                placeholder="Enter a custom tag"
+                placeholderTextColor="#B8AEA0"
+                returnKeyType="next"
+                style={localStyles.customTagInput}
+                value={subcategory}
+              />
             </View>
           </View>
         ) : null}
@@ -1117,6 +1154,32 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.monoBold,
     fontSize: 8,
     fontWeight: '700'
+  },
+  customTagField: {
+    backgroundColor: 'rgba(42,39,34,0.035)',
+    borderColor: 'rgba(42,39,34,0.08)',
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
+    marginTop: 12,
+    paddingHorizontal: 13,
+    paddingVertical: 10
+  },
+  customTagInput: {
+    color: INK,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 20,
+    minHeight: 24,
+    padding: 0
+  },
+  customTagLabel: {
+    color: '#B0A698',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 8.5,
+    fontWeight: '700',
+    letterSpacing: 1
   },
   detailCaption: {
     color: '#C0B9AC',

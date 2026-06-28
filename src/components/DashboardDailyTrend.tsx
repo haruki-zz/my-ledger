@@ -8,7 +8,7 @@ import { motionLayoutTransition } from '@/src/components/motion';
 import { colors, fontFamilies } from '@/src/components/styles';
 import { displayName, formatCompactYen } from '@/src/lib/format';
 import { useReduceMotion } from '@/src/lib/motion';
-import type { DailyUserStat } from '@/src/lib/stats';
+import { trendScaleMaxForAmounts, trendVisualRatioForAmount, type DailyUserStat } from '@/src/lib/stats';
 
 type DashboardDailyTrendProps = {
   currentUserColor: string;
@@ -56,6 +56,7 @@ export function DashboardDailyTrend({
           )}
         </View>
       }
+      expandOnCollapsedAreaPress
       onToggle={() => setOpen((current) => !current)}
       open={open}
       summary={
@@ -93,7 +94,10 @@ function TrendPreview({
   series,
   todayString
 }: Pick<DashboardDailyTrendProps, 'currentUserColor' | 'currentUserId' | 'otherUserColor' | 'otherUserId' | 'series' | 'todayString'>) {
-  const maxAmount = Math.max(0, ...series.map((item) => item.totalAmountYen));
+  const visualScaleMax = useMemo(
+    () => trendScaleMaxForAmounts(series.map((item) => item.totalAmountYen)),
+    [series]
+  );
   const average = useMemo(() => {
     const elapsed = series.filter((item) => item.date <= todayString);
     const denominator = Math.max(1, elapsed.length || series.length);
@@ -106,8 +110,8 @@ function TrendPreview({
     <>
       <View style={localStyles.previewBars}>
         {series.map((item) => {
-          const totalPx = maxAmount > 0
-            ? Math.round((item.totalAmountYen / maxAmount) * PREVIEW_HEIGHT)
+          const totalPx = visualScaleMax > 0
+            ? visualPreviewBarHeight(trendVisualRatioForAmount(item.totalAmountYen, visualScaleMax) * PREVIEW_HEIGHT)
             : 0;
           const currentAmount = currentUserId ? item.amountsByUserId[currentUserId] || 0 : 0;
           const currentPx = item.totalAmountYen > 0
@@ -216,6 +220,10 @@ function UserLegendDot({ color, label }: { color: string; label: string }) {
       </Text>
     </View>
   );
+}
+
+function visualPreviewBarHeight(height: number) {
+  return height > 0 ? Math.max(2, Math.round(height)) : 0;
 }
 
 const localStyles = StyleSheet.create({

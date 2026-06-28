@@ -7,7 +7,12 @@ import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { displayName, formatCompactYen, formatYen } from '@/src/lib/format';
 import { motionDuration, motionDurations, motionEasings, useReduceMotion } from '@/src/lib/motion';
-import type { DailyUserStat } from '@/src/lib/stats';
+import {
+  trendAmountForVisualRatio,
+  trendScaleMaxForAmounts,
+  trendVisualRatioForAmount,
+  type DailyUserStat
+} from '@/src/lib/stats';
 
 type DailyChartProps = {
   currentUserColor?: string;
@@ -56,6 +61,10 @@ export function DailyChart({
   todayString
 }: DailyChartProps) {
   const maxAmount = Math.max(0, ...series.map((item) => item.totalAmountYen));
+  const visualScaleMax = useMemo(
+    () => trendScaleMaxForAmounts(series.map((item) => item.totalAmountYen)),
+    [series]
+  );
   const reduceMotion = useReduceMotion();
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [chartWidth, setChartWidth] = useState(WIDTH);
@@ -66,11 +75,13 @@ export function DailyChart({
   const midline = PADDING_TOP + PLOT_HEIGHT / 2;
   const elapsedSeries = todayString ? series.filter((item) => item.date <= todayString) : series;
   const averageAmount = series.reduce((sum, item) => sum + item.totalAmountYen, 0) / Math.max(1, elapsedSeries.length || series.length);
-  const averageY = maxAmount > 0 ? baseline - (averageAmount / maxAmount) * PLOT_HEIGHT : baseline;
+  const averageY = visualScaleMax > 0 ? baseline - trendVisualRatioForAmount(averageAmount, visualScaleMax) * PLOT_HEIGHT : baseline;
   const barSlotWidth = series.length > 0 ? PLOT_WIDTH / series.length : PLOT_WIDTH;
   const barWidth = Math.max(4, Math.min(12, barSlotWidth * 0.48));
+  const midlineAmount = trendAmountForVisualRatio(0.5, visualScaleMax);
+  const topAxisLabel = maxAmount > visualScaleMax ? `${formatCompactYen(visualScaleMax)}+` : formatCompactYen(visualScaleMax);
   const points = useMemo(() => {
-    if (series.length === 0 || maxAmount <= 0) {
+    if (series.length === 0 || visualScaleMax <= 0) {
       return [];
     }
 
@@ -78,9 +89,9 @@ export function DailyChart({
       const x = PADDING_LEFT + barSlotWidth * index + barSlotWidth / 2;
       const currentAmount = currentUserId ? item.amountsByUserId[currentUserId] || 0 : 0;
       const otherAmount = otherUserId ? item.amountsByUserId[otherUserId] || 0 : 0;
-      const currentHeight = (currentAmount / maxAmount) * PLOT_HEIGHT;
-      const otherHeight = (otherAmount / maxAmount) * PLOT_HEIGHT;
-      const totalHeight = (item.totalAmountYen / maxAmount) * PLOT_HEIGHT;
+      const totalHeight = trendVisualRatioForAmount(item.totalAmountYen, visualScaleMax) * PLOT_HEIGHT;
+      const currentHeight = item.totalAmountYen > 0 ? totalHeight * (currentAmount / item.totalAmountYen) : 0;
+      const otherHeight = item.totalAmountYen > 0 ? totalHeight * (otherAmount / item.totalAmountYen) : 0;
       return {
         ...item,
         x,
@@ -92,7 +103,7 @@ export function DailyChart({
         topY: baseline - totalHeight
       };
     });
-  }, [barSlotWidth, baseline, currentUserId, maxAmount, otherUserId, series]);
+  }, [barSlotWidth, baseline, currentUserId, otherUserId, series, visualScaleMax]);
   const barTargetGroups = useMemo<BarTargetGroup[]>(() => (
     points.map((point) => ({
       barWidth,
@@ -186,10 +197,10 @@ export function DailyChart({
           y2={averageY}
         />
         <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} x={4} y={PADDING_TOP + 4}>
-          {formatCompactYen(maxAmount)}
+          {topAxisLabel}
         </SvgText>
         <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} x={4} y={midline + 4}>
-          {formatCompactYen(maxAmount / 2)}
+          {formatCompactYen(midlineAmount)}
         </SvgText>
         <SvgText fill={colors.muted} fontFamily={fontFamilies.mono} fontSize={10} x={4} y={baseline + 4}>
           ¥0

@@ -540,12 +540,69 @@ export function buildDashboardHeatDays(input: {
   }));
 }
 
-export function heatLevelForAmount(amount: number, maxAmount: number) {
-  if (amount <= 0 || maxAmount <= 0) {
+const HEAT_SCALE_PERCENTILE = 0.9;
+const DEFAULT_HEAT_ACTIVE_LEVEL_COUNT = 4;
+const TREND_VISUAL_EXPONENT = 0.72;
+
+export function heatScaleMaxForAmounts(amounts: number[]) {
+  const positiveAmounts = amounts
+    .filter((amount) => Number.isFinite(amount) && amount > 0)
+    .sort((a, b) => a - b);
+
+  if (positiveAmounts.length === 0) {
     return 0;
   }
 
-  return Math.min(4, Math.max(1, Math.ceil((amount / maxAmount) * 4)));
+  if (positiveAmounts.length === 1) {
+    return positiveAmounts[0];
+  }
+
+  if (positiveAmounts.length < 4) {
+    const maxAmount = positiveAmounts[positiveAmounts.length - 1];
+    const nextHighestAmount = positiveAmounts[positiveAmounts.length - 2];
+    return maxAmount >= nextHighestAmount * 4 ? nextHighestAmount : maxAmount;
+  }
+
+  const percentileIndex = Math.floor((positiveAmounts.length - 1) * HEAT_SCALE_PERCENTILE);
+  return positiveAmounts[percentileIndex];
+}
+
+export function heatLevelForAmount(
+  amount: number,
+  maxAmount: number,
+  activeLevelCount = DEFAULT_HEAT_ACTIVE_LEVEL_COUNT
+) {
+  if (amount <= 0 || maxAmount <= 0 || activeLevelCount <= 0) {
+    return 0;
+  }
+
+  const levelCount = Math.max(1, Math.floor(activeLevelCount));
+  return Math.min(levelCount, Math.max(1, Math.ceil((amount / maxAmount) * levelCount)));
+}
+
+export function trendScaleMaxForAmounts(amounts: number[]) {
+  return heatScaleMaxForAmounts(amounts);
+}
+
+export function trendVisualRatioForAmount(amount: number, scaleMaxAmount: number) {
+  if (amount <= 0 || scaleMaxAmount <= 0) {
+    return 0;
+  }
+
+  const linearRatio = clamp(amount / scaleMaxAmount, 0, 1);
+  return Math.pow(linearRatio, TREND_VISUAL_EXPONENT);
+}
+
+export function trendAmountForVisualRatio(ratio: number, scaleMaxAmount: number) {
+  if (ratio <= 0 || scaleMaxAmount <= 0) {
+    return 0;
+  }
+
+  return Math.pow(clamp(ratio, 0, 1), 1 / TREND_VISUAL_EXPONENT) * scaleMaxAmount;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 export function buildHistorySummary(input: {

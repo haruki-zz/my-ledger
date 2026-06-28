@@ -80,7 +80,7 @@ export function AnimatedBarFill({
   style
 }: AnimatedBarFillProps) {
   const reduceMotion = useReduceMotion();
-  const animatedSize = useSharedValue(Math.max(minSize, size));
+  const animatedSize = useSharedValue(minSize);
   const animatedColor = useSharedValue(color);
 
   useEffect(() => {
@@ -112,7 +112,7 @@ export function AnimatedPercentFill({
   style
 }: AnimatedPercentFillProps) {
   const reduceMotion = useReduceMotion();
-  const animatedPercent = useSharedValue(percent);
+  const animatedPercent = useSharedValue(0);
   const animatedColor = useSharedValue(color);
 
   useEffect(() => {
