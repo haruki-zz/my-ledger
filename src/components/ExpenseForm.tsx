@@ -17,7 +17,13 @@ import {
   type NativeSyntheticEvent,
   type PanResponderInstance
 } from 'react-native';
-import Animated, { Easing, interpolateColor, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KEYBOARD_DONE_ACCESSORY_ID, KeyboardDoneAccessory } from '@/src/components/KeyboardDoneAccessory';
@@ -30,6 +36,7 @@ import {
   categoryLabel,
   resolveCategory,
   subcategoryPresets,
+  type PrimaryCategory,
   type PrimaryCategoryId
 } from '@/src/lib/categorySystem';
 import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
@@ -126,6 +133,40 @@ function ProgressDot({ active }: { active: boolean }) {
   return <Animated.View style={[localStyles.progressDot, animatedStyle]} />;
 }
 
+function WheelCategoryOption({
+  category,
+  highlighted,
+  onPress
+}: {
+  category: PrimaryCategory;
+  highlighted: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={`Select ${category.label}`}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [localStyles.wheelOption, pressed && localStyles.pressed]}
+    >
+      <View style={[localStyles.categoryIconBubble, { backgroundColor: `${category.color}20` }]}>
+        <Ionicons color={category.color} name={category.icon} size={18} />
+      </View>
+      <Text numberOfLines={1} style={[localStyles.wheelOptionText, highlighted && { color: category.color }]}>
+        {category.label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function wheelRowIntersectsBand(absoluteIndex: number, scrollY: number) {
+  const rowStart = absoluteIndex * WHEEL_ROW_HEIGHT;
+  const rowEnd = rowStart + WHEEL_ROW_HEIGHT;
+  const bandStart = scrollY;
+  const bandEnd = bandStart + WHEEL_ROW_HEIGHT;
+  return Math.min(rowEnd, bandEnd) - Math.max(rowStart, bandStart) > 0.5;
+}
+
 export function ExpenseForm({
   ledger,
   members,
@@ -186,6 +227,7 @@ export function ExpenseForm({
   const [shareBuffer, setShareBuffer] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [splitBarWidth, setSplitBarWidth] = useState(0);
+  const [wheelScrollY, setWheelScrollY] = useState(WHEEL_MIDDLE_REPEAT * PRIMARY_CATEGORIES.length * WHEEL_ROW_HEIGHT);
 
   const today = todayDateString();
   const amountYen = parsePositiveInteger(amountBuffer) || 0;
@@ -234,6 +276,7 @@ export function ExpenseForm({
   useEffect(() => {
     if (step === 2) {
       const targetIndex = WHEEL_MIDDLE_REPEAT * PRIMARY_CATEGORIES.length + selectedCategoryIndexRef.current;
+      setWheelScrollY(targetIndex * WHEEL_ROW_HEIGHT);
       requestAnimationFrame(() => {
         wheelScrollRef.current?.scrollTo({
           animated: false,
@@ -350,6 +393,10 @@ export function ExpenseForm({
     setStep(3);
   }
 
+  function handleWheelScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    setWheelScrollY(event.nativeEvent.contentOffset.y);
+  }
+
   function syncWheelSelection(event: NativeSyntheticEvent<NativeScrollEvent>) {
     const absoluteIndex = Math.round(event.nativeEvent.contentOffset.y / WHEEL_ROW_HEIGHT);
     const categoryIndex = wrapIndex(absoluteIndex, PRIMARY_CATEGORIES.length);
@@ -358,6 +405,7 @@ export function ExpenseForm({
     const middleIndex = WHEEL_MIDDLE_REPEAT * PRIMARY_CATEGORIES.length + categoryIndex;
     if (Math.abs(absoluteIndex - middleIndex) > PRIMARY_CATEGORIES.length * 2) {
       requestAnimationFrame(() => {
+        setWheelScrollY(middleIndex * WHEEL_ROW_HEIGHT);
         wheelScrollRef.current?.scrollTo({
           animated: false,
           y: middleIndex * WHEEL_ROW_HEIGHT
@@ -714,6 +762,7 @@ export function ExpenseForm({
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
           onMomentumScrollEnd={syncWheelSelection}
+          onScroll={handleWheelScroll}
           ref={wheelScrollRef}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
@@ -725,9 +774,9 @@ export function ExpenseForm({
             {wheelRows.map(({ absoluteIndex, category }) => {
               const categoryIndex = absoluteIndex % PRIMARY_CATEGORIES.length;
               return (
-                <Pressable
-                  accessibilityLabel={`Select ${category.label}`}
-                  accessibilityRole="button"
+                <WheelCategoryOption
+                  category={category}
+                  highlighted={wheelRowIntersectsBand(absoluteIndex, wheelScrollY)}
                   key={absoluteIndex}
                   onPress={() => {
                     if (categoryIndex === selectedCategoryIndex) {
@@ -741,15 +790,7 @@ export function ExpenseForm({
                       y: absoluteIndex * WHEEL_ROW_HEIGHT
                     });
                   }}
-                  style={({ pressed }) => [localStyles.wheelOption, pressed && localStyles.pressed]}
-                >
-                  <View style={[localStyles.categoryIconBubble, { backgroundColor: `${category.color}20` }]}>
-                    <Ionicons color={category.color} name={category.icon} size={18} />
-                  </View>
-                  <Text numberOfLines={1} style={localStyles.wheelOptionText}>
-                    {category.label}
-                  </Text>
-                </Pressable>
+                />
               );
             })}
           </View>
