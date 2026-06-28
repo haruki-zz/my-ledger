@@ -1,7 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  type SharedValue
+} from 'react-native-reanimated';
 
 import { DashboardModule } from '@/src/components/DashboardModule';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
@@ -174,7 +180,11 @@ function MorphCapsule({
   progress: SharedValue<number>;
   reduceMotion: boolean;
 }) {
-  const animatedColor = useSharedValue(color);
+  const colorProgress = useSharedValue(1);
+  const [colorRange, setColorRange] = useState(() => ({
+    from: color,
+    to: color
+  }));
   const angle = (index / CAPSULE_COUNT) * 360 - 90;
   const angleRadians = (angle * Math.PI) / 180;
   const barX = (index - (CAPSULE_COUNT - 1) / 2) * BAR_STEP;
@@ -182,14 +192,27 @@ function MorphCapsule({
   const ringY = Math.sin(angleRadians) * RING_RADIUS;
 
   useEffect(() => {
-    animatedColor.value = withTiming(color, {
+    if (colorRange.to === color) {
+      return;
+    }
+
+    setColorRange({
+      from: colorRange.to,
+      to: color
+    });
+    colorProgress.value = 0;
+    colorProgress.value = withTiming(1, {
       duration: motionDuration(motionDurations.content, reduceMotion),
       easing: motionEasings.standard
     });
-  }, [animatedColor, color, reduceMotion]);
+  }, [color, colorProgress, colorRange.to, reduceMotion]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    backgroundColor: animatedColor.value,
+    backgroundColor: interpolateColor(
+      colorProgress.value,
+      [0, 1],
+      [colorRange.from, colorRange.to]
+    ),
     transform: [
       {
         translateX: barX + (ringX - barX) * progress.value
