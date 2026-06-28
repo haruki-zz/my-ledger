@@ -1,7 +1,8 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
+  Easing,
   PanResponder,
   Pressable,
   RefreshControl,
@@ -14,12 +15,13 @@ import {
 import Svg, { Defs, Pattern, Polygon, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AnimatedSkeletonBlock } from '@/src/components/motion';
 import { ReceiptPrinterOverlay } from '@/src/components/ReceiptPrinterOverlay';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { displayName, formatYen } from '@/src/lib/format';
-import { useReduceMotion } from '@/src/lib/motion';
+import { motionDuration, motionDurations, useReduceMotion } from '@/src/lib/motion';
 import {
   getLastShownReceiptPrinterMonthKey,
   markReceiptPrinterShown,
@@ -53,6 +55,7 @@ const RECEIPT_WIDTH = 290;
 const RECEIPT_SLIDE_DISTANCE = RECEIPT_WIDTH + 96;
 const RECEIPT_COMMIT_THRESHOLD = RECEIPT_WIDTH * 0.24;
 const RECEIPT_DRAG_CAPTURE_DISTANCE = 6;
+const RECEIPT_SKELETON_PULSE_MS = 760;
 // Temporary testing switch: bypass the persisted once-per-month gate while keeping the original path intact.
 const FORCE_RECEIPT_PRINTER_ON_FOCUS = false;
 const AnimatedReceipt = Animated.createAnimatedComponent(View);
@@ -103,6 +106,7 @@ export default function ReceiptsScreen() {
   const otherMember = state.members.find((member) => member.user_id !== currentUserId) || null;
   const currentUserName = displayName(currentMember?.profile.display_name);
   const otherUserName = displayName(otherMember?.profile.display_name);
+  const receiptLoading = state.loading || (printerCheckState === 'checking' && !printerVisible);
 
   const load = useCallback(async () => {
     if (ledgerLoading || !activeLedger?.ledger || !currentUserId) {
@@ -420,10 +424,6 @@ export default function ReceiptsScreen() {
     }
   }
 
-  if (printerCheckState === 'checking' && !printerVisible) {
-    return <View style={styles.page} />;
-  }
-
   return (
     <View style={styles.page}>
       <ScrollView
@@ -440,72 +440,76 @@ export default function ReceiptsScreen() {
 
         {state.error ? <Text style={styles.error}>{state.error}</Text> : null}
 
-        {!state.loading && state.receipts.length === 0 ? (
-          <View style={localStyles.emptyCard}>
-            <Text style={styles.h2}>No Closed Months Yet</Text>
-            <Text style={styles.muted}>Receipts print after a month closes.</Text>
-          </View>
-        ) : null}
+        <ReceiptSkeletonReveal
+          loading={receiptLoading}
+          revealKey={activeLedgerId || 'no-ledger'}
+          skeleton={<ReceiptLoadingSkeleton />}
+        >
+          {state.receipts.length === 0 ? (
+            <View style={localStyles.emptyCard}>
+              <Text style={styles.h2}>No Closed Months Yet</Text>
+              <Text style={styles.muted}>Receipts print after a month closes.</Text>
+            </View>
+          ) : selectedReceipt ? (
+            <View style={localStyles.stage}>
+              <YearStrip
+                activeYear={activeYear}
+                groups={receiptYearGroups}
+                onSelectReceipt={selectReceipt}
+              />
 
-        {selectedReceipt ? (
-          <View style={localStyles.stage}>
-            <YearStrip
-              activeYear={activeYear}
-              groups={receiptYearGroups}
-              onSelectReceipt={selectReceipt}
-            />
-
-            <View
-              accessibilityActions={[
-                { label: 'Previous month', name: 'previousMonth' },
-                { label: 'Next month', name: 'nextMonth' }
-              ]}
-              accessibilityLabel={`${selectedReceipt.label}, ${selectedReceipt.records} records`}
-              accessibilityRole="adjustable"
-              onAccessibilityAction={handleReceiptAccessibilityAction}
-              style={localStyles.stack}
-              {...receiptSwipeResponder.panHandlers}
-            >
-              {dragTargetReceipt ? (
-                <View pointerEvents="none" style={[localStyles.receiptWrap, localStyles.underReceiptWrap]}>
+              <View
+                accessibilityActions={[
+                  { label: 'Previous month', name: 'previousMonth' },
+                  { label: 'Next month', name: 'nextMonth' }
+                ]}
+                accessibilityLabel={`${selectedReceipt.label}, ${selectedReceipt.records} records`}
+                accessibilityRole="adjustable"
+                onAccessibilityAction={handleReceiptAccessibilityAction}
+                style={localStyles.stack}
+                {...receiptSwipeResponder.panHandlers}
+              >
+                {dragTargetReceipt ? (
+                  <View pointerEvents="none" style={[localStyles.receiptWrap, localStyles.underReceiptWrap]}>
+                    <TearEdge direction="top" />
+                    <ReceiptBody
+                      currentUserName={currentUserName}
+                      otherUserName={otherUserName}
+                      receipt={dragTargetReceipt}
+                    />
+                    <TearEdge direction="bottom" />
+                  </View>
+                ) : (
+                  <>
+                    <View style={[localStyles.peek, localStyles.peekBack]} />
+                    <View style={[localStyles.peek, localStyles.peekMiddle]} />
+                    <View style={[localStyles.peek, localStyles.peekFront]} />
+                  </>
+                )}
+                <AnimatedReceipt
+                  style={[
+                    localStyles.receiptWrap,
+                    localStyles.topReceiptWrap,
+                    {
+                      transform: [
+                        { translateX: receiptTranslateX },
+                        { rotate: receiptRotate }
+                      ]
+                    }
+                  ]}
+                >
                   <TearEdge direction="top" />
                   <ReceiptBody
                     currentUserName={currentUserName}
                     otherUserName={otherUserName}
-                    receipt={dragTargetReceipt}
+                    receipt={selectedReceipt}
                   />
                   <TearEdge direction="bottom" />
-                </View>
-              ) : (
-                <>
-                  <View style={[localStyles.peek, localStyles.peekBack]} />
-                  <View style={[localStyles.peek, localStyles.peekMiddle]} />
-                  <View style={[localStyles.peek, localStyles.peekFront]} />
-                </>
-              )}
-              <AnimatedReceipt
-                style={[
-                  localStyles.receiptWrap,
-                  localStyles.topReceiptWrap,
-                  {
-                    transform: [
-                      { translateX: receiptTranslateX },
-                      { rotate: receiptRotate }
-                    ]
-                  }
-                ]}
-              >
-                <TearEdge direction="top" />
-                <ReceiptBody
-                  currentUserName={currentUserName}
-                  otherUserName={otherUserName}
-                  receipt={selectedReceipt}
-                />
-                <TearEdge direction="bottom" />
-              </AnimatedReceipt>
+                </AnimatedReceipt>
+              </View>
             </View>
-          </View>
-        ) : null}
+          ) : null}
+        </ReceiptSkeletonReveal>
       </ScrollView>
       {printerVisible && selectedReceipt ? (
         <ReceiptPrinterOverlay
@@ -518,6 +522,186 @@ export default function ReceiptsScreen() {
           safeAreaTop={insets.top}
         />
       ) : null}
+    </View>
+  );
+}
+
+function ReceiptSkeletonReveal({
+  children,
+  loading,
+  revealKey,
+  skeleton
+}: {
+  children: ReactNode;
+  loading: boolean;
+  revealKey: string;
+  skeleton: ReactNode;
+}) {
+  const reduceMotion = useReduceMotion();
+  const [reveal] = useState(() => new Animated.Value(loading ? 0 : 1));
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [contentMounted, setContentMounted] = useState(!loading);
+  const [skeletonMounted, setSkeletonMounted] = useState(loading);
+
+  useEffect(() => () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    if (loading) {
+      reveal.stopAnimation();
+      reveal.setValue(0);
+      setContentMounted(false);
+      setSkeletonMounted(true);
+      return;
+    }
+
+    setContentMounted(true);
+    setSkeletonMounted(true);
+    reveal.stopAnimation();
+    reveal.setValue(0);
+
+    const startReveal = () => {
+      Animated.timing(reveal, {
+        duration: motionDuration(motionDurations.content, reduceMotion),
+        easing: Easing.inOut(Easing.ease),
+        toValue: 1,
+        useNativeDriver: true
+      }).start(() => {
+        setSkeletonMounted(false);
+      });
+    };
+
+    if (reduceMotion) {
+      startReveal();
+      return;
+    }
+
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      startReveal();
+    }, RECEIPT_SKELETON_PULSE_MS);
+  }, [loading, reduceMotion, reveal, revealKey]);
+
+  const skeletonStyle = {
+    opacity: reveal.interpolate({
+      inputRange: [0, 1],
+      outputRange: [1, 0]
+    }),
+    transform: [
+      {
+        translateY: reveal.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, -4]
+        })
+      }
+    ]
+  };
+  const contentStyle = {
+    opacity: reveal,
+    transform: [
+      {
+        translateY: reveal.interpolate({
+          inputRange: [0, 1],
+          outputRange: [8, 0]
+        })
+      }
+    ]
+  };
+
+  return (
+    <View style={localStyles.skeletonRevealWrap}>
+      {contentMounted ? (
+        <Animated.View style={contentStyle}>
+          {children}
+        </Animated.View>
+      ) : null}
+      {skeletonMounted ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            contentMounted ? localStyles.skeletonOverlay : null,
+            skeletonStyle
+          ]}
+        >
+          {skeleton}
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}
+
+function ReceiptLoadingSkeleton() {
+  return (
+    <View style={localStyles.stage}>
+      <View style={localStyles.skeletonYearStrip}>
+        {[0, 1, 2].map((item) => (
+          <AnimatedSkeletonBlock key={item} style={localStyles.skeletonYearTab} />
+        ))}
+      </View>
+
+      <View style={localStyles.stack}>
+        <View style={[localStyles.peek, localStyles.peekBack]} />
+        <View style={[localStyles.peek, localStyles.peekMiddle]} />
+        <View style={[localStyles.peek, localStyles.peekFront]} />
+        <View style={[localStyles.receiptWrap, localStyles.topReceiptWrap]}>
+          <TearEdge direction="top" />
+          <View style={localStyles.skeletonReceiptBody}>
+            <View style={localStyles.skeletonHeaderRow}>
+              <AnimatedSkeletonBlock style={localStyles.skeletonMonth} />
+              <View style={localStyles.skeletonMetaGroup}>
+                <AnimatedSkeletonBlock style={localStyles.skeletonMeta} />
+                <AnimatedSkeletonBlock style={localStyles.skeletonMetaShort} />
+              </View>
+            </View>
+            <AnimatedSkeletonBlock style={localStyles.skeletonRule} />
+            <View style={localStyles.skeletonColumnRow}>
+              <AnimatedSkeletonBlock style={localStyles.skeletonColumnItem} />
+              <AnimatedSkeletonBlock style={localStyles.skeletonColumnMom} />
+              <AnimatedSkeletonBlock style={localStyles.skeletonColumnAmount} />
+            </View>
+            <View style={localStyles.skeletonItemsList}>
+              {[0, 1, 2, 3, 4, 5].map((row) => (
+                <View key={row} style={localStyles.skeletonItemRow}>
+                  <AnimatedSkeletonBlock style={localStyles.skeletonItemDot} />
+                  <AnimatedSkeletonBlock style={localStyles.skeletonItemName} />
+                  <AnimatedSkeletonBlock style={localStyles.skeletonItemMom} />
+                  <AnimatedSkeletonBlock style={localStyles.skeletonItemAmount} />
+                </View>
+              ))}
+            </View>
+            <AnimatedSkeletonBlock style={localStyles.skeletonRuleCompact} />
+            <View style={localStyles.skeletonBarcode}>
+              {Array.from({ length: 18 }, (_, index) => (
+                <AnimatedSkeletonBlock
+                  key={index}
+                  style={[
+                    localStyles.skeletonBarcodeBar,
+                    { height: 18 + (index % 4) * 4 }
+                  ]}
+                />
+              ))}
+            </View>
+            <AnimatedSkeletonBlock style={localStyles.skeletonRuleCompact} />
+            <View style={localStyles.skeletonSettlement}>
+              <AnimatedSkeletonBlock style={localStyles.skeletonSplitHeader} />
+              <AnimatedSkeletonBlock style={localStyles.skeletonKeyValue} />
+              <AnimatedSkeletonBlock style={localStyles.skeletonKeyValue} />
+              <AnimatedSkeletonBlock style={localStyles.skeletonTotalRule} />
+              <AnimatedSkeletonBlock style={localStyles.skeletonTotal} />
+              <AnimatedSkeletonBlock style={localStyles.skeletonComparison} />
+            </View>
+          </View>
+          <TearEdge direction="bottom" />
+        </View>
+      </View>
     </View>
   );
 }
@@ -1030,6 +1214,157 @@ const localStyles = StyleSheet.create({
   },
   settlementModule: {
     marginTop: 2
+  },
+  skeletonBarcode: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 3,
+    height: 32,
+    justifyContent: 'center',
+    marginVertical: 2
+  },
+  skeletonBarcodeBar: {
+    borderRadius: 2,
+    width: 4
+  },
+  skeletonColumnAmount: {
+    height: 10,
+    width: 46
+  },
+  skeletonColumnItem: {
+    flex: 1,
+    height: 10
+  },
+  skeletonColumnMom: {
+    height: 10,
+    width: 38
+  },
+  skeletonColumnRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingRight: 6
+  },
+  skeletonComparison: {
+    alignSelf: 'flex-end',
+    height: 12,
+    marginTop: 6,
+    width: 148
+  },
+  skeletonHeaderRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 14,
+    justifyContent: 'space-between'
+  },
+  skeletonItemAmount: {
+    height: 12,
+    width: 54
+  },
+  skeletonItemDot: {
+    borderRadius: 2,
+    height: 8,
+    width: 8
+  },
+  skeletonItemMom: {
+    height: 12,
+    width: 36
+  },
+  skeletonItemName: {
+    flex: 1,
+    height: 12
+  },
+  skeletonItemRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 3
+  },
+  skeletonItemsList: {
+    gap: 1,
+    paddingRight: 6,
+    paddingTop: 2
+  },
+  skeletonKeyValue: {
+    height: 16,
+    width: '100%'
+  },
+  skeletonMeta: {
+    height: 11,
+    width: 86
+  },
+  skeletonMetaGroup: {
+    alignItems: 'flex-end',
+    gap: 4
+  },
+  skeletonMetaShort: {
+    height: 11,
+    width: 106
+  },
+  skeletonMonth: {
+    height: 20,
+    width: 118
+  },
+  skeletonOverlay: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 3
+  },
+  skeletonReceiptBody: {
+    backgroundColor: '#FFFDF7',
+    paddingBottom: 16,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    width: RECEIPT_WIDTH
+  },
+  skeletonRevealWrap: {
+    alignSelf: 'stretch',
+    position: 'relative'
+  },
+  skeletonRule: {
+    height: 1,
+    marginVertical: 11,
+    width: '100%'
+  },
+  skeletonRuleCompact: {
+    height: 1,
+    marginVertical: 6,
+    width: '100%'
+  },
+  skeletonSettlement: {
+    gap: 6,
+    marginTop: 2
+  },
+  skeletonSplitHeader: {
+    height: 10,
+    marginBottom: 2,
+    width: 104
+  },
+  skeletonTotal: {
+    alignSelf: 'flex-end',
+    height: 22,
+    width: 132
+  },
+  skeletonTotalRule: {
+    height: 2,
+    marginTop: 2,
+    width: '100%'
+  },
+  skeletonYearStrip: {
+    alignItems: 'flex-start',
+    borderBottomColor: 'rgba(42,39,34,0.12)',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    height: 20,
+    width: RECEIPT_WIDTH
+  },
+  skeletonYearTab: {
+    height: 14,
+    width: 48
   },
   stack: {
     paddingTop: 8,
