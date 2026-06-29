@@ -76,6 +76,35 @@ npm start
 npm run web
 ```
 
+### Deploy to Vercel
+
+The project is configured for Vercel static hosting with Expo web export.
+
+1. Add these environment variables in Vercel for Production and Preview:
+
+   ```text
+   EXPO_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+   EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+   ```
+
+2. Build settings are defined in `vercel.json`:
+
+   ```text
+   Install Command: npm ci
+   Build Command: npm run build
+   Output Directory: dist
+   ```
+
+3. Before deploying, verify locally:
+
+   ```bash
+   npm ci
+   npm run typecheck
+   npm run lint
+   npm test
+   npm run build
+   ```
+
 ### Verify
 
 ```bash

@@ -1,9 +1,25 @@
 {
-  "buildCommand": "npx expo export -p web",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "devCommand": "npx expo start --web",
   "cleanUrls": true,
   "framework": null,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     {
       "source": "/:path*",
