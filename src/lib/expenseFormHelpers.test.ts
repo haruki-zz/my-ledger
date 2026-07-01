@@ -6,6 +6,8 @@ import {
   complementShareAmounts,
   dateSummary,
   deriveSplitBackfill,
+  nextStepAfterAmount,
+  nextStepAfterDateSelection,
   updateKeypadBuffer,
   wrapIndex
 } from './expenseFormHelpers';
@@ -57,6 +59,14 @@ describe('expense form helpers', () => {
     expect(wrapIndex(-1, 11)).toBe(10);
     expect(wrapIndex(11, 11)).toBe(0);
     expect(wrapIndex(14, 11)).toBe(3);
+  });
+
+  it('skips preset category and detail steps for new expenses after amount entry', () => {
+    expect(nextStepAfterAmount(false)).toBe(4);
+    expect(nextStepAfterAmount(true)).toBe(2);
+    expect(nextStepAfterDateSelection({ amountYen: 1200, isEditing: false })).toBe(4);
+    expect(nextStepAfterDateSelection({ amountYen: 0, isEditing: false })).toBe(2);
+    expect(nextStepAfterDateSelection({ amountYen: 1200, isEditing: true })).toBe(2);
   });
 
   it('calculates split amounts that add up to total', () => {

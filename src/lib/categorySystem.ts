@@ -107,6 +107,8 @@ export type PrimaryCategory = (typeof PRIMARY_CATEGORIES)[number];
 export type PrimaryCategoryId = PrimaryCategory['id'];
 export type CategoryIconName = ComponentProps<typeof Ionicons>['name'];
 
+export const DEFAULT_NEW_EXPENSE_CATEGORY_ID: PrimaryCategoryId = 'food_dining';
+export const DEFAULT_NEW_EXPENSE_SUBCATEGORY = 'Groceries';
 const DEFAULT_CATEGORY_ID: PrimaryCategoryId = 'other';
 export const DEFAULT_CATEGORY_SPLIT_RATIO = [50, 50] as const;
 

@@ -126,6 +126,17 @@ export function wrapIndex(index: number, length: number) {
   return ((index % length) + length) % length;
 }
 
+export function nextStepAfterAmount(isEditing: boolean): 2 | 4 {
+  return isEditing ? 2 : 4;
+}
+
+export function nextStepAfterDateSelection(input: {
+  amountYen: number;
+  isEditing: boolean;
+}): 2 | 4 {
+  return !input.isEditing && input.amountYen > 0 ? 4 : 2;
+}
+
 export function calculateSplitAmounts(totalAmount: number, splitPct: number) {
   const boundedPct = Math.max(0, Math.min(100, splitPct));
   const firstAmount = Math.round((totalAmount * boundedPct) / 100);

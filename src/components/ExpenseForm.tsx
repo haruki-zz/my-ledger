@@ -30,6 +30,8 @@ import { KEYBOARD_DONE_ACCESSORY_ID, KeyboardDoneAccessory } from '@/src/compone
 import { colors, fontFamilies, theme } from '@/src/components/styles';
 import {
   DEFAULT_CATEGORY_SPLIT_RATIO,
+  DEFAULT_NEW_EXPENSE_CATEGORY_ID,
+  DEFAULT_NEW_EXPENSE_SUBCATEGORY,
   PRIMARY_CATEGORIES,
   categoryColor,
   categoryIconName,
@@ -46,6 +48,8 @@ import {
   complementShareAmounts,
   dateSummary,
   deriveSplitBackfill,
+  nextStepAfterAmount,
+  nextStepAfterDateSelection,
   parseDateString,
   sanitizeWholeNumber,
   updateKeypadBuffer,
@@ -202,8 +206,10 @@ export function ExpenseForm({
     category: expense?.category,
     subcategory: expense?.subcategory
   }), [expense?.category, expense?.category_id, expense?.subcategory]);
-  const defaultCategoryId = (expense ? initialCategory.categoryId : PRIMARY_CATEGORIES[0].id) as PrimaryCategoryId;
-  const defaultSubcategory = initialCategory.subcategory || subcategoryPresets(defaultCategoryId)[0] || '';
+  const defaultCategoryId = expense ? initialCategory.categoryId : DEFAULT_NEW_EXPENSE_CATEGORY_ID;
+  const defaultSubcategory = expense
+    ? initialCategory.subcategory || subcategoryPresets(defaultCategoryId)[0] || ''
+    : DEFAULT_NEW_EXPENSE_SUBCATEGORY;
   const initialAmount = expense ? String(expense.amount_yen) : '';
   const initialTotal = parsePositiveInteger(initialAmount) || 0;
   const initialSplit = deriveSplitBackfill({
@@ -448,7 +454,7 @@ export function ExpenseForm({
     }
 
     setSpentOn(dateString);
-    setStep(2);
+    setStep(nextStepAfterDateSelection({ amountYen, isEditing }));
   }
 
   function handleContinue() {
@@ -457,7 +463,7 @@ export function ExpenseForm({
     }
 
     if (step === 0) {
-      setStep(2);
+      setStep(nextStepAfterAmount(isEditing));
       return;
     }
 
