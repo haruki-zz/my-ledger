@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildNetSummary } from './transferSummary';
+import { buildNetSummary, filterOccurredTransferItems } from './transferSummary';
 import type { LedgerMemberProfile, TransferChecklistItemRow } from '@/src/types/database';
 
 const ALEX_ID = 'alex-user-id';
@@ -55,6 +55,45 @@ describe('buildNetSummary', () => {
   });
 });
 
+describe('filterOccurredTransferItems', () => {
+  it('keeps only transfer items whose expense date has occurred', () => {
+    const occurredItem = transferItem({
+      amountYen: 6800,
+      payerUserId: MINA_ID,
+      payeeUserId: ALEX_ID,
+      spentOn: '2026-06-30'
+    });
+    const todayItem = transferItem({
+      amountYen: 4200,
+      payerUserId: MINA_ID,
+      payeeUserId: ALEX_ID,
+      spentOn: '2026-07-01'
+    });
+    const futureFixedExpenseItem = transferItem({
+      amountYen: 120000,
+      payerUserId: MINA_ID,
+      payeeUserId: ALEX_ID,
+      spentOn: '2026-07-25'
+    });
+    const futureRegularExpenseItem = transferItem({
+      amountYen: 1500,
+      payerUserId: ALEX_ID,
+      payeeUserId: MINA_ID,
+      spentOn: '2026-07-02'
+    });
+
+    expect(filterOccurredTransferItems([
+      occurredItem,
+      todayItem,
+      futureFixedExpenseItem,
+      futureRegularExpenseItem
+    ], '2026-07-01')).toEqual([
+      occurredItem,
+      todayItem
+    ]);
+  });
+});
+
 function member(userId: string, displayName: string): LedgerMemberProfile {
   return {
     joined_at: '2026-06-01T00:00:00.000Z',
@@ -72,11 +111,13 @@ function member(userId: string, displayName: string): LedgerMemberProfile {
 function transferItem({
   amountYen,
   payeeUserId,
-  payerUserId
+  payerUserId,
+  spentOn = '2026-06-01'
 }: {
   amountYen: number;
   payeeUserId: string;
   payerUserId: string;
+  spentOn?: string;
 }): TransferChecklistItemRow {
   return {
     amount_yen: amountYen,
@@ -90,7 +131,7 @@ function transferItem({
     payee_user_id: payeeUserId,
     payer_completed_at: null,
     payer_user_id: payerUserId,
-    spent_on: '2026-06-01',
+    spent_on: spentOn,
     subcategory: 'Groceries'
   };
 }

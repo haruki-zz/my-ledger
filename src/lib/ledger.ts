@@ -27,6 +27,7 @@ import {
   saveLocalRecurringRule
 } from '@/src/lib/localRepository';
 import { currentMonthStartDate } from '@/src/lib/recurring';
+import { filterOccurredTransferItems } from '@/src/lib/transferSummary';
 import type {
   Expense,
   ExpenseOwnership,
@@ -609,7 +610,7 @@ export async function getOpenTransferItems(ledgerId: string): Promise<TransferCh
     }
   }
   if (!isLocalRepositoryOnline()) {
-    return cachedItems;
+    return filterOccurredTransferItems(cachedItems);
   }
 
   try {
@@ -628,12 +629,12 @@ export async function getOpenTransferItems(ledgerId: string): Promise<TransferCh
         throw cacheError;
       }
     }
-    return data || cachedItems;
+    return filterOccurredTransferItems(data || cachedItems);
   } catch (error) {
     if (!isOfflineError(error)) {
       throw error;
     }
-    return cachedItems;
+    return filterOccurredTransferItems(cachedItems);
   }
 }
 

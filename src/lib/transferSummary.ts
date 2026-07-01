@@ -1,3 +1,4 @@
+import { DEFAULT_LEDGER_TIME_ZONE, todayDateString } from './format';
 import type { LedgerMemberProfile, TransferChecklistItemRow } from '@/src/types/database';
 
 export type NetSummary = {
@@ -67,4 +68,11 @@ export function buildNetSummary(
     payerUserId: null,
     payeeUserId: null
   };
+}
+
+export function filterOccurredTransferItems(
+  items: TransferChecklistItemRow[],
+  today = todayDateString(DEFAULT_LEDGER_TIME_ZONE)
+) {
+  return items.filter((item) => item.spent_on <= today);
 }
