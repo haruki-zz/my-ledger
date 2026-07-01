@@ -76,3 +76,13 @@ export function filterOccurredTransferItems(
 ) {
   return items.filter((item) => item.spent_on <= today);
 }
+
+export function shouldHideSettledTransferEntry(input: {
+  error: string | null;
+  loading: boolean;
+  openCount: number;
+  saving: boolean;
+  sheetActive: boolean;
+}) {
+  return !input.sheetActive && !input.loading && !input.saving && !input.error && input.openCount === 0;
+}

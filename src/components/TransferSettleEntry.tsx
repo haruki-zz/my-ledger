@@ -13,8 +13,10 @@ import {
   View,
   useWindowDimensions
 } from 'react-native';
+import Reanimated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { motionCardResizeTransition, motionPanelIn, motionPanelOut } from '@/src/components/motion';
 import { completedAtForUser, isParticipant } from '@/src/components/TransferChecklistShared';
 import { IconButton } from '@/src/components/ui';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
@@ -24,7 +26,7 @@ import { buildUserColorMap, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import type { TransferConfirmationUpdate } from '@/src/lib/ledger';
 import { useReduceMotion } from '@/src/lib/motion';
-import { buildNetSummary, type NetSummary } from '@/src/lib/transferSummary';
+import { buildNetSummary, shouldHideSettledTransferEntry, type NetSummary } from '@/src/lib/transferSummary';
 import type { LedgerMemberProfile, TransferChecklistItemRow } from '@/src/types/database';
 
 type TransferSettleEntryProps = {
@@ -68,8 +70,13 @@ export function TransferSettleEntry({
   onSetConfirmations,
   saving
 }: TransferSettleEntryProps) {
+  const reduceMotion = useReduceMotion();
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [sheetRendered, setSheetRendered] = useState(false);
   const [confirmationOverrides, setConfirmationOverrides] = useState<ConfirmationOverrides>({});
+  const resize = motionCardResizeTransition(reduceMotion);
+  const panelIn = motionPanelIn(reduceMotion);
+  const panelOut = motionPanelOut(reduceMotion);
   const userIds = useMemo(() => members.map((member) => member.user_id), [members]);
   const nameByUserId = useMemo(() => (
     new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]))
@@ -91,6 +98,14 @@ export function TransferSettleEntry({
   const openCount = openParticipantItems.length;
   const canOpenSheet = items.length > 0 || openCount > 0 || allParticipantItemsConfirmed;
   const directionText = transferDirectionText(remainingSummary, userName);
+  const sheetActive = sheetVisible || sheetRendered;
+  const shouldHideEntry = shouldHideSettledTransferEntry({
+    error,
+    loading,
+    openCount,
+    saving,
+    sheetActive
+  });
 
   useEffect(() => {
     if (!error) {
@@ -132,7 +147,16 @@ export function TransferSettleEntry({
     return userId ? userColorById.get(userId) || DEFAULT_USER_COLOR : DEFAULT_USER_COLOR;
   }
 
-  async function applyConfirmationUpdates(updates: TransferConfirmationUpdate[], closeAfterSave = false) {
+  function openSheet() {
+    setSheetRendered(true);
+    setSheetVisible(true);
+  }
+
+  function closeSheet() {
+    setSheetVisible(false);
+  }
+
+  async function applyConfirmationUpdates(updates: TransferConfirmationUpdate[]) {
     if (updates.length === 0 || saving) {
       return;
     }
@@ -147,9 +171,6 @@ export function TransferSettleEntry({
 
     try {
       await onSetConfirmations(updates);
-      if (closeAfterSave) {
-        setSheetVisible(false);
-      }
     } catch {
       setConfirmationOverrides({});
     }
@@ -176,74 +197,83 @@ export function TransferSettleEntry({
       participantItems.map((item) => ({
         expense_id: item.expense_id,
         confirmed: nextConfirmed
-      })),
-      nextConfirmed
+      }))
     );
+  }
+
+  if (shouldHideEntry) {
+    return null;
   }
 
   return (
     <>
-      <View style={settleStyles.heroDivider} />
-      <Pressable
-        accessibilityLabel={openCount > 0 ? `${directionText}, ${openCount} open transfer items` : 'All transfers settled'}
-        accessibilityRole="button"
-        disabled={loading || !canOpenSheet}
-        onPress={() => setSheetVisible(true)}
-        style={({ pressed }) => [
-          openCount > 0 ? settleStyles.openStrip : settleStyles.doneStrip,
-          pressed && !loading && canOpenSheet && settleStyles.stripPressed,
-          (loading || !canOpenSheet) && settleStyles.stripDisabled
-        ]}
+      <Reanimated.View
+        entering={panelIn}
+        exiting={panelOut}
+        layout={resize}
       >
-        {loading ? (
-          <>
-            <View style={settleStyles.openIconChip}>
-              <ActivityIndicator color={UP_COLOR} size="small" />
-            </View>
-            <View style={settleStyles.stripBody}>
-              <Text style={settleStyles.openLineOne}>Loading transfers</Text>
-              <Text style={settleStyles.openLineTwo}>TAP TO REVIEW</Text>
-            </View>
-          </>
-        ) : openCount > 0 ? (
-          <>
-            <View style={settleStyles.openIconChip}>
-              <Ionicons color={UP_COLOR} name="swap-horizontal" size={16} />
-            </View>
-            <View style={settleStyles.stripBody}>
-              <Text ellipsizeMode="tail" numberOfLines={1} style={settleStyles.openLineOne}>
-                {directionText} <Text style={settleStyles.openAmount}>{formatYen(remainingSummary.amountYen)}</Text>
+        <View style={settleStyles.heroDivider} />
+        <Pressable
+          accessibilityLabel={openCount > 0 ? `${directionText}, ${openCount} open transfer items` : 'All transfers settled'}
+          accessibilityRole="button"
+          disabled={loading || !canOpenSheet}
+          onPress={openSheet}
+          style={({ pressed }) => [
+            openCount > 0 ? settleStyles.openStrip : settleStyles.doneStrip,
+            pressed && !loading && canOpenSheet && settleStyles.stripPressed,
+            (loading || !canOpenSheet) && settleStyles.stripDisabled
+          ]}
+        >
+          {loading ? (
+            <>
+              <View style={settleStyles.openIconChip}>
+                <ActivityIndicator color={UP_COLOR} size="small" />
+              </View>
+              <View style={settleStyles.stripBody}>
+                <Text style={settleStyles.openLineOne}>Loading transfers</Text>
+                <Text style={settleStyles.openLineTwo}>TAP TO REVIEW</Text>
+              </View>
+            </>
+          ) : openCount > 0 ? (
+            <>
+              <View style={settleStyles.openIconChip}>
+                <Ionicons color={UP_COLOR} name="swap-horizontal" size={16} />
+              </View>
+              <View style={settleStyles.stripBody}>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={settleStyles.openLineOne}>
+                  {directionText} <Text style={settleStyles.openAmount}>{formatYen(remainingSummary.amountYen)}</Text>
+                </Text>
+                <Text style={settleStyles.openLineTwo}>
+                  {openCount} OPEN {openCount === 1 ? 'ITEM' : 'ITEMS'}
+                </Text>
+              </View>
+              <View style={settleStyles.settleButton}>
+                <Text style={settleStyles.settleButtonText}>Settle</Text>
+                <Ionicons color={colors.primary} name="chevron-forward" size={13} />
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={settleStyles.doneIconChip}>
+                <Ionicons color={MINA_ON_DARK} name="checkmark" size={12} />
+              </View>
+              <Text ellipsizeMode="tail" numberOfLines={1} style={settleStyles.doneText}>
+                {"All settled - you're even"}
               </Text>
-              <Text style={settleStyles.openLineTwo}>
-                {openCount} OPEN {openCount === 1 ? 'ITEM' : 'ITEMS'}
-              </Text>
-            </View>
-            <View style={settleStyles.settleButton}>
-              <Text style={settleStyles.settleButtonText}>Settle</Text>
-              <Ionicons color={colors.primary} name="chevron-forward" size={13} />
-            </View>
-          </>
-        ) : (
-          <>
-            <View style={settleStyles.doneIconChip}>
-              <Ionicons color={MINA_ON_DARK} name="checkmark" size={12} />
-            </View>
-            <Text ellipsizeMode="tail" numberOfLines={1} style={settleStyles.doneText}>
-              {"All settled - you're even"}
-            </Text>
-            <Text style={settleStyles.viewText}>VIEW</Text>
-          </>
-        )}
-      </Pressable>
-      {error ? <Text style={settleStyles.heroError}>{error}</Text> : null}
+              <Text style={settleStyles.viewText}>VIEW</Text>
+            </>
+          )}
+        </Pressable>
+        {error ? <Text style={settleStyles.heroError}>{error}</Text> : null}
+      </Reanimated.View>
 
       <TransferSettleSheet
         allParticipantItemsConfirmed={allParticipantItemsConfirmed}
         confirmationOverrides={confirmationOverrides}
         currentUserId={currentUserId}
         items={items}
-        netSummary={remainingSummary}
-        onClose={() => setSheetVisible(false)}
+        onClose={closeSheet}
+        onClosed={() => setSheetRendered(false)}
         onToggleAll={toggleAllParticipantItems}
         onToggleItem={toggleItem}
         openCount={openCount}
@@ -261,8 +291,8 @@ function TransferSettleSheet({
   confirmationOverrides,
   currentUserId,
   items,
-  netSummary,
   onClose,
+  onClosed,
   onToggleAll,
   onToggleItem,
   openCount,
@@ -275,8 +305,8 @@ function TransferSettleSheet({
   confirmationOverrides: ConfirmationOverrides;
   currentUserId: string | null;
   items: TransferChecklistItemRow[];
-  netSummary: NetSummary;
   onClose: () => void;
+  onClosed: () => void;
   onToggleAll: () => void;
   onToggleItem: (item: TransferChecklistItemRow) => void;
   openCount: number;
@@ -292,7 +322,6 @@ function TransferSettleSheet({
   const [closing, setClosing] = useState(false);
   const [transitionProgress] = useState(() => new Animated.Value(0));
   const panelMaxHeight = Math.max(320, Math.min(height * 0.86, height - insets.top - 10));
-  const netDirection = transferNetDirection(netSummary, userName);
   const participantCount = currentUserId
     ? items.filter((item) => isParticipant(item, currentUserId)).length
     : 0;
@@ -309,7 +338,7 @@ function TransferSettleSheet({
     Animated.timing(transitionProgress, {
       duration: reduceMotion ? 0 : ENTER_DURATION_MS,
       toValue: 1,
-      useNativeDriver: true
+      useNativeDriver: Platform.OS !== 'web'
     }).start();
   }, [reduceMotion, transitionProgress, visible]);
 
@@ -323,7 +352,7 @@ function TransferSettleSheet({
     Animated.timing(transitionProgress, {
       duration: reduceMotion ? 0 : EXIT_DURATION_MS,
       toValue: 0,
-      useNativeDriver: true
+      useNativeDriver: Platform.OS !== 'web'
     }).start(({ finished }) => {
       if (!finished) {
         setClosing(false);
@@ -332,8 +361,9 @@ function TransferSettleSheet({
 
       setRendered(false);
       setClosing(false);
+      onClosed();
     });
-  }, [closing, reduceMotion, rendered, transitionProgress, visible]);
+  }, [closing, onClosed, reduceMotion, rendered, transitionProgress, visible]);
 
   if (!rendered) {
     return null;
@@ -341,12 +371,7 @@ function TransferSettleSheet({
 
   return (
     <Modal animationType="none" onRequestClose={onClose} transparent visible>
-      <Pressable
-        accessibilityLabel="Close settle up"
-        accessibilityRole="button"
-        onPress={onClose}
-        style={sheetStyles.backdrop}
-      >
+      <View style={sheetStyles.backdrop}>
         {Platform.OS === 'ios' ? (
           <BlurFallbackBoundary>
             <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: transitionProgress }]}>
@@ -362,11 +387,16 @@ function TransferSettleSheet({
             { opacity: transitionProgress }
           ]}
         />
-
         <Pressable
+          accessibilityLabel="Close settle up"
+          accessibilityRole="button"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+
+        <View
           accessibilityLabel="Settle up"
           accessibilityViewIsModal
-          onPress={(event) => event.stopPropagation()}
           style={[sheetStyles.sheetHitArea, { maxHeight: panelMaxHeight, width }]}
         >
           <Animated.View
@@ -403,26 +433,6 @@ function TransferSettleSheet({
                 size="sm"
                 tone="neutral"
               />
-            </View>
-
-            <View style={sheetStyles.netBanner}>
-              <View style={sheetStyles.netDirection}>
-                <UserDot color={userColor(netSummary.payerUserId)} />
-                <Text ellipsizeMode="tail" numberOfLines={1} style={sheetStyles.netUser}>
-                  {netDirection.from}
-                </Text>
-                <Ionicons color="rgba(255,253,247,0.42)" name="arrow-forward" size={13} />
-                <UserDot color={userColor(netSummary.payeeUserId)} />
-                <Text ellipsizeMode="tail" numberOfLines={1} style={sheetStyles.netUser}>
-                  {netDirection.to}
-                </Text>
-              </View>
-              <View style={sheetStyles.netAmountGroup}>
-                <Text style={sheetStyles.netAmountLabel}>NET OWED</Text>
-                <Text adjustsFontSizeToFit numberOfLines={1} style={sheetStyles.netAmount}>
-                  {formatYen(netSummary.amountYen)}
-                </Text>
-              </View>
             </View>
 
             <ScrollView
@@ -488,8 +498,8 @@ function TransferSettleSheet({
               </Pressable>
             </View>
           </Animated.View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -569,10 +579,6 @@ function UserPill({ color, label }: { color: string; label: string }) {
   );
 }
 
-function UserDot({ color }: { color: string }) {
-  return <View style={[sheetStyles.userDot, { backgroundColor: color }]} />;
-}
-
 function isConfirmedForCurrentUser(
   item: TransferChecklistItemRow,
   currentUserId: string | null,
@@ -595,18 +601,6 @@ function transferDirectionText(
   }
 
   return `${userName(netSummary.payerUserId)} to ${userName(netSummary.payeeUserId)}`;
-}
-
-function transferNetDirection(netSummary: NetSummary, userName: (userId: string | null) => string) {
-  if (!netSummary.payerUserId || !netSummary.payeeUserId) {
-    const fallbackMembers = ['Even', 'Even'];
-    return { from: fallbackMembers[0].toUpperCase(), to: fallbackMembers[1].toUpperCase() };
-  }
-
-  return {
-    from: userName(netSummary.payerUserId).toUpperCase(),
-    to: userName(netSummary.payeeUserId).toUpperCase()
-  };
 }
 
 function formatTransferDate(dateString: string) {
@@ -860,53 +854,6 @@ const sheetStyles = StyleSheet.create({
     letterSpacing: 0.5,
     lineHeight: 13
   },
-  netAmount: {
-    color: PAPER_COLOR,
-    fontFamily: fontFamilies.monoExtraBold,
-    fontSize: 20,
-    fontWeight: '800',
-    lineHeight: 23,
-    minWidth: 96,
-    textAlign: 'right'
-  },
-  netAmountGroup: {
-    alignItems: 'flex-end',
-    marginLeft: 'auto'
-  },
-  netAmountLabel: {
-    color: 'rgba(255,253,247,0.50)',
-    fontFamily: fontFamilies.mono,
-    fontSize: 8,
-    letterSpacing: 1.2,
-    lineHeight: 11
-  },
-  netBanner: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    flexDirection: 'row',
-    gap: 13,
-    marginBottom: 4,
-    marginHorizontal: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14
-  },
-  netDirection: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 6,
-    minWidth: 0
-  },
-  netUser: {
-    color: 'rgba(255,253,247,0.85)',
-    flexShrink: 1,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 11,
-    fontWeight: '700',
-    lineHeight: 15,
-    minWidth: 0
-  },
   row: {
     alignItems: 'center',
     backgroundColor: colors.surface,
@@ -1001,12 +948,6 @@ const sheetStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     minWidth: 0
-  },
-  userDot: {
-    borderRadius: 2,
-    flexShrink: 0,
-    height: 8,
-    width: 8
   },
   userPill: {
     borderRadius: theme.radii.pill,

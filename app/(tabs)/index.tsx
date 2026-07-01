@@ -22,6 +22,7 @@ import { CategoryDetailSheet } from '@/src/components/CategoryDetailSheet';
 import { DashboardCategoryShare } from '@/src/components/DashboardCategoryShare';
 import { DashboardDailyActivity } from '@/src/components/DashboardDailyActivity';
 import { DashboardDailyTrend } from '@/src/components/DashboardDailyTrend';
+import { motionCardResizeTransition } from '@/src/components/motion';
 import { SlidingValueText } from '@/src/components/SlidingValueText';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { TransferSettleEntry } from '@/src/components/TransferSettleEntry';
@@ -50,6 +51,7 @@ const PERIOD_OPTIONS: { label: string; value: DashboardPeriod }[] = [
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReduceMotion();
   const currentDashboardMonthKey = currentMonthKey();
   const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [periodOffset, setPeriodOffset] = useState(0);
@@ -117,6 +119,7 @@ export default function DashboardScreen() {
     neutralIcon: 'remove',
     tone: 'onDark'
   });
+  const heroResize = motionCardResizeTransition(reduceMotion);
 
   const closeCategoryDetail = useCallback(() => {
     setSelectedCategoryKey(null);
@@ -217,93 +220,95 @@ export default function DashboardScreen() {
             style={localStyles.heroZone}
             {...monthSwipeResponder.panHandlers}
           >
-            <BentoCard variant="hero" style={localStyles.heroCard}>
-              <View style={localStyles.heroTop}>
-                <View style={localStyles.heroSwitch}>
-                  <HeroChevron
-                    accessibilityLabel={`Previous ${period}`}
-                    disabled={!periodNavigation.canGoPrevious}
-                    direction="back"
-                    onPress={() => movePeriod(-1)}
-                  />
-                  <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.heroMonth}>
-                    {periodNavigation.label}
-                  </Text>
-                  <HeroChevron
-                    accessibilityLabel={`Next ${period}`}
-                    disabled={!periodNavigation.canGoNext}
-                    direction="forward"
-                    onPress={() => movePeriod(1)}
-                  />
-                </View>
-
-                <PeriodSegment onChange={selectPeriod} period={period} />
-              </View>
-
-              <View style={localStyles.heroAmountRow}>
-                <View style={localStyles.heroAmountBlock}>
-                  <SlidingValueText
-                    formatValue={formatYen}
-                    textStyle={localStyles.heroAmount}
-                    value={stats.totalYen}
-                    wrapperStyle={localStyles.heroAmountSlot}
-                  />
-                </View>
-                <View style={localStyles.comparisonStack}>
-                  <View style={localStyles.comparisonTopLine}>
-                    <Ionicons
-                      color={dashboardComparison.color}
-                      name={dashboardComparison.icon || 'remove'}
-                      size={13}
+            <Animated.View layout={heroResize}>
+              <BentoCard variant="hero" style={localStyles.heroCard}>
+                <View style={localStyles.heroTop}>
+                  <View style={localStyles.heroSwitch}>
+                    <HeroChevron
+                      accessibilityLabel={`Previous ${period}`}
+                      disabled={!periodNavigation.canGoPrevious}
+                      direction="back"
+                      onPress={() => movePeriod(-1)}
                     />
+                    <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.heroMonth}>
+                      {periodNavigation.label}
+                    </Text>
+                    <HeroChevron
+                      accessibilityLabel={`Next ${period}`}
+                      disabled={!periodNavigation.canGoNext}
+                      direction="forward"
+                      onPress={() => movePeriod(1)}
+                    />
+                  </View>
+
+                  <PeriodSegment onChange={selectPeriod} period={period} />
+                </View>
+
+                <View style={localStyles.heroAmountRow}>
+                  <View style={localStyles.heroAmountBlock}>
                     <SlidingValueText
-                      formatValue={formatComparisonAmount}
-                      textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
-                      value={Math.abs(stats.comparison.deltaYen)}
-                      wrapperStyle={localStyles.comparisonAmountSlot}
+                      formatValue={formatYen}
+                      textStyle={localStyles.heroAmount}
+                      value={stats.totalYen}
+                      wrapperStyle={localStyles.heroAmountSlot}
                     />
-                    <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
-                      {stats.comparison.label}
-                    </Text>
                   </View>
-                  <View style={localStyles.percentBadge}>
-                    <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
-                      {formatComparisonPercentage(stats.comparison.percentage)}
-                    </Text>
+                  <View style={localStyles.comparisonStack}>
+                    <View style={localStyles.comparisonTopLine}>
+                      <Ionicons
+                        color={dashboardComparison.color}
+                        name={dashboardComparison.icon || 'remove'}
+                        size={13}
+                      />
+                      <SlidingValueText
+                        formatValue={formatComparisonAmount}
+                        textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
+                        value={Math.abs(stats.comparison.deltaYen)}
+                        wrapperStyle={localStyles.comparisonAmountSlot}
+                      />
+                      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
+                        {stats.comparison.label}
+                      </Text>
+                    </View>
+                    <View style={localStyles.percentBadge}>
+                      <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
+                        {formatComparisonPercentage(stats.comparison.percentage)}
+                      </Text>
+                    </View>
                   </View>
                 </View>
-              </View>
 
-              <View style={localStyles.heroDivider} />
+                <View style={localStyles.heroDivider} />
 
-              <View style={localStyles.memberSplitRow}>
-                <MemberSplit
-                  amountYen={currentMemberStat?.amountYen || 0}
-                  color={currentUserColorOnDark}
-                  label={currentUserName}
+                <View style={localStyles.memberSplitRow}>
+                  <MemberSplit
+                    amountYen={currentMemberStat?.amountYen || 0}
+                    color={currentUserColorOnDark}
+                    label={currentUserName}
+                  />
+                  {otherUserId ? (
+                    <>
+                      <View style={localStyles.memberDivider} />
+                      <MemberSplit
+                        amountYen={otherMemberStat?.amountYen || 0}
+                        color={otherUserColorOnDark}
+                        label={otherUserName}
+                      />
+                    </>
+                  ) : null}
+                </View>
+
+                <TransferSettleEntry
+                  currentUserId={currentUserId}
+                  error={transferError}
+                  items={transferItems}
+                  loading={transferLoading}
+                  members={members}
+                  onSetConfirmations={setConfirmations}
+                  saving={transferSaving}
                 />
-                {otherUserId ? (
-                  <>
-                    <View style={localStyles.memberDivider} />
-                    <MemberSplit
-                      amountYen={otherMemberStat?.amountYen || 0}
-                      color={otherUserColorOnDark}
-                      label={otherUserName}
-                    />
-                  </>
-                ) : null}
-              </View>
-
-              <TransferSettleEntry
-                currentUserId={currentUserId}
-                error={transferError}
-                items={transferItems}
-                loading={transferLoading}
-                members={members}
-                onSetConfirmations={setConfirmations}
-                saving={transferSaving}
-              />
-            </BentoCard>
+              </BentoCard>
+            </Animated.View>
           </View>
 
           <DashboardDailyActivity

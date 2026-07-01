@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildNetSummary, filterOccurredTransferItems } from './transferSummary';
+import { buildNetSummary, filterOccurredTransferItems, shouldHideSettledTransferEntry } from './transferSummary';
 import type { LedgerMemberProfile, TransferChecklistItemRow } from '@/src/types/database';
 
 const ALEX_ID = 'alex-user-id';
@@ -91,6 +91,54 @@ describe('filterOccurredTransferItems', () => {
       occurredItem,
       todayItem
     ]);
+  });
+});
+
+describe('shouldHideSettledTransferEntry', () => {
+  it('hides only after settled transfer state is idle and error-free', () => {
+    expect(shouldHideSettledTransferEntry({
+      error: null,
+      loading: false,
+      openCount: 0,
+      saving: false,
+      sheetActive: false
+    })).toBe(true);
+
+    expect(shouldHideSettledTransferEntry({
+      error: null,
+      loading: false,
+      openCount: 1,
+      saving: false,
+      sheetActive: false
+    })).toBe(false);
+    expect(shouldHideSettledTransferEntry({
+      error: null,
+      loading: true,
+      openCount: 0,
+      saving: false,
+      sheetActive: false
+    })).toBe(false);
+    expect(shouldHideSettledTransferEntry({
+      error: null,
+      loading: false,
+      openCount: 0,
+      saving: true,
+      sheetActive: false
+    })).toBe(false);
+    expect(shouldHideSettledTransferEntry({
+      error: 'Could not load transfers',
+      loading: false,
+      openCount: 0,
+      saving: false,
+      sheetActive: false
+    })).toBe(false);
+    expect(shouldHideSettledTransferEntry({
+      error: null,
+      loading: false,
+      openCount: 0,
+      saving: false,
+      sheetActive: true
+    })).toBe(false);
   });
 });
 
