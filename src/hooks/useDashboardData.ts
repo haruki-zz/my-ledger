@@ -224,7 +224,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
   const statsPeriod = hasCurrentCoverage
     ? period
     : loadedPeriod || period;
-  const stats = useMemo(
+  const personalStats = useMemo(
     () => buildDashboardPeriodStats({
       expenses: settledExpenses,
       monthKey: statsMonthKey,
@@ -232,10 +232,23 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
       offset: hasCurrentCoverage ? periodOffset : 0,
       currentUserId,
       otherUserId,
-      viewerUserId: flipped ? null : currentUserId
+      viewerUserId: currentUserId
     }),
-    [currentUserId, flipped, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
+    [currentUserId, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
   );
+  const combinedStats = useMemo(
+    () => buildDashboardPeriodStats({
+      expenses: settledExpenses,
+      monthKey: statsMonthKey,
+      period: statsPeriod,
+      offset: hasCurrentCoverage ? periodOffset : 0,
+      currentUserId,
+      otherUserId,
+      viewerUserId: null
+    }),
+    [currentUserId, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
+  );
+  const stats = flipped ? combinedStats : personalStats;
 
   return {
     ledger,
@@ -247,6 +260,8 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
     otherUserId,
     minimumMonthKey,
     loadedMonthKey,
+    combinedStats,
+    personalStats,
     stats,
     dataVersion,
     loading,

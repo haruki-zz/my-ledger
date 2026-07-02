@@ -736,6 +736,7 @@ const settleStyles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
+    marginTop: 10,
     minHeight: 36
   },
   doneText: {
@@ -786,6 +787,7 @@ const settleStyles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
+    marginTop: 10,
     minHeight: 36
   },
   settleButton: {

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   PanResponder,
   Pressable,
@@ -9,8 +9,7 @@ import {
   StyleSheet,
   Text,
   View,
-  type LayoutChangeEvent,
-  type ViewStyle
+  type LayoutChangeEvent
 } from 'react-native';
 import Animated, {
   Extrapolation,
@@ -18,7 +17,7 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withTiming,
-  type AnimatedStyle
+  type SharedValue
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -43,11 +42,11 @@ import {
   monthKeyFromDateString,
   resolveDashboardPeriodNavigation,
   type CategoryStat,
-  type DashboardPeriod
+  type DashboardPeriod,
+  type DashboardPeriodStats
 } from '@/src/lib/stats';
 
-const HERO_FLIP_DURATION_MS = motionDurations.data;
-
+const HERO_FLIP_DURATION_MS = 900;
 const PERIOD_OPTIONS: { label: string; value: DashboardPeriod }[] = [
   { label: 'D', value: 'today' },
   { label: 'W', value: 'week' },
@@ -63,9 +62,7 @@ export default function DashboardScreen() {
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [flipped, setFlipped] = useState(false);
-  const [heroShowsBack, setHeroShowsBack] = useState(false);
   const heroFlipProgress = useSharedValue(0);
-  const heroFlipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const {
     ledger,
     members,
@@ -73,6 +70,8 @@ export default function DashboardScreen() {
     otherUserId,
     minimumMonthKey,
     settledExpenses,
+    combinedStats,
+    personalStats,
     stats,
     error,
     reload
@@ -88,9 +87,9 @@ export default function DashboardScreen() {
 
   const currentUserName = displayName(members.find((member) => member.user_id === currentUserId)?.profile.display_name);
   const otherUserName = displayName(members.find((member) => member.user_id === otherUserId)?.profile.display_name);
-  const memberStats = stats.memberTotals;
-  const currentMemberStat = memberStats.find((member) => member.userId === currentUserId);
-  const otherMemberStat = memberStats.find((member) => member.userId === otherUserId);
+  const combinedMemberStats = combinedStats.memberTotals;
+  const currentMemberStat = combinedMemberStats.find((member) => member.userId === currentUserId);
+  const otherMemberStat = combinedMemberStats.find((member) => member.userId === otherUserId);
   const userIds = useMemo(() => (
     members.map((member) => member.user_id)
   ), [members]);
@@ -125,26 +124,7 @@ export default function DashboardScreen() {
       ? stats.getCategoryDetail(selectedCategoryKey)
       : null
   ), [selectedCategoryKey, stats]);
-  const dashboardComparison = getSpendComparisonPresentation(stats.comparison.direction, {
-    neutralIcon: 'remove',
-    tone: 'onDark'
-  });
   const heroResize = motionCardResizeTransition(reduceMotion);
-  const heroFlipStyle = useAnimatedStyle(() => {
-    const progress = heroFlipProgress.value;
-    const rotateY = progress <= 0.5
-      ? interpolate(progress, [0, 0.5], [0, 90], Extrapolation.CLAMP)
-      : interpolate(progress, [0.5, 1], [-90, 0], Extrapolation.CLAMP);
-    const scale = interpolate(progress, [0, 0.5, 1], [1, 0.92, 1]);
-
-    return {
-      transform: [
-        { perspective: 900 },
-        { rotateY: `${rotateY}deg` },
-        { scale }
-      ]
-    };
-  });
 
   const closeCategoryDetail = useCallback(() => {
     setSelectedCategoryKey(null);
@@ -160,25 +140,7 @@ export default function DashboardScreen() {
       duration: motionDuration(HERO_FLIP_DURATION_MS, reduceMotion),
       easing: motionEasings.emphasize
     });
-
-    if (heroFlipTimerRef.current) {
-      clearTimeout(heroFlipTimerRef.current);
-      heroFlipTimerRef.current = null;
-    }
-
-    const swapDelay = motionDuration(HERO_FLIP_DURATION_MS, reduceMotion) / 2;
-    if (swapDelay > 0) {
-      heroFlipTimerRef.current = setTimeout(() => setHeroShowsBack(flipped), swapDelay);
-    } else {
-      setHeroShowsBack(flipped);
-    }
   }, [flipped, heroFlipProgress, reduceMotion]);
-
-  useEffect(() => () => {
-    if (heroFlipTimerRef.current) {
-      clearTimeout(heroFlipTimerRef.current);
-    }
-  }, []);
 
   useEffect(() => {
     if (selectedCategoryKey && !selectedCategoryDetail) {
@@ -300,90 +262,56 @@ export default function DashboardScreen() {
                 </View>
 
                 <HeroFlipZone
+                  backFace={(
+                    <HeroFaceContent
+                      comparison={comparisonBadgeForDirection(combinedStats.comparison.direction)}
+                      currentUserColor={currentUserColorOnDark}
+                      currentUserName={currentUserName}
+                      currentUserTotalYen={currentMemberStat?.amountYen || 0}
+                      otherUserColor={otherUserColorOnDark}
+                      otherUserId={otherUserId}
+                      otherUserName={otherUserName}
+                      otherUserTotalYen={otherMemberStat?.amountYen || 0}
+                      scope="combined"
+                      stats={combinedStats}
+                    />
+                  )}
                   canFlip={Boolean(otherUserId)}
+                  frontFace={(
+                    <HeroFaceContent
+                      comparison={comparisonBadgeForDirection(personalStats.comparison.direction)}
+                      currentUserColor={currentUserColorOnDark}
+                      currentUserName={currentUserName}
+                      currentUserTotalYen={currentMemberStat?.amountYen || 0}
+                      otherUserColor={otherUserColorOnDark}
+                      otherUserId={otherUserId}
+                      otherUserName={otherUserName}
+                      otherUserTotalYen={otherMemberStat?.amountYen || 0}
+                      scope="personal"
+                      stats={personalStats}
+                    />
+                  )}
                   flipped={flipped}
                   onToggle={toggleHeroFlip}
                   otherUserName={otherUserName}
-                  style={heroFlipStyle}
-                >
-                  <View style={localStyles.heroAmountRow}>
-                    <View style={localStyles.heroAmountBlock}>
-                      <SlidingValueText
-                        formatValue={formatYen}
-                        textStyle={localStyles.heroAmount}
-                        value={stats.totalYen}
-                        wrapperStyle={localStyles.heroAmountSlot}
-                      />
-                    </View>
-                    <View style={localStyles.comparisonStack}>
-                      <View style={localStyles.comparisonTopLine}>
-                        <Ionicons
-                          color={dashboardComparison.color}
-                          name={dashboardComparison.icon || 'remove'}
-                          size={13}
-                        />
-                        <SlidingValueText
-                          formatValue={formatComparisonAmount}
-                          textStyle={[localStyles.comparisonAmountText, { color: dashboardComparison.color }]}
-                          value={Math.abs(stats.comparison.deltaYen)}
-                          wrapperStyle={localStyles.comparisonAmountSlot}
-                        />
-                        <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
-                          {stats.comparison.label}
-                        </Text>
-                      </View>
-                      <View style={localStyles.percentBadge}>
-                        <Text style={[localStyles.percentBadgeText, { color: dashboardComparison.color }]}>
-                          {formatComparisonPercentage(stats.comparison.percentage)}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
+                  progress={heroFlipProgress}
+                />
 
-                  {otherUserId && !heroShowsBack ? (
-                    <View style={localStyles.heroFlipHint}>
-                      <Ionicons color="rgba(255,253,247,0.42)" name="sync-outline" size={12} />
-                      <Text style={localStyles.heroFlipHintText}>
-                        Tap to see combined with {otherUserName}
-                      </Text>
-                    </View>
-                  ) : (
-                    <View style={localStyles.heroSecondary}>
-                      <View style={localStyles.memberSplitRow}>
-                        <MemberSplit
-                          amountYen={currentMemberStat?.amountYen || 0}
-                          color={currentUserColorOnDark}
-                          label={currentUserName}
-                        />
-                        {otherUserId ? (
-                          <>
-                            <View style={localStyles.memberDivider} />
-                            <MemberSplit
-                              amountYen={otherMemberStat?.amountYen || 0}
-                              color={otherUserColorOnDark}
-                              label={otherUserName}
-                            />
-                          </>
-                        ) : null}
-                      </View>
-
-                      <TransferSettleEntry
-                        currentUserId={currentUserId}
-                        error={transferError}
-                        items={transferItems}
-                        loading={transferLoading}
-                        members={members}
-                        onSetConfirmations={setConfirmations}
-                        saving={transferSaving}
-                      />
-                    </View>
-                  )}
-                </HeroFlipZone>
+                <TransferSettleEntry
+                  currentUserId={currentUserId}
+                  error={transferError}
+                  items={transferItems}
+                  loading={transferLoading}
+                  members={members}
+                  onSetConfirmations={setConfirmations}
+                  saving={transferSaving}
+                />
               </BentoCard>
             </Animated.View>
           </View>
 
           <DashboardDailyActivity
+            barAnimationDurationMs={HERO_FLIP_DURATION_MS}
             days={heatDays}
             monthKey={heatmapMonthKey}
             onViewHistoryDate={viewHistoryDate}
@@ -392,6 +320,7 @@ export default function DashboardScreen() {
 
           <DashboardCategoryShare
             categories={stats.categories}
+            colorAnimationDurationMs={HERO_FLIP_DURATION_MS}
             onCategoryPress={openCategoryDetail}
             selectedCategoryKey={selectedCategoryKey}
             totalYen={stats.totalYen}
@@ -487,35 +416,211 @@ function PeriodSegment({
 }
 
 function HeroFlipZone({
+  backFace,
   canFlip,
-  children,
+  frontFace,
   flipped,
   onToggle,
   otherUserName,
-  style
+  progress
 }: {
+  backFace: ReactNode;
   canFlip: boolean;
-  children: ReactNode;
+  frontFace: ReactNode;
   flipped: boolean;
   onToggle: () => void;
   otherUserName: string;
-  style: AnimatedStyle<ViewStyle>;
+  progress: SharedValue<number>;
 }) {
+  const [frontFaceHeight, setFrontFaceHeight] = useState(0);
+  const [backFaceHeight, setBackFaceHeight] = useState(0);
+  const hasMeasuredFaces = frontFaceHeight > 0 && backFaceHeight > 0;
+  const rotorShellStyle = useAnimatedStyle(() => {
+    const fallbackHeight = frontFaceHeight || backFaceHeight || 96;
+    return {
+      height: canFlip && hasMeasuredFaces
+        ? interpolate(progress.value, [0, 1], [frontFaceHeight, backFaceHeight], Extrapolation.CLAMP)
+        : fallbackHeight
+    };
+  });
+  const frontFaceStyle = useAnimatedStyle(() => ({
+    opacity: progress.value < 0.5 ? 1 : 0,
+    transform: [
+      { perspective: 1100 },
+      { rotateY: `${progress.value * 180}deg` }
+    ]
+  }));
+  const backFaceStyle = useAnimatedStyle(() => ({
+    opacity: progress.value >= 0.5 ? 1 : 0,
+    transform: [
+      { perspective: 1100 },
+      { rotateY: `${-180 + progress.value * 180}deg` }
+    ]
+  }));
+
   if (!canFlip) {
-    return <View>{children}</View>;
+    return <View>{frontFace}</View>;
   }
 
   return (
-    <Pressable
-      accessibilityHint="Flips between your spending only and combined spending with your partner"
-      accessibilityLabel={flipped ? 'Show only your spending' : `Show combined spending with ${otherUserName}`}
-      accessibilityRole="button"
-      onPress={onToggle}
-    >
-      <Animated.View style={style}>
-        {children}
-      </Animated.View>
-    </Pressable>
+    <View style={localStyles.heroFlipShell}>
+      <View pointerEvents="none" style={localStyles.heroFaceMeasurer}>
+        <View onLayout={(event) => setFrontFaceHeight(event.nativeEvent.layout.height)}>
+          {frontFace}
+        </View>
+        <View onLayout={(event) => setBackFaceHeight(event.nativeEvent.layout.height)}>
+          {backFace}
+        </View>
+      </View>
+
+      <Pressable
+        accessibilityHint="Flips between your spending only and combined spending with your partner"
+        accessibilityLabel={flipped ? 'Show only your spending' : `Show combined spending with ${otherUserName}`}
+        accessibilityRole="button"
+        onPress={onToggle}
+        style={localStyles.heroFlipPressable}
+      >
+        <Animated.View style={[localStyles.heroFlipViewport, rotorShellStyle]}>
+          <Animated.View style={[localStyles.heroFace, frontFaceStyle]}>
+            {frontFace}
+          </Animated.View>
+          <Animated.View style={[localStyles.heroFace, backFaceStyle]}>
+            {backFace}
+          </Animated.View>
+        </Animated.View>
+      </Pressable>
+    </View>
+  );
+}
+
+type ComparisonBadgePresentation = {
+  badgeBackgroundColor: string;
+  color: string;
+  icon: keyof typeof Ionicons.glyphMap;
+};
+
+function HeroFaceContent({
+  comparison,
+  currentUserColor,
+  currentUserName,
+  currentUserTotalYen,
+  otherUserColor,
+  otherUserId,
+  otherUserName,
+  otherUserTotalYen,
+  scope,
+  stats
+}: {
+  comparison: ComparisonBadgePresentation;
+  currentUserColor: string;
+  currentUserName: string;
+  currentUserTotalYen: number;
+  otherUserColor: string;
+  otherUserId: string | null;
+  otherUserName: string;
+  otherUserTotalYen: number;
+  scope: 'combined' | 'personal';
+  stats: DashboardPeriodStats;
+}) {
+  return (
+    <View style={localStyles.heroFaceContent}>
+      <View style={localStyles.heroScopeRow}>
+        <HeroScopePill
+          currentUserColor={currentUserColor}
+          currentUserName={currentUserName}
+          otherUserColor={otherUserColor}
+          scope={scope}
+        />
+        <Text style={localStyles.heroRecordCount}>
+          {formatRecordCount(stats.count)}
+        </Text>
+      </View>
+
+      <View style={localStyles.heroAmountRow}>
+        <View style={localStyles.heroAmountBlock}>
+          <SlidingValueText
+            formatValue={formatYen}
+            textStyle={localStyles.heroAmount}
+            value={stats.totalYen}
+            wrapperStyle={localStyles.heroAmountSlot}
+          />
+        </View>
+        <View style={localStyles.comparisonStack}>
+          <View style={localStyles.comparisonTopLine}>
+            <Ionicons
+              color={comparison.color}
+              name={comparison.icon}
+              size={13}
+            />
+            <SlidingValueText
+              formatValue={formatComparisonAmount}
+              textStyle={[localStyles.comparisonAmountText, { color: comparison.color }]}
+              value={Math.abs(stats.comparison.deltaYen)}
+              wrapperStyle={localStyles.comparisonAmountSlot}
+            />
+            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
+              {stats.comparison.label}
+            </Text>
+          </View>
+          <View style={[localStyles.percentBadge, { backgroundColor: comparison.badgeBackgroundColor }]}>
+            <Text style={[localStyles.percentBadgeText, { color: comparison.color }]}>
+              {formatComparisonPercentage(stats.comparison.percentage)}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {scope === 'combined' ? (
+        <View style={localStyles.heroSecondary}>
+          <View style={localStyles.memberSplitRow}>
+            <MemberSplit
+              amountYen={currentUserTotalYen}
+              color={currentUserColor}
+              label={currentUserName}
+            />
+            {otherUserId ? (
+              <>
+                <View style={localStyles.memberDivider} />
+                <MemberSplit
+                  amountYen={otherUserTotalYen}
+                  color={otherUserColor}
+                  label={otherUserName}
+                />
+              </>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function HeroScopePill({
+  currentUserColor,
+  currentUserName,
+  otherUserColor,
+  scope
+}: {
+  currentUserColor: string;
+  currentUserName: string;
+  otherUserColor: string;
+  scope: 'combined' | 'personal';
+}) {
+  return (
+    <View style={localStyles.heroScopePill}>
+      {scope === 'personal' ? (
+        <View style={[localStyles.heroScopeDot, { backgroundColor: currentUserColor }]} />
+      ) : (
+        <View style={localStyles.heroTogetherDots}>
+          <View style={[localStyles.heroScopeDot, { backgroundColor: currentUserColor }]} />
+          <View style={[localStyles.heroScopeDot, localStyles.heroScopeDotOverlap, { backgroundColor: otherUserColor }]} />
+        </View>
+      )}
+      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.heroScopeText}>
+        {scope === 'personal' ? displayName(currentUserName) : 'Together'}
+      </Text>
+      <Ionicons color="rgba(255,253,247,0.48)" name="swap-horizontal" size={12} />
+    </View>
   );
 }
 
@@ -588,6 +693,39 @@ function periodLabel(period: DashboardPeriod) {
   }
 
   return 'month';
+}
+
+function comparisonBadgeForDirection(direction: DashboardPeriodStats['comparison']['direction']): ComparisonBadgePresentation {
+  if (direction === 'over') {
+    return {
+      badgeBackgroundColor: 'rgba(232,149,123,0.16)',
+      color: '#E8957B',
+      icon: 'caret-up'
+    };
+  }
+
+  if (direction === 'under') {
+    return {
+      badgeBackgroundColor: 'rgba(95,184,178,0.16)',
+      color: '#7FC4BE',
+      icon: 'caret-down'
+    };
+  }
+
+  const presentation = getSpendComparisonPresentation(direction, {
+    neutralIcon: 'remove',
+    tone: 'onDark'
+  });
+
+  return {
+    badgeBackgroundColor: 'rgba(255,253,247,0.12)',
+    color: presentation.color,
+    icon: presentation.icon
+  };
+}
+
+function formatRecordCount(count: number) {
+  return `${count} ${count === 1 ? 'record' : 'records'}`;
 }
 
 function formatComparisonAmount(amountYen: number) {
@@ -703,19 +841,33 @@ const localStyles = StyleSheet.create({
   heroChevronPressed: {
     backgroundColor: 'rgba(255,253,247,0.14)'
   },
-  heroFlipHint: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    justifyContent: 'center',
-    marginTop: 14,
-    paddingVertical: 2
+  heroFace: {
+    backfaceVisibility: 'hidden',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0
   },
-  heroFlipHintText: {
-    color: 'rgba(255,253,247,0.42)',
-    fontFamily: fontFamilies.regular,
-    fontSize: 11,
-    lineHeight: 15
+  heroFaceContent: {
+    gap: 13
+  },
+  heroFaceMeasurer: {
+    left: 0,
+    opacity: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: -1
+  },
+  heroFlipPressable: {
+    minHeight: 44
+  },
+  heroFlipShell: {
+    position: 'relative'
+  },
+  heroFlipViewport: {
+    overflow: 'visible',
+    position: 'relative'
   },
   heroMonth: {
     color: '#FFFDF7',
@@ -732,9 +884,55 @@ const localStyles = StyleSheet.create({
     backgroundColor: 'rgba(255,253,247,0.05)',
     borderRadius: 14,
     gap: 10,
-    marginTop: 12,
     paddingHorizontal: 12,
     paddingVertical: 10
+  },
+  heroRecordCount: {
+    color: 'rgba(255,253,247,0.44)',
+    flexShrink: 0,
+    fontFamily: fontFamilies.monoSemiBold,
+    fontSize: 11,
+    fontWeight: '600',
+    lineHeight: 15,
+    textAlign: 'right'
+  },
+  heroScopeDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  heroScopeDotOverlap: {
+    marginLeft: -3
+  },
+  heroScopePill: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,253,247,0.09)',
+    borderColor: 'rgba(255,253,247,0.10)',
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    maxWidth: 176,
+    minHeight: 26,
+    paddingHorizontal: 9,
+    paddingVertical: 5
+  },
+  heroScopeRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+    minHeight: 26
+  },
+  heroScopeText: {
+    color: 'rgba(255,253,247,0.78)',
+    flexShrink: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 11.5,
+    fontWeight: '600',
+    lineHeight: 15,
+    minWidth: 0
   },
   heroSwitch: {
     alignItems: 'center',
@@ -752,6 +950,11 @@ const localStyles = StyleSheet.create({
   },
   heroZone: {
     transformOrigin: 'top center'
+  },
+  heroTogetherDots: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    width: 13
   },
   memberAmount: {
     color: 'rgba(255,253,247,0.86)',

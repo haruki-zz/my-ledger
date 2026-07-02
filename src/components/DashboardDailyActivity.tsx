@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Platform,
@@ -10,13 +10,20 @@ import {
   useWindowDimensions,
   type LayoutChangeEvent
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming
+} from 'react-native-reanimated';
 
 import { DashboardModule } from '@/src/components/DashboardModule';
 import { colors, fontFamilies } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
+import { motionDuration, motionEasings, useReduceMotion } from '@/src/lib/motion';
 import { heatLevelForAmount, heatScaleMaxForAmounts, trendVisualRatioForAmount, type HeatDay } from '@/src/lib/stats';
 
 type DashboardDailyActivityProps = {
+  barAnimationDurationMs?: number;
   days: HeatDay[];
   monthKey: string;
   onViewHistoryDate: (date: string) => void;
@@ -56,6 +63,7 @@ const HEAT_ACTIVE_LEVELS = HEAT_COLORS.length - 1;
 const BAR_MAX_HEIGHT = 40;
 
 export function DashboardDailyActivity({
+  barAnimationDurationMs = 900,
   days,
   monthKey,
   onViewHistoryDate,
@@ -232,21 +240,18 @@ export function DashboardDailyActivity({
         summary={
           <View style={localStyles.summary}>
             <View style={localStyles.barRow}>
-              {days.map((day) => {
+              {days.map((day, index) => {
                 const future = isSelectedMonthCurrent && day.date > todayString;
                 const level = heatLevelForAmount(day.amount, heatScaleMaxAmount, HEAT_ACTIVE_LEVELS);
                 const ratio = heatScaleMaxAmount > 0 ? trendVisualRatioForAmount(day.amount, heatScaleMaxAmount) : 0;
                 const barHeight = Math.max(2, Math.round(ratio * BAR_MAX_HEIGHT));
                 return (
-                  <View key={day.date} style={localStyles.barSlot}>
-                    <View
-                      style={[
-                        localStyles.bar,
-                        {
-                          backgroundColor: future ? 'rgba(42,39,34,0.05)' : HEAT_COLORS[level],
-                          height: barHeight
-                        }
-                      ]}
+                  <View key={`summary-bar-${index}`} style={localStyles.barSlot}>
+                    <DailyActivitySummaryBar
+                      color={future ? 'rgba(42,39,34,0.05)' : HEAT_COLORS[level]}
+                      date={day.date}
+                      durationMs={barAnimationDurationMs}
+                      height={barHeight}
                     />
                   </View>
                 );
@@ -357,6 +362,43 @@ export function DashboardDailyActivity({
         </Pressable>
       </Modal>
     </>
+  );
+}
+
+function DailyActivitySummaryBar({
+  color,
+  date,
+  durationMs,
+  height
+}: {
+  color: string;
+  date: string;
+  durationMs: number;
+  height: number;
+}) {
+  const reduceMotion = useReduceMotion();
+  const animatedHeight = useSharedValue(height);
+
+  useEffect(() => {
+    animatedHeight.value = withTiming(height, {
+      duration: motionDuration(durationMs, reduceMotion),
+      easing: motionEasings.emphasize
+    });
+  }, [animatedHeight, durationMs, height, reduceMotion]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: animatedHeight.value
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        localStyles.bar,
+        { backgroundColor: color },
+        animatedStyle
+      ]}
+      testID={`daily-activity-summary-bar-${date}`}
+    />
   );
 }
 

@@ -1,7 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
-import Animated, { useAnimatedProps, useSharedValue, withTiming, type SharedValue } from 'react-native-reanimated';
+import Animated, {
+  interpolateColor,
+  useAnimatedProps,
+  useSharedValue,
+  withTiming,
+  type SharedValue
+} from 'react-native-reanimated';
 import Svg, { Circle, Path, Text as SvgText } from 'react-native-svg';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
@@ -12,6 +18,7 @@ import type { CategoryStat } from '@/src/lib/stats';
 
 type PieChartProps = {
   categories: CategoryStat[];
+  colorAnimationDurationMs?: number;
   totalYen: number;
   onCategoryPress?: (category: CategoryStat, anchorPoint?: AnchorPoint) => void;
   selectedCategoryKey?: string | null;
@@ -33,6 +40,7 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 export function PieChart({
   categories,
+  colorAnimationDurationMs = 900,
   totalYen,
   onCategoryPress,
   selectedCategoryKey
@@ -92,6 +100,7 @@ export function PieChart({
             <DonutCircle
               category={segments[0]}
               center={center}
+              colorAnimationDurationMs={colorAnimationDurationMs}
               circumference={circumference}
               onPress={onCategoryPress ? (event) => handleCategoryPress(segments[0], event as unknown as GestureResponderEvent) : undefined}
               progress={donutProgress}
@@ -102,6 +111,7 @@ export function PieChart({
             segments.map((segment) => (
               <DonutSegment
                 key={`${segment.category}-${segment.path}`}
+                colorAnimationDurationMs={colorAnimationDurationMs}
                 onPress={onCategoryPress ? (event) => handleCategoryPress(segment, event as unknown as GestureResponderEvent) : undefined}
                 progress={donutProgress}
                 segment={segment}
@@ -175,6 +185,7 @@ export function PieChart({
 function DonutCircle({
   category,
   center,
+  colorAnimationDurationMs,
   circumference,
   onPress,
   progress,
@@ -183,13 +194,42 @@ function DonutCircle({
 }: {
   category: PieSegment;
   center: number;
+  colorAnimationDurationMs: number;
   circumference: number;
   onPress?: (event: unknown) => void;
   progress: SharedValue<number>;
   radius: number;
   strokeWidth: number;
 }) {
+  const reduceMotion = useReduceMotion();
+  const strokeColorProgress = useSharedValue(1);
+  const [strokeColorRange, setStrokeColorRange] = useState(() => ({
+    from: category.color,
+    to: category.color
+  }));
+
+  useEffect(() => {
+    if (strokeColorRange.to === category.color) {
+      return;
+    }
+
+    setStrokeColorRange({
+      from: strokeColorRange.to,
+      to: category.color
+    });
+    strokeColorProgress.value = 0;
+    strokeColorProgress.value = withTiming(1, {
+      duration: motionDuration(colorAnimationDurationMs, reduceMotion),
+      easing: motionEasings.emphasize
+    });
+  }, [category.color, colorAnimationDurationMs, reduceMotion, strokeColorProgress, strokeColorRange.to]);
+
   const animatedProps = useAnimatedProps(() => ({
+    stroke: interpolateColor(
+      strokeColorProgress.value,
+      [0, 1],
+      [strokeColorRange.from, strokeColorRange.to]
+    ),
     strokeDashoffset: circumference * (1 - progress.value)
   }));
 
@@ -201,7 +241,6 @@ function DonutCircle({
       fill="none"
       onPress={onPress}
       r={radius}
-      stroke={category.color}
       strokeDasharray={`${circumference} ${circumference}`}
       strokeWidth={strokeWidth}
     />
@@ -209,17 +248,47 @@ function DonutCircle({
 }
 
 function DonutSegment({
+  colorAnimationDurationMs,
   onPress,
   progress,
   segment,
   strokeWidth
 }: {
+  colorAnimationDurationMs: number;
   onPress?: (event: unknown) => void;
   progress: SharedValue<number>;
   segment: PieSegment;
   strokeWidth: number;
 }) {
+  const reduceMotion = useReduceMotion();
+  const strokeColorProgress = useSharedValue(1);
+  const [strokeColorRange, setStrokeColorRange] = useState(() => ({
+    from: segment.color,
+    to: segment.color
+  }));
+
+  useEffect(() => {
+    if (strokeColorRange.to === segment.color) {
+      return;
+    }
+
+    setStrokeColorRange({
+      from: strokeColorRange.to,
+      to: segment.color
+    });
+    strokeColorProgress.value = 0;
+    strokeColorProgress.value = withTiming(1, {
+      duration: motionDuration(colorAnimationDurationMs, reduceMotion),
+      easing: motionEasings.emphasize
+    });
+  }, [colorAnimationDurationMs, reduceMotion, segment.color, strokeColorProgress, strokeColorRange.to]);
+
   const animatedProps = useAnimatedProps(() => ({
+    stroke: interpolateColor(
+      strokeColorProgress.value,
+      [0, 1],
+      [strokeColorRange.from, strokeColorRange.to]
+    ),
     strokeDashoffset: segment.segmentLength * (1 - progress.value)
   }));
 
@@ -229,7 +298,6 @@ function DonutSegment({
       d={segment.path}
       fill="none"
       onPress={onPress}
-      stroke={segment.color}
       strokeDasharray={`${segment.segmentLength} ${segment.segmentLength}`}
       strokeLinecap="round"
       strokeWidth={strokeWidth}

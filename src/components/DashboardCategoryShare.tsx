@@ -18,6 +18,7 @@ import type { CategoryStat } from '@/src/lib/stats';
 
 type DashboardCategoryShareProps = {
   categories: CategoryStat[];
+  colorAnimationDurationMs?: number;
   onCategoryPress: (category: CategoryStat) => void;
   selectedCategoryKey?: string | null;
   totalYen: number;
@@ -29,6 +30,7 @@ const RING_RADIUS = 60;
 
 export function DashboardCategoryShare({
   categories,
+  colorAnimationDurationMs = 900,
   onCategoryPress,
   selectedCategoryKey,
   totalYen
@@ -70,13 +72,14 @@ export function DashboardCategoryShare({
       }
       expandOnCollapsedAreaPress
       measureKey={`category-share:${measureKey}`}
-      middle={
+      middle={visibleCategories.length > 0 ? (
         <CapsuleMorph
           categories={visibleCategories}
+          colorAnimationDurationMs={colorAnimationDurationMs}
           open={open}
           totalYen={totalYen}
         />
-      }
+      ) : null}
       onToggle={() => setOpen((current) => !current)}
       open={open}
       summary={
@@ -101,10 +104,12 @@ export function DashboardCategoryShare({
 
 function CapsuleMorph({
   categories,
+  colorAnimationDurationMs,
   open,
   totalYen
 }: {
   categories: CategoryStat[];
+  colorAnimationDurationMs: number;
   open: boolean;
   totalYen: number;
 }) {
@@ -150,6 +155,7 @@ function CapsuleMorph({
       {Array.from({ length: CAPSULE_COUNT }, (_, index) => (
         <MorphCapsule
           color={colorSlots[index] || colors.subtle}
+          colorAnimationDurationMs={colorAnimationDurationMs}
           index={index}
           key={`cap-${index}`}
           progress={morphProgress}
@@ -167,11 +173,13 @@ function CapsuleMorph({
 
 function MorphCapsule({
   color,
+  colorAnimationDurationMs,
   index,
   progress,
   reduceMotion
 }: {
   color: string;
+  colorAnimationDurationMs: number;
   index: number;
   progress: SharedValue<number>;
   reduceMotion: boolean;
@@ -198,10 +206,10 @@ function MorphCapsule({
     });
     colorProgress.value = 0;
     colorProgress.value = withTiming(1, {
-      duration: motionDuration(motionDurations.content, reduceMotion),
-      easing: motionEasings.standard
+      duration: motionDuration(colorAnimationDurationMs, reduceMotion),
+      easing: motionEasings.emphasize
     });
-  }, [color, colorProgress, colorRange.to, reduceMotion]);
+  }, [color, colorAnimationDurationMs, colorProgress, colorRange.to, reduceMotion]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(
@@ -222,7 +230,7 @@ function MorphCapsule({
     ]
   }));
 
-  return <Animated.View style={[localStyles.capsule, animatedStyle]} />;
+  return <Animated.View style={[localStyles.capsule, animatedStyle]} testID={`category-share-capsule-${index}`} />;
 }
 
 function buildCapsuleColors(categories: CategoryStat[]) {
@@ -381,7 +389,7 @@ const localStyles = StyleSheet.create({
     gap: 10,
     paddingBottom: 15,
     paddingHorizontal: 16,
-    paddingTop: 13
+    paddingTop: 28
   },
   summaryName: {
     color: colors.muted,
