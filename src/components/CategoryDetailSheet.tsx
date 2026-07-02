@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
   Modal,
@@ -17,7 +17,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnimatedBarFill, AnimatedPercentFill } from '@/src/components/motion';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
-import { IconButton } from '@/src/components/ui';
 import { displayName, formatYen } from '@/src/lib/format';
 import { getSpendComparisonPresentation } from '@/src/lib/spendComparison';
 import type {
@@ -45,6 +44,7 @@ type BlurFallbackBoundaryState = {
 const ENTER_DURATION_MS = 180;
 const EXIT_DURATION_MS = 130;
 const DISMISS_DRAG_DISTANCE = 70;
+const DISMISS_DRAG_VELOCITY = 0.85;
 const SHEET_HEIGHT_RATIO = 0.72;
 
 export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetailSheetProps) {
@@ -54,56 +54,50 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
   const [closing, setClosing] = useState(false);
   const [transitionProgress] = useState(() => new Animated.Value(0));
   const [dragY] = useState(() => new Animated.Value(0));
-  const [sheetAtTop, setSheetAtTop] = useState(true);
+  const webDragCleanupRef = useRef<null | (() => void)>(null);
   const memberNameById = useMemo(() => (
     new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]))
   ), [members]);
   const sheetWidth = width;
   const sheetMaxHeight = Math.max(300, Math.min(height * SHEET_HEIGHT_RATIO, height - insets.top - 12));
   const visible = Boolean(detail);
+  const dragBackdropOpacity = useMemo(() => (
+    dragY.interpolate({
+      extrapolate: 'clamp',
+      inputRange: [0, sheetMaxHeight],
+      outputRange: [1, 0]
+    })
+  ), [dragY, sheetMaxHeight]);
+  const backdropOpacity = useMemo(() => (
+    Animated.multiply(transitionProgress, dragBackdropOpacity)
+  ), [dragBackdropOpacity, transitionProgress]);
   const springDragBack = useMemo(() => () => {
     Animated.spring(dragY, {
       damping: 18,
       mass: 0.7,
       stiffness: 180,
       toValue: 0,
-      useNativeDriver: true
+      useNativeDriver: Platform.OS !== 'web'
     }).start();
   }, [dragY]);
-  const panResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponder: (_, gestureState) => (
-      sheetAtTop &&
-      gestureState.dy > 8 &&
-      Math.abs(gestureState.dy) > Math.abs(gestureState.dx) * 1.25
-    ),
-    onPanResponderMove: (_, gestureState) => {
-      dragY.setValue(Math.max(0, gestureState.dy));
-    },
-    onPanResponderRelease: (_, gestureState) => {
-      if (gestureState.dy > DISMISS_DRAG_DISTANCE) {
-        dragY.setValue(0);
-        onClose();
-        return;
-      }
-
-      springDragBack();
-    },
-    onPanResponderTerminate: () => {
-      springDragBack();
-    },
-    onStartShouldSetPanResponder: () => false
-  }), [dragY, onClose, sheetAtTop, springDragBack]);
   const handlePanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_, gestureState) => (
+      gestureState.dy > 4 &&
+      Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+    ),
     onMoveShouldSetPanResponder: (_, gestureState) => (
       gestureState.dy > 4 &&
       Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
     ),
+    onPanResponderGrant: () => {
+      dragY.stopAnimation();
+      dragY.setValue(0);
+    },
     onPanResponderMove: (_, gestureState) => {
       dragY.setValue(Math.max(0, gestureState.dy));
     },
     onPanResponderRelease: (_, gestureState) => {
-      if (gestureState.dy > DISMISS_DRAG_DISTANCE) {
-        dragY.setValue(0);
+      if (gestureState.dy > DISMISS_DRAG_DISTANCE || (gestureState.dy > 24 && gestureState.vy > DISMISS_DRAG_VELOCITY)) {
         onClose();
         return;
       }
@@ -113,8 +107,53 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
     onPanResponderTerminate: () => {
       springDragBack();
     },
-    onStartShouldSetPanResponder: () => false
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponderCapture: () => true
   }), [dragY, onClose, springDragBack]);
+  const webHandleDragHandlers = useMemo(() => {
+    if (Platform.OS !== 'web') {
+      return {};
+    }
+
+    return {
+      onMouseDown: (event: { nativeEvent?: { pageY?: number; preventDefault?: () => void } }) => {
+        event.nativeEvent?.preventDefault?.();
+        webDragCleanupRef.current?.();
+
+        const startY = event.nativeEvent?.pageY ?? 0;
+        let latestY = startY;
+        const handleMove = (moveEvent: MouseEvent) => {
+          latestY = moveEvent.pageY;
+          dragY.setValue(Math.max(0, latestY - startY));
+        };
+        const handleEnd = () => {
+          webDragCleanupRef.current?.();
+          const dy = latestY - startY;
+          if (dy > DISMISS_DRAG_DISTANCE) {
+            onClose();
+            return;
+          }
+
+          springDragBack();
+        };
+        const cleanup = () => {
+          document.removeEventListener('mousemove', handleMove);
+          document.removeEventListener('mouseup', handleEnd);
+          webDragCleanupRef.current = null;
+        };
+
+        webDragCleanupRef.current = cleanup;
+        document.addEventListener('mousemove', handleMove);
+        document.addEventListener('mouseup', handleEnd);
+      }
+    };
+  }, [dragY, onClose, springDragBack]);
+
+  useEffect(() => () => {
+    webDragCleanupRef.current?.();
+  }, []);
 
   useEffect(() => {
     if (!detail) {
@@ -129,12 +168,11 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
 
     setClosing(false);
     dragY.setValue(0);
-    setSheetAtTop(true);
     transitionProgress.setValue(0);
     Animated.timing(transitionProgress, {
       duration: ENTER_DURATION_MS,
       toValue: 1,
-      useNativeDriver: true
+      useNativeDriver: Platform.OS !== 'web'
     }).start();
   }, [closing, detail, dragY, renderedDetail?.detailKey, transitionProgress]);
 
@@ -148,7 +186,7 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
     Animated.timing(transitionProgress, {
       duration: EXIT_DURATION_MS,
       toValue: 0,
-      useNativeDriver: true
+      useNativeDriver: Platform.OS !== 'web'
     }).start(({ finished }) => {
       if (!finished) {
         setClosing(false);
@@ -158,7 +196,7 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
       setRenderedDetail(null);
       setClosing(false);
     });
-  }, [closing, renderedDetail, transitionProgress, visible]);
+  }, [closing, dragY, renderedDetail, transitionProgress, visible]);
 
   if (!renderedDetail) {
     return null;
@@ -168,18 +206,13 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
   const comparisonBadgeText = formatComparisonBadge(renderedDetail.comparison.percentage, comparison.symbol);
   const maxBreakdownAmount = Math.max(0, ...renderedDetail.breakdown.map((item) => item.amountYen));
   const splitTotal = renderedDetail.memberSplits.reduce((sum, split) => sum + split.amountYen, 0);
-  const dragHandlers = Platform.OS === 'web' ? {} : panResponder.panHandlers;
-  const handleDragHandlers = Platform.OS === 'web' ? {} : handlePanResponder.panHandlers;
 
   return (
     <Modal animationType="none" onRequestClose={onClose} transparent visible>
-      <Pressable
-        onPress={onClose}
-        style={sheetStyles.backdrop}
-      >
+      <View style={sheetStyles.backdrop}>
         {Platform.OS === 'ios' ? (
           <BlurFallbackBoundary>
-            <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: transitionProgress }]}>
+            <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}>
               <BlurView intensity={30} style={StyleSheet.absoluteFill} tint="light" />
             </Animated.View>
           </BlurFallbackBoundary>
@@ -189,14 +222,20 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
           style={[
             sheetStyles.fallback,
             Platform.OS === 'ios' && sheetStyles.fallbackIos,
-            { opacity: transitionProgress }
+            { opacity: backdropOpacity }
           ]}
         />
 
         <Pressable
+          accessibilityLabel="Close category details"
+          accessibilityRole="button"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+
+        <View
           accessibilityLabel={`${renderedDetail.category} category details`}
           accessibilityViewIsModal
-          onPress={(event) => event.stopPropagation()}
           style={[
             sheetStyles.sheetHitArea,
             {
@@ -207,7 +246,6 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
           ]}
         >
           <Animated.View
-            {...dragHandlers}
             style={[
               sheetStyles.sheet,
               {
@@ -227,22 +265,14 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
               }
             ]}
           >
-            <Pressable
+            <View
+              accessible
               accessibilityLabel="Drag down to close category details"
-              hitSlop={{ bottom: 10, left: 48, right: 48, top: 10 }}
               style={sheetStyles.grabberHitArea}
-              {...handleDragHandlers}
+              {...handlePanResponder.panHandlers}
+              {...webHandleDragHandlers}
             >
               <View style={sheetStyles.grabber} />
-            </Pressable>
-            <View style={sheetStyles.closeButton}>
-              <IconButton
-                accessibilityLabel="Close category details"
-                icon="close"
-                onPress={onClose}
-                size="sm"
-                tone="neutral"
-              />
             </View>
 
             <View style={sheetStyles.header}>
@@ -271,11 +301,6 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
 
             <ScrollView
               contentContainerStyle={[sheetStyles.content, { paddingBottom: 30 + insets.bottom }]}
-              onScroll={(event) => {
-                const nextAtTop = event.nativeEvent.contentOffset.y <= 0;
-                setSheetAtTop((current) => (current === nextAtTop ? current : nextAtTop));
-              }}
-              scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}
               style={sheetStyles.scroll}
             >
@@ -340,8 +365,8 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
               ) : null}
             </ScrollView>
           </Animated.View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -622,12 +647,6 @@ const sheetStyles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 15
   },
-  closeButton: {
-    position: 'absolute',
-    right: 16,
-    top: 13,
-    zIndex: 2
-  },
   content: {
     gap: 16,
     paddingBottom: 20,
@@ -676,7 +695,6 @@ const sheetStyles = StyleSheet.create({
     gap: 13,
     paddingBottom: 12,
     paddingHorizontal: 20,
-    paddingRight: 54,
     paddingTop: 12
   },
   headerAmount: {

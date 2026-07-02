@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Animated,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -18,7 +19,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { motionCardResizeTransition, motionPanelIn, motionPanelOut } from '@/src/components/motion';
 import { completedAtForUser, isParticipant } from '@/src/components/TransferChecklistShared';
-import { IconButton } from '@/src/components/ui';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
 import { tintFromAccent } from '@/src/lib/color';
 import { categoryWithSubcategory } from '@/src/lib/categorySystem';
@@ -55,6 +55,8 @@ const MINA_COLOR = '#3F8A86';
 const MINA_ON_DARK = '#5FB8B2';
 const ENTER_DURATION_MS = 420;
 const EXIT_DURATION_MS = 240;
+const DISMISS_DRAG_DISTANCE = 70;
+const DISMISS_DRAG_VELOCITY = 0.85;
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -321,11 +323,106 @@ function TransferSettleSheet({
   const [rendered, setRendered] = useState(visible);
   const [closing, setClosing] = useState(false);
   const [transitionProgress] = useState(() => new Animated.Value(0));
+  const [dragY] = useState(() => new Animated.Value(0));
+  const webDragCleanupRef = useRef<null | (() => void)>(null);
   const panelMaxHeight = Math.max(320, Math.min(height * 0.86, height - insets.top - 10));
   const participantCount = currentUserId
     ? items.filter((item) => isParticipant(item, currentUserId)).length
     : 0;
   const actionDisabled = saving || participantCount === 0;
+  const dragBackdropOpacity = useMemo(() => (
+    dragY.interpolate({
+      extrapolate: 'clamp',
+      inputRange: [0, panelMaxHeight],
+      outputRange: [1, 0]
+    })
+  ), [dragY, panelMaxHeight]);
+  const backdropOpacity = useMemo(() => (
+    Animated.multiply(transitionProgress, dragBackdropOpacity)
+  ), [dragBackdropOpacity, transitionProgress]);
+  const springDragBack = useMemo(() => () => {
+    Animated.spring(dragY, {
+      damping: 18,
+      mass: 0.7,
+      stiffness: 180,
+      toValue: 0,
+      useNativeDriver: Platform.OS !== 'web'
+    }).start();
+  }, [dragY]);
+  const handlePanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_, gestureState) => (
+      gestureState.dy > 4 &&
+      Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+    ),
+    onMoveShouldSetPanResponder: (_, gestureState) => (
+      gestureState.dy > 4 &&
+      Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+    ),
+    onPanResponderGrant: () => {
+      dragY.stopAnimation();
+      dragY.setValue(0);
+    },
+    onPanResponderMove: (_, gestureState) => {
+      dragY.setValue(Math.max(0, gestureState.dy));
+    },
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dy > DISMISS_DRAG_DISTANCE || (gestureState.dy > 24 && gestureState.vy > DISMISS_DRAG_VELOCITY)) {
+        onClose();
+        return;
+      }
+
+      springDragBack();
+    },
+    onPanResponderTerminate: () => {
+      springDragBack();
+    },
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponderCapture: () => true
+  }), [dragY, onClose, springDragBack]);
+  const webHandleDragHandlers = useMemo(() => {
+    if (Platform.OS !== 'web') {
+      return {};
+    }
+
+    return {
+      onMouseDown: (event: { nativeEvent?: { pageY?: number; preventDefault?: () => void } }) => {
+        event.nativeEvent?.preventDefault?.();
+        webDragCleanupRef.current?.();
+
+        const startY = event.nativeEvent?.pageY ?? 0;
+        let latestY = startY;
+        const handleMove = (moveEvent: MouseEvent) => {
+          latestY = moveEvent.pageY;
+          dragY.setValue(Math.max(0, latestY - startY));
+        };
+        const handleEnd = () => {
+          webDragCleanupRef.current?.();
+          const dy = latestY - startY;
+          if (dy > DISMISS_DRAG_DISTANCE) {
+            onClose();
+            return;
+          }
+
+          springDragBack();
+        };
+        const cleanup = () => {
+          document.removeEventListener('mousemove', handleMove);
+          document.removeEventListener('mouseup', handleEnd);
+          webDragCleanupRef.current = null;
+        };
+
+        webDragCleanupRef.current = cleanup;
+        document.addEventListener('mousemove', handleMove);
+        document.addEventListener('mouseup', handleEnd);
+      }
+    };
+  }, [dragY, onClose, springDragBack]);
+
+  useEffect(() => () => {
+    webDragCleanupRef.current?.();
+  }, []);
 
   useEffect(() => {
     if (!visible) {
@@ -334,13 +431,14 @@ function TransferSettleSheet({
 
     setRendered(true);
     setClosing(false);
+    dragY.setValue(0);
     transitionProgress.setValue(0);
     Animated.timing(transitionProgress, {
       duration: reduceMotion ? 0 : ENTER_DURATION_MS,
       toValue: 1,
       useNativeDriver: Platform.OS !== 'web'
     }).start();
-  }, [reduceMotion, transitionProgress, visible]);
+  }, [dragY, reduceMotion, transitionProgress, visible]);
 
   useEffect(() => {
     if (visible || !rendered || closing) {
@@ -363,7 +461,7 @@ function TransferSettleSheet({
       setClosing(false);
       onClosed();
     });
-  }, [closing, onClosed, reduceMotion, rendered, transitionProgress, visible]);
+  }, [closing, dragY, onClosed, reduceMotion, rendered, transitionProgress, visible]);
 
   if (!rendered) {
     return null;
@@ -374,7 +472,7 @@ function TransferSettleSheet({
       <View style={sheetStyles.backdrop}>
         {Platform.OS === 'ios' ? (
           <BlurFallbackBoundary>
-            <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: transitionProgress }]}>
+            <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: backdropOpacity }]}>
               <BlurView intensity={24} style={StyleSheet.absoluteFill} tint="light" />
             </Animated.View>
           </BlurFallbackBoundary>
@@ -384,7 +482,7 @@ function TransferSettleSheet({
           style={[
             sheetStyles.scrim,
             Platform.OS === 'ios' && sheetStyles.scrimIos,
-            { opacity: transitionProgress }
+            { opacity: backdropOpacity }
           ]}
         />
         <Pressable
@@ -406,16 +504,25 @@ function TransferSettleSheet({
                 maxHeight: panelMaxHeight,
                 transform: [
                   {
-                    translateY: transitionProgress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [height, 0]
-                    })
+                    translateY: Animated.add(
+                      transitionProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [height, 0]
+                      }),
+                      dragY
+                    )
                   }
                 ]
               }
             ]}
           >
-            <View style={sheetStyles.grabberWrap}>
+            <View
+              accessible
+              accessibilityLabel="Drag down to close settle up"
+              style={sheetStyles.grabberWrap}
+              {...handlePanResponder.panHandlers}
+              {...webHandleDragHandlers}
+            >
               <View style={sheetStyles.grabber} />
             </View>
 
@@ -426,13 +533,6 @@ function TransferSettleSheet({
                   {openCount > 0 ? `${openCount} OPEN ${openCount === 1 ? 'ITEM' : 'ITEMS'}` : 'ALL SETTLED'}
                 </Text>
               </View>
-              <IconButton
-                accessibilityLabel="Close settle up"
-                icon="close"
-                onPress={onClose}
-                size="sm"
-                tone="neutral"
-              />
             </View>
 
             <ScrollView
@@ -823,9 +923,13 @@ const sheetStyles = StyleSheet.create({
   },
   grabberWrap: {
     alignItems: 'center',
+    alignSelf: 'center',
     flexShrink: 0,
+    justifyContent: 'center',
+    minHeight: 24,
     paddingBottom: 4,
-    paddingTop: 9
+    paddingTop: 9,
+    width: 142
   },
   header: {
     alignItems: 'flex-start',

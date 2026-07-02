@@ -111,17 +111,20 @@ export default function RootLayout() {
               <Stack.Screen
                 name="expenses/new"
                 options={{
+                  contentStyle: { backgroundColor: 'transparent' },
                   gestureEnabled: false,
                   headerShown: false,
-                  presentation: 'modal',
+                  presentation: 'transparentModal',
                   title: 'Add Expense'
                 }}
               />
               <Stack.Screen
                 name="expenses/[id]"
                 options={{
+                  contentStyle: { backgroundColor: 'transparent' },
                   gestureEnabled: false,
                   headerShown: false,
+                  presentation: 'transparentModal',
                   title: 'Edit Expense'
                 }}
               />

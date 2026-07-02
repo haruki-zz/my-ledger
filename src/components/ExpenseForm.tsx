@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Animated as RNAnimated,
   PanResponder,
   Platform,
   Pressable,
@@ -100,6 +102,10 @@ const PROGRESS_DOT_CONFIG = {
   easing: Easing.out(Easing.cubic)
 };
 const SPLIT_CAPSULES = 20;
+const SHEET_ENTER_DURATION_MS = 220;
+const SHEET_EXIT_DURATION_MS = 180;
+const SHEET_DISMISS_DRAG_DISTANCE = 70;
+const SHEET_DISMISS_DRAG_VELOCITY = 0.85;
 
 function parsePositiveInteger(value: string) {
   const parsed = Number(sanitizeWholeNumber(value));
@@ -179,13 +185,19 @@ export function ExpenseForm({
   recurringRules = []
 }: Props) {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const compactLayout = width < 390;
-  const pagePaddingTop = Math.max(insets.top - 24, 0);
+  const sheetMaxHeight = Math.max(360, Math.min(height * 0.92, height - insets.top - 10));
+  const pagePaddingTop = 0;
   const pagePaddingBottom = Math.max(insets.bottom, 10);
   const scrollRef = useRef<ScrollView>(null);
   const wheelScrollRef = useRef<ScrollView>(null);
   const [splitBarResponder, setSplitBarResponder] = useState<PanResponderInstance | null>(null);
+  const [sheetHandleResponder, setSheetHandleResponder] = useState<PanResponderInstance | null>(null);
+  const [sheetTransition] = useState(() => new RNAnimated.Value(0));
+  const [sheetDragY] = useState(() => new RNAnimated.Value(0));
+  const sheetClosingRef = useRef(false);
+  const webSheetDragCleanupRef = useRef<null | (() => void)>(null);
   const selectedCategoryIndexRef = useRef(0);
   const stepRef = useRef<Step>(0);
   const barRef = useRef<View>(null);
@@ -278,6 +290,94 @@ export function ExpenseForm({
   const canContinue = step !== 0 || amountYen > 0;
   const isEditing = Boolean(expense);
   const footerLabel = submitting ? 'Saving...' : step === 4 ? 'Save record' : 'Continue';
+  const sheetDragBackdropOpacity = useMemo(() => (
+    sheetDragY.interpolate({
+      extrapolate: 'clamp',
+      inputRange: [0, sheetMaxHeight],
+      outputRange: [1, 0]
+    })
+  ), [sheetDragY, sheetMaxHeight]);
+  const sheetBackdropOpacity = useMemo(() => (
+    RNAnimated.multiply(sheetTransition, sheetDragBackdropOpacity)
+  ), [sheetDragBackdropOpacity, sheetTransition]);
+  const springSheetDragBack = useMemo(() => () => {
+    RNAnimated.spring(sheetDragY, {
+      damping: 18,
+      mass: 0.7,
+      stiffness: 180,
+      toValue: 0,
+      useNativeDriver: Platform.OS !== 'web'
+    }).start();
+  }, [sheetDragY]);
+  const navigateAwayFromForm = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace('/(tabs)/history');
+  }, []);
+  const closeExpenseSheet = useCallback((preserveDrag = false) => {
+    if (sheetClosingRef.current) {
+      return;
+    }
+
+    sheetClosingRef.current = true;
+    if (!preserveDrag) {
+      sheetDragY.setValue(0);
+    }
+    sheetTransition.stopAnimation();
+    RNAnimated.timing(sheetTransition, {
+      duration: SHEET_EXIT_DURATION_MS,
+      toValue: 0,
+      useNativeDriver: Platform.OS !== 'web'
+    }).start(({ finished }) => {
+      if (!finished) {
+        sheetClosingRef.current = false;
+        return;
+      }
+
+      navigateAwayFromForm();
+    });
+  }, [navigateAwayFromForm, sheetDragY, sheetTransition]);
+  const webSheetHandleDragHandlers = useMemo(() => {
+    if (Platform.OS !== 'web') {
+      return {};
+    }
+
+    return {
+      onMouseDown: (event: { nativeEvent?: { pageY?: number; preventDefault?: () => void } }) => {
+        event.nativeEvent?.preventDefault?.();
+        webSheetDragCleanupRef.current?.();
+
+        const startY = event.nativeEvent?.pageY ?? 0;
+        let latestY = startY;
+        const handleMove = (moveEvent: MouseEvent) => {
+          latestY = moveEvent.pageY;
+          sheetDragY.setValue(Math.max(0, latestY - startY));
+        };
+        const handleEnd = () => {
+          webSheetDragCleanupRef.current?.();
+          const dy = latestY - startY;
+          if (dy > SHEET_DISMISS_DRAG_DISTANCE) {
+            closeExpenseSheet(true);
+            return;
+          }
+
+          springSheetDragBack();
+        };
+        const cleanup = () => {
+          document.removeEventListener('mousemove', handleMove);
+          document.removeEventListener('mouseup', handleEnd);
+          webSheetDragCleanupRef.current = null;
+        };
+
+        webSheetDragCleanupRef.current = cleanup;
+        document.addEventListener('mousemove', handleMove);
+        document.addEventListener('mouseup', handleEnd);
+      }
+    };
+  }, [closeExpenseSheet, sheetDragY, springSheetDragBack]);
 
   useEffect(() => {
     if (step === 2) {
@@ -323,6 +423,55 @@ export function ExpenseForm({
     }));
   }, []);
 
+  useEffect(() => {
+    setSheetHandleResponder(PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => (
+        gestureState.dy > 4 &&
+        Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+      ),
+      onMoveShouldSetPanResponder: (_, gestureState) => (
+        gestureState.dy > 4 &&
+        Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+      ),
+      onPanResponderGrant: () => {
+        sheetDragY.stopAnimation();
+        sheetDragY.setValue(0);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        sheetDragY.setValue(Math.max(0, gestureState.dy));
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > SHEET_DISMISS_DRAG_DISTANCE || (gestureState.dy > 24 && gestureState.vy > SHEET_DISMISS_DRAG_VELOCITY)) {
+          closeExpenseSheet(true);
+          return;
+        }
+
+        springSheetDragBack();
+      },
+      onPanResponderTerminate: () => {
+        springSheetDragBack();
+      },
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true,
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true
+    }));
+  }, [closeExpenseSheet, sheetDragY, springSheetDragBack]);
+
+  useEffect(() => {
+    sheetDragY.setValue(0);
+    sheetTransition.setValue(0);
+    RNAnimated.timing(sheetTransition, {
+      duration: SHEET_ENTER_DURATION_MS,
+      toValue: 1,
+      useNativeDriver: Platform.OS !== 'web'
+    }).start();
+  }, [sheetDragY, sheetTransition]);
+
+  useEffect(() => () => {
+    webSheetDragCleanupRef.current?.();
+  }, []);
+
   function currentShares(): Shares {
     const empty = Object.fromEntries(memberIds.map((memberId) => [memberId, 0]));
     if (!firstMemberId || !secondMemberId || amountYen <= 0) {
@@ -356,12 +505,7 @@ export function ExpenseForm({
   }
 
   function dismissForm() {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace('/(tabs)/history');
+    closeExpenseSheet();
   }
 
   function goStep(nextStep: Step) {
@@ -587,22 +731,73 @@ export function ExpenseForm({
     ratioFromPageXRef.current = ratioFromPageX;
   });
 
-  if (sortedMembers.length < 2) {
+  function renderExpenseSheet(content: React.ReactNode, accessibilityLabel: string) {
     return (
-      <View style={[localStyles.page, { paddingBottom: insets.bottom, paddingTop: insets.top }]}>
-        <View style={localStyles.header}>
-          <Pressable accessibilityLabel="Close expense form" onPress={dismissForm} style={localStyles.iconButton}>
-            <Ionicons color={colors.muted} name="close" size={22} />
-          </Pressable>
-        </View>
-        <View style={localStyles.center}>
-          <Text selectable style={localStyles.errorText}>Shared expenses require two ledger members.</Text>
+      <View style={localStyles.sheetRoot}>
+        {Platform.OS === 'ios' ? (
+          <RNAnimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: sheetBackdropOpacity }]}>
+            <BlurView intensity={24} style={StyleSheet.absoluteFill} tint="light" />
+          </RNAnimated.View>
+        ) : null}
+        <RNAnimated.View
+          pointerEvents="none"
+          style={[localStyles.sheetScrim, Platform.OS === 'ios' && localStyles.sheetScrimIos, { opacity: sheetBackdropOpacity }]}
+        />
+        <Pressable
+          accessibilityLabel="Close expense form"
+          accessibilityRole="button"
+          onPress={dismissForm}
+          style={StyleSheet.absoluteFill}
+        />
+        <View accessibilityLabel={accessibilityLabel} accessibilityViewIsModal style={[localStyles.sheetHitArea, { height: sheetMaxHeight }]}>
+          <RNAnimated.View
+            style={[
+              localStyles.sheet,
+              {
+                height: sheetMaxHeight,
+                transform: [
+                  {
+                    translateY: RNAnimated.add(
+                      sheetTransition.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [height, 0]
+                      }),
+                      sheetDragY
+                    )
+                  }
+                ]
+              }
+            ]}
+          >
+            <View
+              accessible
+              accessibilityLabel="Drag down to close expense form"
+              style={localStyles.sheetGrabberHitArea}
+              {...(sheetHandleResponder?.panHandlers || {})}
+              {...webSheetHandleDragHandlers}
+            >
+              <View style={localStyles.sheetGrabber} />
+            </View>
+            {content}
+          </RNAnimated.View>
         </View>
       </View>
     );
   }
 
-  return (
+  if (sortedMembers.length < 2) {
+    return renderExpenseSheet(
+      <View style={[localStyles.page, { paddingBottom: insets.bottom, paddingTop: insets.top }]}>
+        {renderHeader()}
+        <View style={localStyles.center}>
+          <Text selectable style={localStyles.errorText}>Shared expenses require two ledger members.</Text>
+        </View>
+      </View>,
+      isEditing ? 'Edit expense' : 'Add expense'
+    );
+  }
+
+  return renderExpenseSheet(
     <View style={[localStyles.page, { paddingBottom: pagePaddingBottom, paddingTop: pagePaddingTop }]}>
       {renderHeader()}
       <ScrollView
@@ -628,15 +823,13 @@ export function ExpenseForm({
       {keypadVisible ? renderKeypad() : null}
       {renderFooter()}
       <KeyboardDoneAccessory />
-    </View>
+    </View>,
+    isEditing ? 'Edit expense' : 'Add expense'
   );
 
   function renderHeader() {
     return (
       <View style={localStyles.header}>
-        <Pressable accessibilityLabel="Close expense form" onPress={dismissForm} style={({ pressed }) => [localStyles.iconButton, pressed && localStyles.pressed]}>
-          <Ionicons color={colors.muted} name="close" size={22} />
-        </Pressable>
         <View style={localStyles.headerTitleBlock}>
           <Text style={localStyles.titleKicker}>{isEditing ? 'EDIT RECORD' : 'NEW RECORD'}</Text>
           <View style={localStyles.progressRow}>
@@ -645,7 +838,6 @@ export function ExpenseForm({
             ))}
           </View>
         </View>
-        <View style={localStyles.headerSpacer} />
       </View>
     );
   }
@@ -1288,7 +1480,7 @@ const localStyles = StyleSheet.create({
   header: {
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingBottom: 8,
     paddingHorizontal: 18,
     paddingTop: 0
@@ -1458,6 +1650,51 @@ const localStyles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.72
+  },
+  sheet: {
+    backgroundColor: PAPER,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    boxShadow: '0 -24px 60px -20px rgba(42,39,34,0.50)',
+    overflow: 'hidden',
+    width: '100%'
+  },
+  sheetGrabber: {
+    backgroundColor: 'rgba(42,39,34,0.18)',
+    borderRadius: theme.radii.pill,
+    height: 5,
+    width: 38
+  },
+  sheetGrabberHitArea: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    justifyContent: 'center',
+    minHeight: 24,
+    paddingBottom: 4,
+    paddingTop: 9,
+    width: 142
+  },
+  sheetHitArea: {
+    alignSelf: 'stretch'
+  },
+  sheetRoot: {
+    bottom: 0,
+    justifyContent: 'flex-end',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0
+  },
+  sheetScrim: {
+    backgroundColor: 'rgba(26,23,19,0.42)',
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0
+  },
+  sheetScrimIos: {
+    backgroundColor: 'rgba(26,23,19,0.30)'
   },
   progressDot: {
     backgroundColor: 'rgba(42,39,34,0.16)',

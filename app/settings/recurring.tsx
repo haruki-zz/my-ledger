@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   RefreshControl,
@@ -61,6 +63,8 @@ type LoadMode = 'background' | 'initial' | 'refresh';
 
 const MEMBER_COLORS = [DEFAULT_USER_COLOR, DEFAULT_PARTNER_COLOR] as const;
 const RULE_NOT_FOUND_MESSAGE = 'Fixed expense rule was not found';
+const SHEET_DISMISS_DRAG_DISTANCE = 70;
+const SHEET_DISMISS_DRAG_VELOCITY = 0.85;
 
 function sanitizeWholeNumber(value: string) {
   return value.replace(/[^\d]/g, '').replace(/^0+(?=\d)/, '');
@@ -185,6 +189,7 @@ export default function RecurringExpenseRulesScreen() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [generateDatePickerDragY] = useState(() => new Animated.Value(0));
   const initializedRuleIdRef = useRef<string | null>(null);
 
   const ledgerId = ledger?.id;
@@ -281,6 +286,72 @@ export default function RecurringExpenseRulesScreen() {
   const amountDisplayValue = formatYenInput(draft.amount);
 
   const currentSubcategoryPresets = useMemo(() => subcategoryPresets(draft.categoryId), [draft.categoryId]);
+  const closeNativeGenerateDatePicker = useCallback((preserveDrag = false) => {
+    if (!preserveDrag) {
+      generateDatePickerDragY.setValue(0);
+    }
+    setNativeGenerateDatePickerOpen(false);
+  }, [generateDatePickerDragY]);
+  const dismissNativeGenerateDatePicker = useCallback(() => {
+    closeNativeGenerateDatePicker();
+  }, [closeNativeGenerateDatePicker]);
+  const generateDatePickerBackdropOpacity = useMemo(() => (
+    generateDatePickerDragY.interpolate({
+      extrapolate: 'clamp',
+      inputRange: [0, 280],
+      outputRange: [1, 0]
+    })
+  ), [generateDatePickerDragY]);
+  const generateDatePickerHandlePanResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponderCapture: (_, gestureState) => (
+      gestureState.dy > 4 &&
+      Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+    ),
+    onMoveShouldSetPanResponder: (_, gestureState) => (
+      gestureState.dy > 4 &&
+      Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+    ),
+    onPanResponderGrant: () => {
+      generateDatePickerDragY.stopAnimation();
+      generateDatePickerDragY.setValue(0);
+    },
+    onPanResponderMove: (_, gestureState) => {
+      generateDatePickerDragY.setValue(Math.max(0, gestureState.dy));
+    },
+    onPanResponderRelease: (_, gestureState) => {
+      if (gestureState.dy > SHEET_DISMISS_DRAG_DISTANCE || (gestureState.dy > 24 && gestureState.vy > SHEET_DISMISS_DRAG_VELOCITY)) {
+        closeNativeGenerateDatePicker(true);
+        return;
+      }
+
+      Animated.spring(generateDatePickerDragY, {
+        damping: 18,
+        mass: 0.7,
+        stiffness: 180,
+        toValue: 0,
+        useNativeDriver: true
+      }).start();
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(generateDatePickerDragY, {
+        damping: 18,
+        mass: 0.7,
+        stiffness: 180,
+        toValue: 0,
+        useNativeDriver: true
+      }).start();
+    },
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponderCapture: () => true
+  }), [closeNativeGenerateDatePicker, generateDatePickerDragY]);
+
+  useEffect(() => {
+    if (nativeGenerateDatePickerOpen) {
+      generateDatePickerDragY.setValue(0);
+    }
+  }, [generateDatePickerDragY, nativeGenerateDatePickerOpen]);
 
   async function refresh() {
     const nextLedger = await reloadLedger();
@@ -500,7 +571,7 @@ export default function RecurringExpenseRulesScreen() {
 
   function selectGenerateDay(day: number) {
     updateDraft({ generateDay: String(day) });
-    setNativeGenerateDatePickerOpen(false);
+    closeNativeGenerateDatePicker();
   }
 
   const draftAmountYen = parsePositiveInteger(draft.amount) || 0;
@@ -787,18 +858,30 @@ export default function RecurringExpenseRulesScreen() {
       {Platform.OS !== 'web' ? (
         <Modal
           animationType="fade"
-          onRequestClose={() => setNativeGenerateDatePickerOpen(false)}
+          onRequestClose={dismissNativeGenerateDatePicker}
           presentationStyle="overFullScreen"
           transparent
           visible={nativeGenerateDatePickerOpen}
         >
           <View style={localStyles.modalOverlay}>
-            <Pressable onPress={() => setNativeGenerateDatePickerOpen(false)} style={localStyles.modalBackdrop} />
-            <View style={localStyles.modalSheet}>
+            <Animated.View
+              pointerEvents="none"
+              style={[localStyles.modalBackdropVisual, { opacity: generateDatePickerBackdropOpacity }]}
+            />
+            <Pressable onPress={dismissNativeGenerateDatePicker} style={localStyles.modalBackdrop} />
+            <Animated.View style={[localStyles.modalSheet, { transform: [{ translateY: generateDatePickerDragY }] }]}>
+              <View
+                accessible
+                accessibilityLabel="Drag down to close bill date"
+                style={localStyles.modalGrabberHitArea}
+                {...generateDatePickerHandlePanResponder.panHandlers}
+              >
+                <View style={localStyles.modalGrabber} />
+              </View>
               <View style={localStyles.modalHeader}>
                 <Text style={styles.h2}>Bill Date</Text>
                 <Pressable
-                  onPress={() => setNativeGenerateDatePickerOpen(false)}
+                  onPress={dismissNativeGenerateDatePicker}
                   style={[styles.button, styles.secondaryButton, localStyles.compactButton]}
                 >
                   <Text style={[styles.buttonText, styles.secondaryButtonText]}>Done</Text>
@@ -825,7 +908,7 @@ export default function RecurringExpenseRulesScreen() {
                   );
                 })}
               </View>
-            </View>
+            </Animated.View>
           </View>
         </Modal>
       ) : null}
@@ -1205,13 +1288,29 @@ const localStyles = StyleSheet.create({
   modalBackdrop: {
     ...StyleSheet.absoluteFill
   },
+  modalBackdropVisual: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(42,39,34,0.24)'
+  },
+  modalGrabber: {
+    backgroundColor: colors.line,
+    borderRadius: theme.radii.pill,
+    height: 5,
+    width: 38
+  },
+  modalGrabberHitArea: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    justifyContent: 'center',
+    minHeight: 24,
+    width: 142
+  },
   modalHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between'
   },
   modalOverlay: {
-    backgroundColor: 'rgba(42,39,34,0.24)',
     flex: 1,
     justifyContent: 'flex-end',
     padding: 16
