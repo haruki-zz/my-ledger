@@ -13,6 +13,7 @@ import {
 } from '@/src/lib/ledger';
 import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import {
+  addMonths,
   buildDashboardPeriodStats,
   compareMonthKeys,
   currentMonthKey,
@@ -59,6 +60,12 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
     () => resolveDashboardDateRange('month', coverageMonthKey),
     [coverageMonthKey]
   );
+  const extendedStartDateString = useMemo(() => {
+    const recentStartDateString = monthStartDateString(addMonths(currentMonthKey(), -5));
+    return recentStartDateString < coverageDateRange.comparisonStartDateString
+      ? recentStartDateString
+      : coverageDateRange.comparisonStartDateString;
+  }, [coverageDateRange.comparisonStartDateString]);
 
   useEffect(() => {
     currentLedgerRef.current = currentLedger;
@@ -107,7 +114,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
       const [nextMembers, firstExpenseSpentOn, nextExpenses, nextRecurringRules] = await Promise.all([
         getLedgerMembers(activeLedger.id),
         getFirstExpenseSpentOn(activeLedger.id),
-        getExpensesByMonth(activeLedger.id, coverageDateRange.comparisonStartDateString, coverageDateRange.endDateString, { refreshFirst: true }),
+        getExpensesByMonth(activeLedger.id, extendedStartDateString, coverageDateRange.endDateString, { refreshFirst: true }),
         getRecurringExpenseRules(activeLedger.id, { emitChange: false, refreshFirst: true }).catch((rulesError) => {
           console.warn('Dashboard fixed expense rules reload failed:', rulesError instanceof Error ? rulesError.message : String(rulesError));
           return null;
@@ -164,9 +171,9 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
       }
     }
   }, [
-    coverageDateRange.comparisonStartDateString,
     coverageDateRange.effectiveMonthKey,
     coverageDateRange.endDateString,
+    extendedStartDateString,
     ledgerLoading,
     session?.user.id
   ]);

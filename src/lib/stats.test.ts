@@ -158,13 +158,23 @@ describe('resolveDashboardDateRange', () => {
     });
   });
 
-  it('uses the full selected month for current month totals', () => {
+  it('uses month-to-date for current month totals and same-progress previous month comparison', () => {
     expect(resolveDashboardDateRange('month', '2026-06', '2026-06-03')).toMatchObject({
       startDateString: '2026-06-01',
-      endDateString: '2026-06-30',
+      endDateString: '2026-06-03',
       comparisonStartDateString: '2026-05-01',
-      comparisonEndDateString: '2026-05-31',
+      comparisonEndDateString: '2026-05-03',
       comparisonLabel: 'vs May'
+    });
+  });
+
+  it('caps same-progress month comparison when the previous month is shorter', () => {
+    expect(resolveDashboardDateRange('month', '2026-03', '2026-03-31')).toMatchObject({
+      startDateString: '2026-03-01',
+      endDateString: '2026-03-31',
+      comparisonStartDateString: '2026-02-01',
+      comparisonEndDateString: '2026-02-28',
+      comparisonLabel: 'vs Feb'
     });
   });
 
@@ -277,6 +287,32 @@ describe('buildDashboardPeriodStats', () => {
     });
   });
 
+  it('compares current month spend against the same progress in the previous month', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-07-01' }),
+        expense({ amountYen: 500, category: 'Transport', spentOn: '2026-07-02' }),
+        expense({ amountYen: 3000, category: 'Food & Dining', spentOn: '2026-06-01' }),
+        expense({ amountYen: 2000, category: 'Transport', spentOn: '2026-06-02' }),
+        expense({ amountYen: 120000, category: 'Rent', spentOn: '2026-06-15' })
+      ],
+      monthKey: '2026-07',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: OTHER_USER_ID,
+      today: '2026-07-02'
+    });
+
+    expect(stats.totalYen).toBe(1500);
+    expect(stats.comparison).toMatchObject({
+      previousTotalYen: 5000,
+      deltaYen: -3500,
+      direction: 'under',
+      label: 'vs Jun',
+      percentage: -70
+    });
+  });
+
   it('excludes current-month fixed expenses generated after today from settled dashboard stats', () => {
     const expenses = filterCurrentMonthSettledExpenses({
       expenses: [
@@ -288,7 +324,8 @@ describe('buildDashboardPeriodStats', () => {
     const stats = buildStats('month', expenses);
 
     expect(stats.totalYen).toBe(0);
-    expect(stats.dailyUserSeries[19].totalAmountYen).toBe(0);
+    expect(stats.dailyUserSeries).toHaveLength(3);
+    expect(stats.dailyUserSeries.map((day) => day.totalAmountYen)).toEqual([0, 0, 0]);
   });
 
   it('aggregates category rows as top five plus Other', () => {
@@ -337,7 +374,7 @@ describe('buildDashboardPeriodStats', () => {
       userIds: [CURRENT_USER_ID, OTHER_USER_ID]
     });
 
-    expect(series).toHaveLength(30);
+    expect(series).toHaveLength(3);
     expect(series.slice(0, 3).map((day) => day.totalAmountYen)).toEqual([0, 200, 100]);
   });
 

@@ -320,7 +320,7 @@ export function resolveDashboardDateRange(
     return resolveWeekDateRange(addDays(todayDate, offset * 7));
   }
 
-  return resolveMonthDateRange(addMonths(monthKey, offset));
+  return resolveMonthDateRange(addMonths(monthKey, offset), todayDate);
 }
 
 function resolveTodayDateRange(todayDate: Date): DashboardDateRange {
@@ -360,19 +360,27 @@ function resolveWeekDateRange(todayDate: Date): DashboardDateRange {
   };
 }
 
-function resolveMonthDateRange(monthKey: string): DashboardDateRange {
+function resolveMonthDateRange(monthKey: string, todayDate: Date): DashboardDateRange {
   const effectiveMonthKey = monthKey;
   const monthStartString = monthStartDateString(effectiveMonthKey);
   const monthEndString = monthEndDateString(effectiveMonthKey);
+  const todayString = formatDateString(todayDate);
+  const selectedMonthIsCurrent = effectiveMonthKey === toMonthKey(todayDate);
+  const periodEndString = selectedMonthIsCurrent ? todayString : monthEndString;
   const comparisonMonthKey = addMonths(effectiveMonthKey, -1);
   const comparisonStartString = monthStartDateString(comparisonMonthKey);
-  const comparisonEndString = monthEndDateString(comparisonMonthKey);
+  const comparisonEndString = selectedMonthIsCurrent
+    ? formatDateString(minDate(
+        addDays(parseDateString(comparisonStartString), daysBetween(parseDateString(monthStartString), todayDate)),
+        parseDateString(monthEndDateString(comparisonMonthKey))
+      ))
+    : monthEndDateString(comparisonMonthKey);
 
   return {
     period: 'month',
     effectiveMonthKey,
     startDateString: monthStartString,
-    endDateString: monthEndString,
+    endDateString: periodEndString,
     comparisonStartDateString: comparisonStartString,
     comparisonEndDateString: comparisonEndString,
     label: formatMonthLabel(effectiveMonthKey),
@@ -1270,6 +1278,10 @@ function addDays(date: Date, days: number) {
   const nextDate = new Date(date);
   nextDate.setDate(nextDate.getDate() + days);
   return nextDate;
+}
+
+function minDate(a: Date, b: Date) {
+  return a.getTime() <= b.getTime() ? a : b;
 }
 
 function daysBetween(start: Date, end: Date) {
