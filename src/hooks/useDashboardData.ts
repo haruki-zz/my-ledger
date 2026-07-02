@@ -24,7 +24,7 @@ import {
 } from '@/src/lib/stats';
 import type { Expense, Ledger, LedgerMemberProfile, Profile, RecurringExpenseRule } from '@/src/types/database';
 
-export function useDashboardData(monthKey: string, period: DashboardPeriod, periodOffset = 0) {
+export function useDashboardData(monthKey: string, period: DashboardPeriod, periodOffset = 0, flipped = false) {
   const { session } = useAuth();
   const { activeLedger, loading: ledgerLoading } = useLedgerContext();
   const currentLedger = activeLedger?.ledger || null;
@@ -231,9 +231,10 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
       period: statsPeriod,
       offset: hasCurrentCoverage ? periodOffset : 0,
       currentUserId,
-      otherUserId
+      otherUserId,
+      viewerUserId: flipped ? null : currentUserId
     }),
-    [currentUserId, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
+    [currentUserId, flipped, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
   );
 
   return {

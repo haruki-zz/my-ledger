@@ -11,6 +11,7 @@ import Animated, {
 
 import { DashboardModule } from '@/src/components/DashboardModule';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
+import { mutedChartColor } from '@/src/lib/color';
 import { formatCompactYen, formatYen } from '@/src/lib/format';
 import { motionDuration, motionDurations, motionEasings, useReduceMotion } from '@/src/lib/motion';
 import type { CategoryStat } from '@/src/lib/stats';
@@ -52,7 +53,7 @@ export function DashboardCategoryShare({
                 pressed && localStyles.rowPressed
               ]}
             >
-              <View style={[localStyles.fullDot, { backgroundColor: category.color }]} />
+              <View style={[localStyles.fullDot, { backgroundColor: mutedChartColor(category.color) }]} />
               <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.fullName}>
                 {category.category}
               </Text>
@@ -82,7 +83,7 @@ export function DashboardCategoryShare({
         <View style={localStyles.summaryLegend}>
           {visibleCategories.length > 0 ? visibleCategories.map((category) => (
             <View key={`${category.detailKey}-${category.color}`} style={localStyles.summaryRow}>
-              <View style={[localStyles.summaryDot, { backgroundColor: category.color }]} />
+              <View style={[localStyles.summaryDot, { backgroundColor: mutedChartColor(category.color) }]} />
               <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.summaryName}>
                 {category.category}
               </Text>
@@ -92,11 +93,6 @@ export function DashboardCategoryShare({
             <Text style={localStyles.emptyText}>No category expenses to chart yet</Text>
           )}
         </View>
-      }
-      summaryStat={
-        <Text style={localStyles.headerStat}>
-          <Text style={localStyles.headerStrong}>{visibleCategories.length}</Text> categories
-        </Text>
       }
       title="Category Share"
     />
@@ -240,8 +236,9 @@ function buildCapsuleColors(categories: CategoryStat[]) {
   );
   const colorsOut: string[] = [];
   categories.forEach((category, index) => {
+    const mutedColor = mutedChartColor(category.color);
     for (let slot = 0; slot < counts[index]; slot += 1) {
-      colorsOut.push(category.color);
+      colorsOut.push(mutedColor);
     }
   });
 
@@ -363,17 +360,6 @@ const localStyles = StyleSheet.create({
     minHeight: 36,
     paddingHorizontal: 6,
     paddingVertical: 6
-  },
-  headerStat: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.mono,
-    fontSize: 10,
-    lineHeight: 14
-  },
-  headerStrong: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontWeight: '700'
   },
   morph: {
     position: 'relative'

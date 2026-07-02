@@ -36,21 +36,31 @@ export function DashboardDailyTrend({
   const [open, setOpen] = useState(false);
   const hasTrend = series.length > 0 && Math.max(0, ...series.map((item) => item.totalAmountYen)) > 0;
 
+  const legend = (
+    <View style={localStyles.legend}>
+      {currentUserId ? <UserLegendDot color={currentUserColor} label={currentUserName} /> : null}
+      {otherUserId ? <UserLegendDot color={otherUserColor} label={otherUserName} /> : null}
+    </View>
+  );
+
   return (
     <DashboardModule
       detail={
         <View style={localStyles.expandedDetail}>
           {hasTrend ? (
-            <TrendChart
-              currentUserColor={currentUserColor}
-              currentUserId={currentUserId}
-              currentUserName={currentUserName}
-              otherUserColor={otherUserColor}
-              otherUserId={otherUserId}
-              otherUserName={otherUserName}
-              series={series}
-              todayString={todayString}
-            />
+            <>
+              {legend}
+              <TrendChart
+                currentUserColor={currentUserColor}
+                currentUserId={currentUserId}
+                currentUserName={currentUserName}
+                otherUserColor={otherUserColor}
+                otherUserId={otherUserId}
+                otherUserName={otherUserName}
+                series={series}
+                todayString={todayString}
+              />
+            </>
           ) : (
             <Text style={localStyles.emptyText}>No daily expense trend yet</Text>
           )}
@@ -62,23 +72,20 @@ export function DashboardDailyTrend({
       summary={
         <View style={localStyles.summaryPreview}>
           {hasTrend ? (
-            <TrendPreview
-              currentUserColor={currentUserColor}
-              currentUserId={currentUserId}
-              otherUserColor={otherUserColor}
-              otherUserId={otherUserId}
-              series={series}
-              todayString={todayString}
-            />
+            <>
+              {legend}
+              <TrendPreview
+                currentUserColor={currentUserColor}
+                currentUserId={currentUserId}
+                otherUserColor={otherUserColor}
+                otherUserId={otherUserId}
+                series={series}
+                todayString={todayString}
+              />
+            </>
           ) : (
             <Text style={localStyles.emptyText}>No daily expense trend yet</Text>
           )}
-        </View>
-      }
-      summaryStat={
-        <View style={localStyles.legend}>
-          {currentUserId ? <UserLegendDot color={currentUserColor} label={currentUserName} /> : null}
-          {otherUserId ? <UserLegendDot color={otherUserColor} label={otherUserName} /> : null}
         </View>
       }
       title="Daily Trend"
@@ -216,7 +223,7 @@ function UserLegendDot({ color, label }: { color: string; label: string }) {
     <View style={localStyles.legendItem}>
       <View style={[localStyles.legendDot, { backgroundColor: color }]} />
       <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.legendText}>
-        {displayName(label).toUpperCase()}
+        {displayName(label)}
       </Text>
     </View>
   );
@@ -242,7 +249,8 @@ const localStyles = StyleSheet.create({
   legend: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 9
+    gap: 12,
+    marginBottom: 8
   },
   legendDot: {
     borderRadius: 2,
@@ -252,15 +260,14 @@ const localStyles = StyleSheet.create({
   legendItem: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 4,
-    maxWidth: 74
+    gap: 5,
+    maxWidth: 96
   },
   legendText: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 9,
-    fontWeight: '700',
-    lineHeight: 12
+    color: colors.muted,
+    fontFamily: fontFamilies.medium,
+    fontSize: 11,
+    lineHeight: 14
   },
   previewAverage: {
     color: colors.muted

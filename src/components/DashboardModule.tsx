@@ -21,7 +21,6 @@ type DashboardModuleProps = {
   onToggle: () => void;
   open: boolean;
   summary: ReactNode;
-  summaryStat?: ReactNode;
   title: string;
 };
 
@@ -35,7 +34,6 @@ export function DashboardModule({
   onToggle,
   open,
   summary,
-  summaryStat,
   title
 }: DashboardModuleProps) {
   const reduceMotion = useReduceMotion();
@@ -50,10 +48,7 @@ export function DashboardModule({
         <View style={localStyles.tick} />
         <Text style={localStyles.title}>{title}</Text>
       </View>
-      <View style={localStyles.headerRight}>
-        {summaryStat}
-        <AnimatedChevron open={open} />
-      </View>
+      <AnimatedChevron open={open} />
     </>
   );
 
@@ -101,10 +96,8 @@ export function DashboardModule({
 const localStyles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderColor: colors.glassBorder,
     borderRadius: theme.radii.surface,
-    borderWidth: 1,
-    boxShadow: '0 16px 34px -18px rgba(42,39,34,0.20)',
+    boxShadow: '0 10px 24px -16px rgba(42,39,34,0.13)',
     overflow: 'hidden',
     position: 'relative'
   },
@@ -141,11 +134,6 @@ const localStyles = StyleSheet.create({
   },
   headerPressed: {
     backgroundColor: 'rgba(42,39,34,0.03)'
-  },
-  headerRight: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10
   },
   tick: {
     backgroundColor: colors.accent,

@@ -404,6 +404,7 @@ export function buildDashboardPeriodStats(input: {
   otherUserId: string | null;
   offset?: number;
   today?: Date | string;
+  viewerUserId?: string | null;
 }): DashboardPeriodStats {
   const dateRange = resolveDashboardDateRange(input.period, input.monthKey, input.today, input.offset || 0);
   const userIds = [input.currentUserId, input.otherUserId].filter((userId): userId is string => Boolean(userId));
@@ -413,15 +414,14 @@ export function buildDashboardPeriodStats(input: {
     dateRange.comparisonStartDateString,
     dateRange.comparisonEndDateString
   );
-  const totalYen = periodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
-  const previousTotalYen = comparisonExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
   const userColorById = buildUserColorMap(userIds, input.currentUserId);
+  const rawTotalYen = periodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
   const memberTotals = userIds.map((userId) => {
     const amountYen = periodExpenses.reduce((sum, expense) => sum + amountForUser(expense, userId), 0);
     return {
       userId,
       amountYen,
-      percentage: totalYen > 0 ? (amountYen / totalYen) * 100 : 0,
+      percentage: rawTotalYen > 0 ? (amountYen / rawTotalYen) * 100 : 0,
       color: userColorById.get(userId) || DEFAULT_USER_COLOR
     };
   });
@@ -431,25 +431,32 @@ export function buildDashboardPeriodStats(input: {
     endDateString: dateRange.endDateString,
     userIds
   });
+
+  const viewerUserId = input.viewerUserId ?? null;
+  const viewerPeriodExpenses = scopeExpensesToViewer(periodExpenses, viewerUserId);
+  const viewerComparisonExpenses = scopeExpensesToViewer(comparisonExpenses, viewerUserId);
+  const totalYen = viewerPeriodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
+  const previousTotalYen = viewerComparisonExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
   const categories = buildDashboardCategoryStats({
-    expenses: periodExpenses,
+    expenses: viewerPeriodExpenses,
     totalYen
   });
   const categoryDetailInput = {
     categories,
-    comparisonExpenses,
+    comparisonExpenses: viewerComparisonExpenses,
     currentUserId: input.currentUserId,
     dateRange,
     otherUserId: input.otherUserId,
-    periodExpenses,
+    periodExpenses: viewerPeriodExpenses,
     today: input.today,
-    totalYen
+    totalYen,
+    viewerUserId
   };
   const stats = {
     totalYen,
-    count: periodExpenses.length,
+    count: viewerPeriodExpenses.length,
     categories,
-    dailySeries: buildDailySeries(dateRange.effectiveMonthKey, dateRange.endDateString, amountsByDate(periodExpenses)),
+    dailySeries: buildDailySeries(dateRange.effectiveMonthKey, dateRange.endDateString, amountsByDate(viewerPeriodExpenses)),
     dailyUserSeries,
     comparison: buildComparisonStat(totalYen, previousTotalYen, dateRange.comparisonLabel),
     dateRange,
@@ -463,12 +470,29 @@ export function buildDashboardPeriodStats(input: {
   }) as DashboardPeriodStats;
 }
 
+/**
+ * Reinterprets each expense's amount_yen as just the viewer's attributed share
+ * (via amountForUser) and drops expenses the viewer has no stake in, so every
+ * downstream aggregation that reads expense.amount_yen "just works" for a
+ * self-only perspective. Passing a null viewerUserId returns the input as-is.
+ */
+function scopeExpensesToViewer(expenses: Expense[], viewerUserId: string | null): Expense[] {
+  if (!viewerUserId) {
+    return expenses;
+  }
+
+  return expenses
+    .map((expense) => ({ ...expense, amount_yen: amountForUser(expense, viewerUserId) }))
+    .filter((expense) => expense.amount_yen > 0);
+}
+
 export function buildDashboardHeatDays(input: {
   expenses: Expense[];
   monthKey: string;
   members: LedgerMemberProfile[];
   currentUserId: string | null;
   today?: Date | string;
+  viewerUserId?: string | null;
 }): HeatDay[] {
   const todayString = typeof input.today === 'string'
     ? input.today
@@ -481,6 +505,8 @@ export function buildDashboardHeatDays(input: {
   const dates = dateStringsInRange(monthStartString, monthEndStringValue);
   const userIds = input.members.map((member) => member.user_id);
   const userColorById = buildUserColorMap(userIds, input.currentUserId);
+  const viewerUserId = input.viewerUserId ?? null;
+  const viewerExpenses = scopeExpensesToViewer(input.expenses, viewerUserId);
   const categoryAmountsByDate = new Map<string, Map<string, number>>();
   const memberAmountsByDate = new Map<string, Map<string, number>>();
   const totalsByDate = new Map<string, number>();
@@ -493,7 +519,7 @@ export function buildDashboardHeatDays(input: {
     countsByDate.set(date, 0);
   }
 
-  for (const expense of input.expenses) {
+  for (const expense of viewerExpenses) {
     if (monthKeyFromDateString(expense.spent_on) !== input.monthKey) {
       continue;
     }
@@ -531,7 +557,7 @@ export function buildDashboardHeatDays(input: {
         color: categoryColor(categoryId),
         amount
       })),
-    byMember: input.members.map((member) => ({
+    byMember: viewerUserId ? [] : input.members.map((member) => ({
       id: member.user_id,
       label: displayName(member.profile.display_name),
       color: userColorById.get(member.user_id) || DEFAULT_USER_COLOR,
@@ -808,6 +834,7 @@ type DashboardCategoryDetailInput = {
   periodExpenses: Expense[];
   today?: Date | string;
   totalYen: number;
+  viewerUserId?: string | null;
 };
 
 type DashboardCategoryDetailContext = {
@@ -868,7 +895,7 @@ function buildDashboardCategoryDetailForCategory(
   const dailyAmountsByDate = amountsByDate(categoryExpenses);
   const peakAmountYen = Math.max(0, ...context.dates.map((date) => dailyAmountsByDate.get(date) || 0));
   const peakDate = context.dates.find((date) => (dailyAmountsByDate.get(date) || 0) === peakAmountYen && peakAmountYen > 0) || null;
-  const memberSplits = context.userIds.map((userId) => {
+  const memberSplits = input.viewerUserId ? [] : context.userIds.map((userId) => {
     const amountYen = categoryExpenses.reduce((sum, expense) => sum + amountForUser(expense, userId), 0);
     return {
       amountYen,

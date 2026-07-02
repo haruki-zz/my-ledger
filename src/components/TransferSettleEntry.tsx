@@ -214,7 +214,6 @@ export function TransferSettleEntry({
         exiting={panelOut}
         layout={resize}
       >
-        <View style={settleStyles.heroDivider} />
         <Pressable
           accessibilityLabel={openCount > 0 ? `${directionText}, ${openCount} open transfer items` : 'All transfers settled'}
           accessibilityRole="button"
@@ -233,36 +232,36 @@ export function TransferSettleEntry({
               </View>
               <View style={settleStyles.stripBody}>
                 <Text style={settleStyles.openLineOne}>Loading transfers</Text>
-                <Text style={settleStyles.openLineTwo}>TAP TO REVIEW</Text>
+                <Text style={settleStyles.openLineTwo}>tap to review</Text>
               </View>
             </>
           ) : openCount > 0 ? (
             <>
               <View style={settleStyles.openIconChip}>
-                <Ionicons color={UP_COLOR} name="swap-horizontal" size={16} />
+                <Ionicons color={UP_COLOR} name="swap-horizontal" size={14} />
               </View>
               <View style={settleStyles.stripBody}>
                 <Text ellipsizeMode="tail" numberOfLines={1} style={settleStyles.openLineOne}>
                   {directionText} <Text style={settleStyles.openAmount}>{formatYen(remainingSummary.amountYen)}</Text>
                 </Text>
                 <Text style={settleStyles.openLineTwo}>
-                  {openCount} OPEN {openCount === 1 ? 'ITEM' : 'ITEMS'}
+                  {openCount} open {openCount === 1 ? 'item' : 'items'}
                 </Text>
               </View>
               <View style={settleStyles.settleButton}>
                 <Text style={settleStyles.settleButtonText}>Settle</Text>
-                <Ionicons color={colors.primary} name="chevron-forward" size={13} />
+                <Ionicons color={colors.primary} name="chevron-forward" size={12} />
               </View>
             </>
           ) : (
             <>
               <View style={settleStyles.doneIconChip}>
-                <Ionicons color={MINA_ON_DARK} name="checkmark" size={12} />
+                <Ionicons color={MINA_ON_DARK} name="checkmark" size={11} />
               </View>
               <Text ellipsizeMode="tail" numberOfLines={1} style={settleStyles.doneText}>
                 {"All settled - you're even"}
               </Text>
-              <Text style={settleStyles.viewText}>VIEW</Text>
+              <Text style={settleStyles.viewText}>view</Text>
             </>
           )}
         </Pressable>
@@ -727,32 +726,26 @@ class BlurFallbackBoundary extends Component<BlurFallbackBoundaryProps, BlurFall
 const settleStyles = StyleSheet.create({
   doneIconChip: {
     alignItems: 'center',
-    backgroundColor: 'rgba(95,184,178,0.22)',
+    backgroundColor: 'rgba(95,184,178,0.20)',
     borderRadius: 6,
-    height: 18,
+    height: 16,
     justifyContent: 'center',
-    width: 18
+    width: 16
   },
   doneStrip: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 9,
-    marginTop: 11,
-    minHeight: 44
+    gap: 8,
+    minHeight: 36
   },
   doneText: {
-    color: 'rgba(255,253,247,0.62)',
+    color: 'rgba(255,253,247,0.56)',
     flex: 1,
-    fontFamily: fontFamilies.bold,
-    fontSize: 12.5,
-    fontWeight: '700',
-    lineHeight: 17,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
     minWidth: 0
-  },
-  heroDivider: {
-    backgroundColor: 'rgba(255,253,247,0.12)',
-    height: 1,
-    marginTop: 12
   },
   heroError: {
     color: UP_COLOR,
@@ -763,57 +756,55 @@ const settleStyles = StyleSheet.create({
   },
   openAmount: {
     color: UP_COLOR,
-    fontFamily: fontFamilies.monoExtraBold,
-    fontWeight: '800'
+    fontFamily: fontFamilies.monoBold,
+    fontWeight: '700'
   },
   openIconChip: {
     alignItems: 'center',
-    backgroundColor: 'rgba(232,149,123,0.16)',
-    borderRadius: 9,
+    backgroundColor: 'rgba(232,149,123,0.14)',
+    borderRadius: 8,
     flexShrink: 0,
-    height: 30,
+    height: 26,
     justifyContent: 'center',
-    width: 30
+    width: 26
   },
   openLineOne: {
-    color: PAPER_COLOR,
-    fontFamily: fontFamilies.bold,
-    fontSize: 13.5,
-    fontWeight: '700',
-    lineHeight: 17
+    color: 'rgba(255,253,247,0.80)',
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 12.5,
+    fontWeight: '600',
+    lineHeight: 16
   },
   openLineTwo: {
-    color: 'rgba(255,253,247,0.50)',
+    color: 'rgba(255,253,247,0.46)',
     fontFamily: fontFamilies.mono,
     fontSize: 9.5,
-    letterSpacing: 0.4,
     lineHeight: 13,
     marginTop: 2
   },
   openStrip: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 11,
-    marginTop: 11,
-    minHeight: 44
+    gap: 10,
+    minHeight: 36
   },
   settleButton: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,253,247,0.92)',
-    borderRadius: 9,
+    backgroundColor: 'rgba(255,253,247,0.88)',
+    borderRadius: 8,
     flexDirection: 'row',
     flexShrink: 0,
     gap: 3,
-    minHeight: 32,
-    paddingHorizontal: 12,
-    paddingVertical: 7
+    minHeight: 28,
+    paddingHorizontal: 10,
+    paddingVertical: 6
   },
   settleButtonText: {
     color: colors.primary,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 12,
-    fontWeight: '800',
-    lineHeight: 16
+    fontFamily: fontFamilies.bold,
+    fontSize: 11.5,
+    fontWeight: '700',
+    lineHeight: 15
   },
   stripBody: {
     flex: 1,
@@ -826,7 +817,7 @@ const settleStyles = StyleSheet.create({
     opacity: 0.72
   },
   viewText: {
-    color: 'rgba(255,253,247,0.34)',
+    color: 'rgba(255,253,247,0.32)',
     fontFamily: fontFamilies.mono,
     fontSize: 9.5,
     lineHeight: 13

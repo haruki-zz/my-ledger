@@ -468,6 +468,62 @@ describe('buildDashboardPeriodStats', () => {
   });
 });
 
+describe('viewer-scoped dashboard stats', () => {
+  it('scopes totals, categories, and comparison to the viewer\'s attributed share', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-06-01', splits: [600, 400] }),
+        expense({ amountYen: 500, category: 'Transport', ownership: 'personal', paidBy: OTHER_USER_ID, spentOn: '2026-06-02' }),
+        expense({ amountYen: 400, category: 'Food & Dining', spentOn: '2026-05-01', splits: [240, 160] })
+      ],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: OTHER_USER_ID,
+      today: '2026-06-03',
+      viewerUserId: CURRENT_USER_ID
+    });
+
+    expect(stats.totalYen).toBe(600);
+    expect(stats.count).toBe(1);
+    expect(stats.categories).toEqual([
+      expect.objectContaining({ amountYen: 600, category: 'Food & Dining' })
+    ]);
+    expect(stats.comparison).toMatchObject({ previousTotalYen: 240, deltaYen: 360 });
+    expect(stats.memberTotals).toEqual([
+      expect.objectContaining({ amountYen: 600, userId: CURRENT_USER_ID }),
+      expect.objectContaining({ amountYen: 900, userId: OTHER_USER_ID })
+    ]);
+  });
+
+  it('hides member splits on category details when scoped to a single viewer', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-06-01', splits: [600, 400] })
+      ],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: OTHER_USER_ID,
+      today: '2026-06-03',
+      viewerUserId: CURRENT_USER_ID
+    });
+    const detail = stats.categoryDetails.find((category) => category.detailKey === 'food_dining');
+
+    expect(detail?.amountYen).toBe(600);
+    expect(detail?.memberSplits).toEqual([]);
+  });
+
+  it('falls back to combined totals when no viewer is given', () => {
+    const stats = buildStats('month', [
+      expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-06-01', splits: [600, 400] })
+    ]);
+
+    expect(stats.totalYen).toBe(1000);
+    expect(stats.categoryDetails[0].memberSplits).toHaveLength(2);
+  });
+});
+
 describe('buildHistorySummary', () => {
   it('builds count-led current-month summary stats from filtered records', () => {
     const summary = buildHistorySummary({
@@ -619,6 +675,23 @@ describe('buildDashboardHeatDays', () => {
       count: 1,
       date: '2026-05-10'
     });
+  });
+
+  it('scopes day amounts to the viewer and drops expenses they have no stake in', () => {
+    const days = buildDashboardHeatDays({
+      expenses: [
+        expense({ amountYen: 1000, category: 'Food & Dining', spentOn: '2026-06-03', splits: [650, 350] }),
+        expense({ amountYen: 700, category: 'Transport', ownership: 'personal', paidBy: OTHER_USER_ID, spentOn: '2026-06-03' })
+      ],
+      monthKey: '2026-06',
+      members: ledgerMembers(),
+      currentUserId: CURRENT_USER_ID,
+      today: '2026-06-20',
+      viewerUserId: CURRENT_USER_ID
+    });
+
+    expect(days[2]).toMatchObject({ amount: 650, count: 1, date: '2026-06-03' });
+    expect(days[2].byMember).toEqual([]);
   });
 });
 

@@ -1,27 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
-  Animated,
-  Easing,
   Modal,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
-  type GestureResponderEvent,
-  type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent
+  type LayoutChangeEvent
 } from 'react-native';
 
 import { DashboardModule } from '@/src/components/DashboardModule';
 import { colors, fontFamilies } from '@/src/components/styles';
 import { formatYen } from '@/src/lib/format';
-import { motionDuration, motionDurations, useReduceMotion } from '@/src/lib/motion';
-import { heatLevelForAmount, heatScaleMaxForAmounts, type HeatDay } from '@/src/lib/stats';
+import { heatLevelForAmount, heatScaleMaxForAmounts, trendVisualRatioForAmount, type HeatDay } from '@/src/lib/stats';
 
 type DashboardDailyActivityProps = {
   days: HeatDay[];
@@ -35,23 +28,6 @@ type Rect = {
   width: number;
   x: number;
   y: number;
-};
-
-type MeasurableView = {
-  measureInWindow: (callback: (x: number, y: number, width: number, height: number) => void) => void;
-};
-
-type ActivityTransitionCell = {
-  backgroundColor: string;
-  borderColor: string;
-  borderStyle: 'dashed' | 'solid';
-  date: string;
-  dayNumber: number;
-  from: Rect;
-  future: boolean;
-  isToday: boolean;
-  textColor: string;
-  to: Rect;
 };
 
 type PopoverPosition = {
@@ -77,12 +53,7 @@ const HEAT_COLORS = [
 ] as const;
 const HEAT_TEXT_COLORS = ['#C7BDAE', '#8A7A55', '#78683D', '#624E22', '#FFFDF7', '#FFFDF7'] as const;
 const HEAT_ACTIVE_LEVELS = HEAT_COLORS.length - 1;
-const STRIP_GAP = 5;
-const STRIP_TARGET_CELL_WIDTH = 30;
-const STRIP_MIN_CELL_WIDTH = 28;
-const STRIP_DEFAULT_VISIBLE_COUNT = 7;
-const VISIBLE_CELL_OVERLAP_MIN = 2;
-const TARGET_MEASURE_FRAMES = 2;
+const BAR_MAX_HEIGHT = 40;
 
 export function DashboardDailyActivity({
   days,
@@ -90,27 +61,14 @@ export function DashboardDailyActivity({
   onViewHistoryDate,
   todayString
 }: DashboardDailyActivityProps) {
-  const reduceMotion = useReduceMotion();
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
-  const stripRef = useRef<ScrollView | null>(null);
-  const stripTouchStartRef = useRef({ x: 0, y: 0 });
-  const stripTouchMovedRef = useRef(false);
   const cardRef = useRef<View | null>(null);
   const cellRefs = useRef<Record<string, View | null>>({});
-  const stripCellRefs = useRef<Record<string, View | null>>({});
-  const gridCellFrameRefs = useRef<Record<string, View | null>>({});
-  const openingTransitionRunningRef = useRef(false);
-  const transitionProgress = useRef(new Animated.Value(1)).current;
-  const gridFadeProgress = useRef(new Animated.Value(1)).current;
   const [open, setOpen] = useState(false);
   const [selectedDay, setSelectedDay] = useState<HeatDay | null>(null);
   const [selectedCellRect, setSelectedCellRect] = useState<Rect | null>(null);
   const [cardRect, setCardRect] = useState<Rect | null>(null);
   const [popoverHeight, setPopoverHeight] = useState(POPOVER_ESTIMATED_HEIGHT);
-  const [stripViewportWidth, setStripViewportWidth] = useState(0);
-  const [stripScrollX, setStripScrollX] = useState(0);
-  const [transitionCells, setTransitionCells] = useState<ActivityTransitionCell[]>([]);
-  const [transitioningDaySet, setTransitioningDaySet] = useState<Set<string>>(() => new Set());
   const todayMonthKey = todayString.slice(0, 7);
   const isSelectedMonthCurrent = monthKey === todayMonthKey;
   const visibleDays = useMemo(
@@ -129,35 +87,7 @@ export function DashboardDailyActivity({
     [visibleDays]
   );
   const gridRows = useMemo(() => buildMonthGrid(days, monthKey), [days, monthKey]);
-  const stripMetrics = useMemo(() => {
-    if (stripViewportWidth <= 0) {
-      return {
-        cellWidth: STRIP_TARGET_CELL_WIDTH,
-        visibleCount: Math.min(STRIP_DEFAULT_VISIBLE_COUNT, Math.max(1, days.length || STRIP_DEFAULT_VISIBLE_COUNT))
-      };
-    }
-
-    const visibleCount = Math.max(1, Math.floor((stripViewportWidth + STRIP_GAP) / (STRIP_MIN_CELL_WIDTH + STRIP_GAP)));
-    const cellWidth = (stripViewportWidth - STRIP_GAP * Math.max(0, visibleCount - 1)) / visibleCount;
-    return {
-      cellWidth,
-      visibleCount: Math.min(visibleCount, Math.max(1, days.length || visibleCount))
-    };
-  }, [days.length, stripViewportWidth]);
-  const stripAnchorDate = isSelectedMonthCurrent
-    ? todayString
-    : visibleDays[visibleDays.length - 1]?.date || days[days.length - 1]?.date || todayString;
-  const stripAnchorIndex = useMemo(() => {
-    const anchorIndex = days.findIndex((day) => day.date === stripAnchorDate);
-    return anchorIndex >= 0 ? anchorIndex : Math.max(0, days.length - 1);
-  }, [days, stripAnchorDate]);
-  const stripStep = stripMetrics.cellWidth + STRIP_GAP;
-  const stripInitialOffset = useMemo(() => (
-    stripStartIndexForAnchor(days.length, stripAnchorIndex, stripMetrics.visibleCount) * stripStep
-  ), [days.length, stripAnchorIndex, stripMetrics.visibleCount, stripStep]);
-  const visibleStripStartIndex = stripStep > 0 ? Math.max(0, Math.floor(stripScrollX / stripStep)) : 0;
-  const visibleStripEndIndex = Math.min(days.length - 1, visibleStripStartIndex + stripMetrics.visibleCount);
-  const isOpeningTransitionActive = transitioningDaySet.size > 0;
+  const cardMeasurementProps = Platform.OS === 'web' ? {} : { collapsable: false };
   const popoverPosition = selectedCellRect
     ? computePopoverPosition({
         cardRect,
@@ -167,43 +97,6 @@ export function DashboardDailyActivity({
         windowWidth
       })
     : null;
-  const cardMeasurementProps = Platform.OS === 'web' ? {} : { collapsable: false };
-
-  useEffect(() => {
-    if (open) {
-      return;
-    }
-
-    setStripScrollX(stripInitialOffset);
-    requestAnimationFrame(() => {
-      stripRef.current?.scrollTo({ animated: false, x: stripInitialOffset });
-    });
-  }, [monthKey, open, stripInitialOffset]);
-
-  useEffect(() => {
-    if (open) {
-      return;
-    }
-
-    transitionProgress.stopAnimation();
-    gridFadeProgress.stopAnimation();
-    transitionProgress.setValue(1);
-    gridFadeProgress.setValue(1);
-    openingTransitionRunningRef.current = false;
-    setTransitionCells([]);
-    setTransitioningDaySet(new Set());
-  }, [gridFadeProgress, open, transitionProgress]);
-
-  useEffect(() => {
-    if (!selectedDay) {
-      return;
-    }
-
-    const selectedDate = selectedDay.date;
-    if (!days.some((day) => day.date === selectedDate)) {
-      closePopover();
-    }
-  }, [days, selectedDay]);
 
   function openPopover(day: HeatDay) {
     if (selectedDay?.date === day.date) {
@@ -247,167 +140,17 @@ export function DashboardDailyActivity({
     closePopover();
   }
 
-  function handleStripLayout(event: LayoutChangeEvent) {
-    const nextWidth = event.nativeEvent.layout.width;
-    if (nextWidth <= 0) {
-      return;
-    }
-
-    setStripViewportWidth((current) => Math.abs(current - nextWidth) > 1 ? nextWidth : current);
-  }
-
-  function handleStripScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
-    setStripScrollX(event.nativeEvent.contentOffset.x);
-  }
-
-  function handleStripTouchStart(event: GestureResponderEvent) {
-    stripTouchMovedRef.current = false;
-    stripTouchStartRef.current = {
-      x: event.nativeEvent.pageX,
-      y: event.nativeEvent.pageY
-    };
-  }
-
-  function handleStripTouchMove(event: GestureResponderEvent) {
-    const dx = Math.abs(event.nativeEvent.pageX - stripTouchStartRef.current.x);
-    const dy = Math.abs(event.nativeEvent.pageY - stripTouchStartRef.current.y);
-    if (dx > 8 || dy > 8) {
-      stripTouchMovedRef.current = true;
-    }
-  }
-
-  function handleStripTouchEnd() {
-    if (!stripTouchMovedRef.current) {
-      void openWithDateTransition();
-    }
-  }
-
   function handleModuleToggle() {
     if (open) {
       closePopover();
-      setOpen(false);
-      return;
     }
 
-    void openWithDateTransition();
-  }
-
-  async function openWithDateTransition() {
-    if (open || openingTransitionRunningRef.current) {
-      return;
-    }
-
-    openingTransitionRunningRef.current = true;
-
-    const stripViewportRect = await measureViewInWindow(stripRef.current as unknown as MeasurableView | null);
-    const sourceMeasurements = await Promise.all(days.map(async (day, index) => ({
-      day,
-      index,
-      rect: await measureViewInWindow(stripCellRefs.current[day.date])
-    })));
-    const visibleSources: { day: HeatDay; index: number; rect: Rect }[] = [];
-
-    sourceMeasurements.forEach((item) => {
-      if (!hasMeasuredSize(item.rect)) {
-        return;
-      }
-
-      const inMeasuredViewport = stripViewportRect
-        ? rectOverlapsHorizontally(item.rect, stripViewportRect)
-        : item.index >= visibleStripStartIndex && item.index <= visibleStripEndIndex;
-      const inFallbackRange = item.index >= visibleStripStartIndex && item.index <= visibleStripEndIndex;
-
-      if (inMeasuredViewport || (!stripViewportRect && inFallbackRange)) {
-        visibleSources.push({
-          day: item.day,
-          index: item.index,
-          rect: item.rect
-        });
-      }
-    });
-
-    const orderedSources = visibleSources.sort((first, second) => first.index - second.index);
-
-    if (orderedSources.length === 0) {
-      openingTransitionRunningRef.current = false;
-      setOpen(true);
-      return;
-    }
-
-    const movingDateSet = new Set(orderedSources.map((item) => item.day.date));
-    transitionProgress.stopAnimation();
-    gridFadeProgress.stopAnimation();
-    transitionProgress.setValue(0);
-    gridFadeProgress.setValue(0);
-    setTransitioningDaySet(movingDateSet);
-    setTransitionCells(orderedSources.map((item) => buildActivityTransitionCell({
-      day: item.day,
-      from: item.rect,
-      heatScaleMaxAmount,
-      isSelectedMonthCurrent,
-      to: item.rect,
-      todayString
-    })));
-    setOpen(true);
-
-    await waitForFrames(TARGET_MEASURE_FRAMES);
-
-    const targetMeasurements = await Promise.all(orderedSources.map(async (item) => ({
-      ...item,
-      targetRect: await measureViewInWindow(gridCellFrameRefs.current[item.day.date])
-    })));
-    const nextTransitionCells = targetMeasurements.reduce<ActivityTransitionCell[]>((result, item) => {
-      if (!hasMeasuredSize(item.targetRect)) {
-        return result;
-      }
-
-      result.push(buildActivityTransitionCell({
-        day: item.day,
-        from: item.rect,
-        heatScaleMaxAmount,
-        isSelectedMonthCurrent,
-        to: item.targetRect,
-        todayString
-      }));
-      return result;
-    }, []);
-
-    if (nextTransitionCells.length === 0) {
-      transitionProgress.setValue(1);
-      gridFadeProgress.setValue(1);
-      setTransitionCells([]);
-      setTransitioningDaySet(new Set());
-      openingTransitionRunningRef.current = false;
-      return;
-    }
-
-    setTransitionCells(nextTransitionCells);
-    requestAnimationFrame(() => {
-      Animated.parallel([
-        Animated.timing(transitionProgress, {
-          duration: motionDuration(motionDurations.layout, reduceMotion),
-          easing: Easing.out(Easing.cubic),
-          toValue: 1,
-          useNativeDriver: false
-        }),
-        Animated.timing(gridFadeProgress, {
-          duration: motionDuration(motionDurations.content, reduceMotion),
-          easing: Easing.out(Easing.cubic),
-          toValue: 1,
-          useNativeDriver: true
-        })
-      ]).start(() => {
-        setTransitionCells([]);
-        setTransitioningDaySet(new Set());
-        openingTransitionRunningRef.current = false;
-      });
-    });
+    setOpen((current) => !current);
   }
 
   return (
     <>
       <DashboardModule
-        disableContentTransition
         detail={
           <View ref={cardRef} {...cardMeasurementProps} style={localStyles.detail}>
             <View style={localStyles.weekdayHeader}>
@@ -429,63 +172,43 @@ export function DashboardDailyActivity({
                     const level = heatLevelForAmount(day.amount, heatScaleMaxAmount, HEAT_ACTIVE_LEVELS);
                     const isPeak = peakDay?.date === day.date && (peakDay?.amount || 0) > 0;
                     const dayNumber = Number(day.date.slice(8, 10));
-                    const movingDuringTransition = transitioningDaySet.has(day.date);
 
                     return (
-                      <View
-                        collapsable={false}
-                        key={day.date}
-                        ref={(node) => {
-                          gridCellFrameRefs.current[day.date] = node;
-                        }}
-                        style={localStyles.gridCellFrame}
-                      >
-                        <Animated.View
-                          pointerEvents={movingDuringTransition ? 'none' : 'auto'}
-                          style={[
-                            localStyles.gridCellFill,
-                            movingDuringTransition
-                              ? localStyles.transitionHiddenCell
-                              : isOpeningTransitionActive
-                                ? { opacity: gridFadeProgress }
-                                : null
+                      <View key={day.date} style={localStyles.gridCellFrame}>
+                        <Pressable
+                          accessibilityLabel={`${formatFullDay(day.date)} ${formatYen(day.amount)}`}
+                          accessibilityRole="button"
+                          disabled={future}
+                          onPress={() => openPopover(day)}
+                          ref={(node) => {
+                            cellRefs.current[day.date] = node;
+                          }}
+                          style={({ pressed }) => [
+                            localStyles.cell,
+                            {
+                              backgroundColor: future ? 'transparent' : HEAT_COLORS[level],
+                              borderColor: future ? 'rgba(42,39,34,0.16)' : 'transparent',
+                              borderStyle: future ? 'dashed' : 'solid'
+                            },
+                            day.date === todayString && localStyles.todayCell,
+                            selected && localStyles.selectedCell,
+                            pressed && !future && localStyles.pressed
                           ]}
                         >
-                          <Pressable
-                            accessibilityLabel={`${formatFullDay(day.date)} ${formatYen(day.amount)}`}
-                            accessibilityRole="button"
-                            disabled={future}
-                            onPress={() => openPopover(day)}
-                            ref={(node) => {
-                              cellRefs.current[day.date] = node;
-                            }}
-                            style={({ pressed }) => [
-                              localStyles.cell,
-                              {
-                                backgroundColor: future ? 'transparent' : HEAT_COLORS[level],
-                                borderColor: future ? 'rgba(42,39,34,0.16)' : 'transparent',
-                                borderStyle: future ? 'dashed' : 'solid'
-                              },
-                              day.date === todayString && localStyles.todayCell,
-                              selected && localStyles.selectedCell,
-                              pressed && !future && localStyles.pressed
-                            ]}
-                          >
-                            <Text style={[
-                              localStyles.cellText,
-                              { color: future ? colors.subtle : HEAT_TEXT_COLORS[level] },
-                              future && localStyles.futureText
-                            ]}>
-                              {dayNumber}
-                            </Text>
-                            {isPeak ? (
-                              <View style={[
-                                localStyles.peakDot,
-                                level >= 3 && localStyles.peakDotLight
-                              ]} />
-                            ) : null}
-                          </Pressable>
-                        </Animated.View>
+                          <Text style={[
+                            localStyles.cellText,
+                            { color: future ? colors.subtle : HEAT_TEXT_COLORS[level] },
+                            future && localStyles.futureText
+                          ]}>
+                            {dayNumber}
+                          </Text>
+                          {isPeak ? (
+                            <View style={[
+                              localStyles.peakDot,
+                              level >= 3 && localStyles.peakDotLight
+                            ]} />
+                          ) : null}
+                        </Pressable>
                       </View>
                     );
                   })}
@@ -494,89 +217,56 @@ export function DashboardDailyActivity({
             </View>
           </View>
         }
+        expandOnCollapsedAreaPress
         footer={
           <View style={localStyles.stripFooter}>
-            <Text style={localStyles.stripHint}>{formatMonthHint(monthKey)} · SWIPE</Text>
-            <View style={localStyles.heatLegend}>
-              <Text style={localStyles.scaleLabel}>less</Text>
-              {HEAT_COLORS.slice(1).map((color) => (
-                <View key={color} style={[localStyles.scaleDot, { backgroundColor: color }]} />
-              ))}
-              <Text style={localStyles.scaleLabel}>more</Text>
-            </View>
+            <Text style={localStyles.scaleLabel}>less</Text>
+            {HEAT_COLORS.slice(1).map((color) => (
+              <View key={color} style={[localStyles.scaleDot, { backgroundColor: color }]} />
+            ))}
+            <Text style={localStyles.scaleLabel}>more</Text>
           </View>
         }
         onToggle={handleModuleToggle}
         open={open}
         summary={
           <View style={localStyles.summary}>
-            <ScrollView
-              contentContainerStyle={localStyles.stripContent}
-              contentOffset={{ x: stripInitialOffset, y: 0 }}
-              horizontal
-              keyboardShouldPersistTaps="handled"
-              onLayout={handleStripLayout}
-              onScroll={handleStripScroll}
-              onTouchEnd={handleStripTouchEnd}
-              onTouchMove={handleStripTouchMove}
-              onTouchStart={handleStripTouchStart}
-              ref={stripRef}
-              scrollEventThrottle={16}
-              showsHorizontalScrollIndicator={false}
-              style={localStyles.stripViewport}
-            >
-                {days.map((day) => {
-                  const future = isSelectedMonthCurrent && day.date > todayString;
-                  const level = heatLevelForAmount(day.amount, heatScaleMaxAmount, HEAT_ACTIVE_LEVELS);
-                  const dayNumber = Number(day.date.slice(8, 10));
-                  return (
+            <View style={localStyles.barRow}>
+              {days.map((day) => {
+                const future = isSelectedMonthCurrent && day.date > todayString;
+                const level = heatLevelForAmount(day.amount, heatScaleMaxAmount, HEAT_ACTIVE_LEVELS);
+                const ratio = heatScaleMaxAmount > 0 ? trendVisualRatioForAmount(day.amount, heatScaleMaxAmount) : 0;
+                const barHeight = Math.max(2, Math.round(ratio * BAR_MAX_HEIGHT));
+                return (
+                  <View key={day.date} style={localStyles.barSlot}>
                     <View
-                      collapsable={false}
-                      key={day.date}
-                      ref={(node) => {
-                        stripCellRefs.current[day.date] = node;
-                      }}
                       style={[
-                        localStyles.stripCell,
+                        localStyles.bar,
                         {
-                          backgroundColor: future ? 'transparent' : HEAT_COLORS[level],
-                          borderColor: future ? 'rgba(42,39,34,0.16)' : 'transparent',
-                          borderStyle: future ? 'dashed' : 'solid'
-                        },
-                        { width: stripMetrics.cellWidth },
-                        day.date === todayString && localStyles.todayCell
+                          backgroundColor: future ? 'rgba(42,39,34,0.05)' : HEAT_COLORS[level],
+                          height: barHeight
+                        }
                       ]}
-                    >
-                      <Text style={[
-                        localStyles.stripCellText,
-                        { color: future ? colors.subtle : HEAT_TEXT_COLORS[level] },
-                        future && localStyles.futureText
-                      ]}>
-                        {dayNumber}
-                      </Text>
-                    </View>
-                  );
-                })}
-            </ScrollView>
+                    />
+                  </View>
+                );
+              })}
+            </View>
+
+            <View style={localStyles.summaryCaption}>
+              <Text style={localStyles.summaryCaptionText}>{formatMonthHint(monthKey)}</Text>
+              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.summaryCaptionText}>
+                peak <Text style={localStyles.summaryCaptionStrong}>
+                  {peakDay && peakDay.amount > 0 ? formatPeakDay(peakDay.date) : '--'}
+                </Text>
+                {' · '}
+                <Text style={localStyles.summaryCaptionStrong}>{formatYen(peakDay?.amount || 0)}</Text>
+              </Text>
+            </View>
           </View>
-        }
-        summaryStat={
-          <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.headerStat}>
-            peak <Text style={localStyles.headerGold}>{peakDay && peakDay.amount > 0 ? formatPeakDay(peakDay.date) : '--'}</Text>
-            {' · '}
-            <Text style={localStyles.headerStrong}>{formatYen(peakDay?.amount || 0)}</Text>
-          </Text>
         }
         title="Daily Activity"
       />
-
-      <Modal animationType="none" transparent visible={transitionCells.length > 0}>
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-          {transitionCells.map((cell) => (
-            <MovingActivityDayCell cell={cell} key={cell.date} progress={transitionProgress} />
-          ))}
-        </View>
-      </Modal>
 
       <Modal
         animationType="fade"
@@ -641,7 +331,7 @@ export function DashboardDailyActivity({
                     <View style={[localStyles.memberDot, { backgroundColor: member.color }]} />
                     <View style={localStyles.memberTextBlock}>
                       <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.memberLabel}>
-                        {member.label.toUpperCase()}
+                        {member.label}
                       </Text>
                       <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.memberAmount}>
                         {formatYen(member.amount)}
@@ -670,52 +360,6 @@ export function DashboardDailyActivity({
   );
 }
 
-function MovingActivityDayCell({
-  cell,
-  progress
-}: {
-  cell: ActivityTransitionCell;
-  progress: Animated.Value;
-}) {
-  return (
-    <Animated.View
-      style={[
-        localStyles.movingCell,
-        {
-          backgroundColor: cell.backgroundColor,
-          borderColor: cell.borderColor,
-          borderStyle: cell.borderStyle,
-          height: progress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [cell.from.height, cell.to.height]
-          }),
-          left: progress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [cell.from.x, cell.to.x]
-          }),
-          top: progress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [cell.from.y, cell.to.y]
-          }),
-          width: progress.interpolate({
-            inputRange: [0, 1],
-            outputRange: [cell.from.width, cell.to.width]
-          })
-        },
-        cell.isToday && localStyles.todayCell
-      ]}
-    >
-      <Text style={[
-        localStyles.stripCellText,
-        { color: cell.textColor },
-        cell.future && localStyles.futureText
-      ]}>
-        {cell.dayNumber}
-      </Text>
-    </Animated.View>
-  );
-}
-
 function buildMonthGrid(days: HeatDay[], monthKey: string) {
   const leadingEmptyCount = monthKey ? mondayFirstColumn(monthKey) : 0;
   const items: (HeatDay | null)[] = [
@@ -728,19 +372,6 @@ function buildMonthGrid(days: HeatDay[], monthKey: string) {
     rows.push(row.length < 7 ? [...row, ...Array.from({ length: 7 - row.length }, () => null)] : row);
   }
   return rows;
-}
-
-function stripStartIndexForAnchor(dayCount: number, anchorIndex: number, visibleCount: number) {
-  if (dayCount <= 0) {
-    return 0;
-  }
-
-  const safeVisibleCount = Math.max(1, Math.min(dayCount, visibleCount));
-  const targetIndex = clamp(anchorIndex, 0, dayCount - 1);
-  const centeredStart = targetIndex - Math.floor(safeVisibleCount / 2);
-  const maxStart = Math.max(0, dayCount - safeVisibleCount);
-
-  return clamp(centeredStart, 0, maxStart);
 }
 
 function computePopoverPosition(input: {
@@ -774,64 +405,6 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
 
-function measureViewInWindow(node: MeasurableView | null | undefined): Promise<Rect | null> {
-  if (!node) {
-    return Promise.resolve(null);
-  }
-
-  return new Promise((resolve) => {
-    try {
-      node.measureInWindow((x, y, width, height) => {
-        resolve({ height, width, x, y });
-      });
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
-function hasMeasuredSize(rect: Rect | null): rect is Rect {
-  return Boolean(rect && rect.width > 0 && rect.height > 0);
-}
-
-function rectOverlapsHorizontally(rect: Rect, viewport: Rect) {
-  const overlap = Math.min(rect.x + rect.width, viewport.x + viewport.width) - Math.max(rect.x, viewport.x);
-  return overlap > VISIBLE_CELL_OVERLAP_MIN;
-}
-
-async function waitForFrames(count: number) {
-  for (let index = 0; index < count; index += 1) {
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => resolve());
-    });
-  }
-}
-
-function buildActivityTransitionCell(input: {
-  day: HeatDay;
-  from: Rect;
-  heatScaleMaxAmount: number;
-  isSelectedMonthCurrent: boolean;
-  to: Rect;
-  todayString: string;
-}): ActivityTransitionCell {
-  const future = input.isSelectedMonthCurrent && input.day.date > input.todayString;
-  const level = heatLevelForAmount(input.day.amount, input.heatScaleMaxAmount, HEAT_ACTIVE_LEVELS);
-
-  return {
-    backgroundColor: future ? 'transparent' : HEAT_COLORS[level],
-    borderColor: future ? 'rgba(42,39,34,0.16)' : 'transparent',
-    borderStyle: future ? 'dashed' : 'solid',
-    date: input.day.date,
-    dayNumber: Number(input.day.date.slice(8, 10)),
-    from: input.from,
-    future,
-    isToday: input.day.date === input.todayString,
-    textColor: future ? colors.subtle : HEAT_TEXT_COLORS[level],
-    to: input.to
-  };
-}
-
 function isFutureDay(date: string, monthKey: string, todayString: string) {
   return monthKey === todayString.slice(0, 7) && date > todayString;
 }
@@ -849,7 +422,7 @@ function parseDateString(dateString: string) {
 
 function formatPeakDay(dateString: string) {
   const date = parseDateString(dateString);
-  return `${new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date).toUpperCase()} ${date.getDate()}`;
+  return `${new Intl.DateTimeFormat('en-US', { weekday: 'short' }).format(date)} ${date.getDate()}`;
 }
 
 function formatFullDay(dateString: string) {
@@ -869,7 +442,7 @@ function formatPopoverDate(dateString: string) {
 
 function formatMonthHint(monthKey: string) {
   const [year, month] = monthKey.split('-').map(Number);
-  return new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(year, month - 1, 1)).toUpperCase();
+  return new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(year, month - 1, 1));
 }
 
 const localStyles = StyleSheet.create({
@@ -965,10 +538,6 @@ const localStyles = StyleSheet.create({
   grid: {
     gap: 5
   },
-  gridCellFill: {
-    height: '100%',
-    width: '100%'
-  },
   gridCellFrame: {
     aspectRatio: 1,
     flex: 1,
@@ -977,28 +546,6 @@ const localStyles = StyleSheet.create({
   gridRow: {
     flexDirection: 'row',
     gap: 5
-  },
-  headerGold: {
-    color: '#8A5A12',
-    fontFamily: fontFamilies.monoBold,
-    fontWeight: '700'
-  },
-  headerStat: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.mono,
-    fontSize: 10,
-    lineHeight: 14,
-    maxWidth: 168
-  },
-  headerStrong: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontWeight: '700'
-  },
-  heatLegend: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 4
   },
   historyButton: {
     alignItems: 'center',
@@ -1041,11 +588,9 @@ const localStyles = StyleSheet.create({
   },
   memberLabel: {
     color: colors.subtle,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 9.5,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 13
+    fontFamily: fontFamilies.medium,
+    fontSize: 11,
+    lineHeight: 14
   },
   memberSplit: {
     flexDirection: 'row',
@@ -1055,12 +600,19 @@ const localStyles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
-  movingCell: {
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    position: 'absolute'
+  bar: {
+    borderRadius: 2,
+    width: '100%'
+  },
+  barRow: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 2,
+    height: BAR_MAX_HEIGHT
+  },
+  barSlot: {
+    flex: 1,
+    minWidth: 0
   },
   peakDot: {
     backgroundColor: colors.accent,
@@ -1133,52 +685,37 @@ const localStyles = StyleSheet.create({
   selectedCell: {
     opacity: 0.86
   },
-  stripCell: {
-    alignItems: 'center',
-    borderRadius: 8,
-    borderWidth: 1,
-    height: 30,
-    justifyContent: 'center',
-    width: STRIP_TARGET_CELL_WIDTH
-  },
-  stripCellText: {
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
-    fontWeight: '700',
-    lineHeight: 14
-  },
-  stripContent: {
-    flexDirection: 'row',
-    gap: STRIP_GAP,
-    paddingVertical: 3
-  },
   stripFooter: {
     alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 4,
+    justifyContent: 'center',
     paddingBottom: 16,
     paddingHorizontal: 16
   },
-  stripHint: {
+  summary: {
+    gap: 9,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    paddingTop: 8
+  },
+  summaryCaption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  summaryCaptionStrong: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontWeight: '700'
+  },
+  summaryCaptionText: {
     color: colors.subtle,
     fontFamily: fontFamilies.mono,
-    fontSize: 9,
-    letterSpacing: 0.5,
-    lineHeight: 12
-  },
-  stripViewport: {
-    marginHorizontal: 16,
-    overflow: 'hidden'
-  },
-  summary: {
-    paddingBottom: 8,
-    paddingTop: 8
+    fontSize: 10,
+    lineHeight: 14
   },
   todayCell: {
     boxShadow: '0 0 0 2px #C0892E'
-  },
-  transitionHiddenCell: {
-    opacity: 0
   },
   weekdayHeader: {
     flexDirection: 'row',
