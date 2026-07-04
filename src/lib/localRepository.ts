@@ -4,6 +4,7 @@ import {
   mapLegacyCategoryToId,
   resolveCategory
 } from '@/src/lib/categorySystem';
+import { friendlyErrorMessage } from '@/src/lib/errorMessages';
 import { getLocalDb, withLocalTransaction } from '@/src/lib/localDb';
 import { emitLedgerDataChanged } from '@/src/lib/localEvents';
 import {
@@ -215,6 +216,7 @@ export async function getCachedLedgerMemberships(userId: string): Promise<(Ledge
     `SELECT
        lm.ledger_id, lm.user_id, lm.joined_at,
        l.id as "ledger.id", l.name as "ledger.name", l.invite_code as "ledger.invite_code",
+       COALESCE(l.owner_id, l.created_by) as "ledger.owner_id",
        l.created_by as "ledger.created_by", l.created_at as "ledger.created_at", l.updated_at as "ledger.updated_at"
      FROM ledger_members lm
      JOIN ledgers l ON l.id = lm.ledger_id
@@ -229,6 +231,7 @@ export async function getCachedLedgerMemberships(userId: string): Promise<(Ledge
       id: row['ledger.id'],
       name: row['ledger.name'],
       invite_code: row['ledger.invite_code'],
+      owner_id: row['ledger.owner_id'],
       created_by: row['ledger.created_by'],
       created_at: row['ledger.created_at'],
       updated_at: row['ledger.updated_at']
@@ -1335,11 +1338,12 @@ async function upsertProfile(tx: LocalTransaction, profile: Profile) {
 
 async function upsertLedger(tx: LocalTransaction, ledger: Ledger) {
   await tx.runAsync(
-    `INSERT OR REPLACE INTO ledgers (id, name, invite_code, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO ledgers (id, name, invite_code, owner_id, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ledger.id,
     ledger.name,
     ledger.invite_code,
+    ledger.owner_id || ledger.created_by,
     ledger.created_by,
     ledger.created_at,
     ledger.updated_at
@@ -1493,36 +1497,7 @@ function safeJsonParse(value: string) {
 }
 
 function formatSyncError(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (!error || typeof error !== 'object') {
-    return String(error);
-  }
-
-  const details = error as {
-    code?: unknown;
-    details?: unknown;
-    hint?: unknown;
-    message?: unknown;
-  };
-  const parts = [
-    typeof details.message === 'string' ? details.message : null,
-    typeof details.code === 'string' ? `code: ${details.code}` : null,
-    typeof details.details === 'string' ? `details: ${details.details}` : null,
-    typeof details.hint === 'string' ? `hint: ${details.hint}` : null
-  ].filter(Boolean);
-
-  if (parts.length > 0) {
-    return parts.join(' · ');
-  }
-
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
+  return friendlyErrorMessage(error);
 }
 
 function createUuid() {

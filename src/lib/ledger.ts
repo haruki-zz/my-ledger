@@ -1,4 +1,5 @@
 import { supabase } from '@/src/lib/supabase';
+import { friendlyErrorMessage } from '@/src/lib/errorMessages';
 import { isLocalDbUnavailableError } from '@/src/lib/localDb';
 import {
   cacheProfile,
@@ -120,7 +121,7 @@ function mapLedgerMemberships(memberships: LedgerMembershipRow[], userId: string
         ledger: membership.ledger,
         joined_at: membership.joined_at,
         user_id: membership.user_id,
-        isOwner: membership.ledger.created_by === userId
+        isOwner: (membership.ledger.owner_id || membership.ledger.created_by) === userId
       };
     })
     .filter((membership): membership is LedgerMembership => Boolean(membership));
@@ -128,7 +129,7 @@ function mapLedgerMemberships(memberships: LedgerMembershipRow[], userId: string
 
 export async function createLedger(name: string): Promise<Ledger> {
   const { data, error } = await supabase.rpc('create_ledger', {
-    p_name: name.trim() || 'Shared Ledger'
+    p_name: name.trim() || 'Ledger'
   });
 
   if (error) {
@@ -211,18 +212,7 @@ export async function getRecurringExpenseRules(
 }
 
 export function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  if (error && typeof error === 'object' && 'message' in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === 'string') {
-      return message;
-    }
-  }
-
-  return String(error);
+  return friendlyErrorMessage(error);
 }
 
 function isOfflineError(error: unknown) {

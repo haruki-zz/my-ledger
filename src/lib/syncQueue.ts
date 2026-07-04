@@ -1,4 +1,10 @@
-export type SyncEntityType = 'expense' | 'category' | 'recurring_rule';
+export type LegacySyncEntityType = 'expense' | 'category';
+export type SyncEntityType =
+  | LegacySyncEntityType
+  | 'transaction'
+  | 'recurring_rule'
+  | 'budget_template'
+  | 'budget_snapshot';
 export type SyncAction = 'create' | 'edit' | 'delete';
 type SyncStatus = 'queued' | 'syncing' | 'failed' | 'conflict';
 

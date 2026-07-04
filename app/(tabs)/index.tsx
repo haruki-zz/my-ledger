@@ -93,7 +93,7 @@ export default function DashboardScreen() {
     error: transferError,
     reload: reloadTransfers,
     setConfirmations
-  } = useTransferChecklist(ledger?.id || null);
+  } = useTransferChecklist(members.length >= 2 ? ledger?.id || null : null);
 
   const currentUserName = displayName(members.find((member) => member.user_id === currentUserId)?.profile.display_name);
   const otherUserName = displayName(members.find((member) => member.user_id === otherUserId)?.profile.display_name);
@@ -371,15 +371,17 @@ export default function DashboardScreen() {
                   progress={heroFlipProgress}
                 />
 
-                <TransferSettleEntry
-                  currentUserId={currentUserId}
-                  error={transferError}
-                  items={transferItems}
-                  loading={transferLoading}
-                  members={members}
-                  onSetConfirmations={setConfirmations}
-                  saving={transferSaving}
-                />
+                {members.length >= 2 ? (
+                  <TransferSettleEntry
+                    currentUserId={currentUserId}
+                    error={transferError}
+                    items={transferItems}
+                    loading={transferLoading}
+                    members={members}
+                    onSetConfirmations={setConfirmations}
+                    saving={transferSaving}
+                  />
+                ) : null}
               </BentoCard>
             </Animated.View>
           </View>

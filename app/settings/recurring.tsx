@@ -137,6 +137,7 @@ const GENERATE_DAY_OPTIONS = Array.from({ length: 31 }, (_, index) => index + 1)
 
 function emptyDraft(members: LedgerMemberProfile[]): Draft {
   const currentMonth = dateStringToMonthKey(currentMonthStartDate());
+  const ownership: ExpenseOwnership = members.length === 2 ? 'shared' : 'personal';
   return {
     id: null,
     name: '',
@@ -144,7 +145,7 @@ function emptyDraft(members: LedgerMemberProfile[]): Draft {
     subcategory: 'Rent',
     amount: '',
     paidBy: members[0]?.user_id || '',
-    ownership: 'shared',
+    ownership,
     splitAmountA: '',
     splitAmountB: '',
     generateDay: '1',
@@ -195,6 +196,9 @@ export default function RecurringExpenseRulesScreen() {
   const ledgerId = ledger?.id;
   const ruleIdParam = Array.isArray(params.ruleId) ? params.ruleId[0] : params.ruleId;
   const editingRuleId = ruleIdParam || null;
+  const hasTwoMembers = members.length === 2;
+  const orphanSharedRule = Boolean(editingRuleId && draft.id && draft.ownership === 'shared' && !hasTwoMembers);
+  const formLocked = orphanSharedRule;
 
   const load = useCallback(async (currentLedger = ledger, mode: LoadMode = 'background') => {
     if (!currentLedger) {
@@ -366,6 +370,9 @@ export default function RecurringExpenseRulesScreen() {
     if (saving) {
       return;
     }
+    if (orphanSharedRule && !draft.isActive) {
+      return;
+    }
 
     const nextDraft = { ...draft, isActive: !draft.isActive };
     updateDraft({ isActive: nextDraft.isActive });
@@ -378,7 +385,7 @@ export default function RecurringExpenseRulesScreen() {
     if (!ledger) {
       return 'No active ledger';
     }
-    if (nextDraft.ownership === 'shared' && members.length !== 2) {
+    if (nextDraft.ownership === 'shared' && members.length !== 2 && !(orphanSharedRule && !nextDraft.isActive)) {
       return 'Fixed monthly expenses require two ledger members';
     }
     if (!nextDraft.name.trim()) {
@@ -538,6 +545,10 @@ export default function RecurringExpenseRulesScreen() {
   }
 
   function updateAmount(value: string) {
+    if (formLocked) {
+      return;
+    }
+
     const nextAmount = sanitizeWholeNumber(value);
     const currentAmountYen = parsePositiveInteger(draft.amount) || 0;
     const nextAmountYen = parsePositiveInteger(nextAmount) || 0;
@@ -551,6 +562,10 @@ export default function RecurringExpenseRulesScreen() {
   }
 
   function selectOwnership(nextOwnership: ExpenseOwnership) {
+    if (formLocked || (nextOwnership === 'shared' && !hasTwoMembers)) {
+      return;
+    }
+
     if (nextOwnership === 'personal') {
       updateDraft({
         ownership: nextOwnership,
@@ -570,6 +585,10 @@ export default function RecurringExpenseRulesScreen() {
   }
 
   function selectGenerateDay(day: number) {
+    if (formLocked) {
+      return;
+    }
+
     updateDraft({ generateDay: String(day) });
     closeNativeGenerateDatePicker();
   }
@@ -584,6 +603,10 @@ export default function RecurringExpenseRulesScreen() {
   const splitEvenlySelected = isEvenSplit(draftAmountYen, draft.splitAmountA, draft.splitAmountB);
 
   function updateSharedAmount(memberIndex: 0 | 1, value: string) {
+    if (formLocked) {
+      return;
+    }
+
     const amountYen = parsePositiveInteger(draft.amount);
     const sanitizedValue = sanitizeWholeNumber(value);
     if (!sanitizedValue) {
@@ -606,11 +629,19 @@ export default function RecurringExpenseRulesScreen() {
   }
 
   function splitEvenly() {
+    if (formLocked) {
+      return;
+    }
+
     const [splitAmountA, splitAmountB] = evenSplitAmounts(draftAmountYen);
     updateDraft({ splitAmountA, splitAmountB });
   }
 
   function clearSplit() {
+    if (formLocked) {
+      return;
+    }
+
     updateDraft({ splitAmountA: '', splitAmountB: '' });
   }
 
@@ -621,11 +652,17 @@ export default function RecurringExpenseRulesScreen() {
       contentContainerStyle={styles.content}
     >
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
+      {orphanSharedRule ? (
+        <Text selectable style={styles.error}>
+          This shared fixed expense needs two ledger members to edit. You can turn it off or delete it.
+        </Text>
+      ) : null}
 
       <BentoCard variant="form" style={localStyles.groupCard}>
         <GroupHead icon="pricetag-outline" label="What" />
         <View style={localStyles.fieldGroup}>
           <TextInput
+            editable={!formLocked}
             inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             onChangeText={(name) => updateDraft({ name })}
             placeholder="Name"
@@ -653,8 +690,9 @@ export default function RecurringExpenseRulesScreen() {
               ) : null}
             </View>
             <Pressable
+              disabled={formLocked}
               onPress={() => runAfterKeyboardDismiss(() => setCategoryMenuOpen((current) => !current))}
-              style={({ pressed }) => [localStyles.categoryTrigger, pressed && localStyles.pressed]}
+              style={({ pressed }) => [localStyles.categoryTrigger, formLocked && localStyles.disabled, pressed && !formLocked && localStyles.pressed]}
             >
               <View style={localStyles.categorySelected}>
                 <Ionicons color={selectedCategoryColor} name={selectedCategoryIcon} size={18} />
@@ -669,6 +707,9 @@ export default function RecurringExpenseRulesScreen() {
                 <Pressable
                   key={category.id}
                   onPress={() => {
+                    if (formLocked) {
+                      return;
+                    }
                     updateDraft({ categoryId: category.id, subcategory: '' });
                     setCategoryMenuOpen(false);
                   }}
@@ -689,6 +730,7 @@ export default function RecurringExpenseRulesScreen() {
                 return (
                   <Pressable
                     key={option}
+                    disabled={formLocked}
                     onPress={() => updateDraft({ subcategory: selected ? '' : option })}
                     style={({ pressed }) => [
                       localStyles.subcategoryChip,
@@ -703,6 +745,7 @@ export default function RecurringExpenseRulesScreen() {
             </View>
           </ScrollView>
           <TextInput
+            editable={!formLocked}
             inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
             onChangeText={(subcategory) => updateDraft({ subcategory })}
             placeholder="Optional tag"
@@ -721,6 +764,7 @@ export default function RecurringExpenseRulesScreen() {
               const selected = Number(draft.generateDay) === day;
               return (
                 <Pressable
+                  disabled={formLocked}
                   key={day}
                   onPress={() => selectGenerateDay(day)}
                   style={({ pressed }) => [
@@ -739,29 +783,34 @@ export default function RecurringExpenseRulesScreen() {
 
       <BentoCard variant="form" style={localStyles.groupCard}>
         <GroupHead icon="people-outline" label="Who" />
-        <View accessibilityLabel="Fixed expense ownership" style={localStyles.ownershipSelector}>
-          {[
-            { label: 'Personal', value: 'personal' as const },
-            { label: 'Shared', value: 'shared' as const }
-          ].map((option) => {
-            const selected = option.value === draft.ownership;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => selectOwnership(option.value)}
-                style={({ pressed }) => [
-                  localStyles.ownershipOption,
-                  selected && localStyles.ownershipOptionActive,
-                  pressed && localStyles.pressed
-                ]}
-              >
-                <Text style={[localStyles.ownershipText, selected && localStyles.ownershipTextActive]}>
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        {hasTwoMembers || draft.ownership === 'shared' ? (
+          <View accessibilityLabel="Fixed expense ownership" style={localStyles.ownershipSelector}>
+            {[
+              { label: 'Personal', value: 'personal' as const },
+              { label: 'Shared', value: 'shared' as const }
+            ].map((option) => {
+              const selected = option.value === draft.ownership;
+              const disabled = formLocked || (option.value === 'shared' && !hasTwoMembers);
+              return (
+                <Pressable
+                  disabled={disabled}
+                  key={option.value}
+                  onPress={() => selectOwnership(option.value)}
+                  style={({ pressed }) => [
+                    localStyles.ownershipOption,
+                    selected && localStyles.ownershipOptionActive,
+                    disabled && localStyles.disabled,
+                    pressed && !disabled && localStyles.pressed
+                  ]}
+                >
+                  <Text style={[localStyles.ownershipText, selected && localStyles.ownershipTextActive]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         <View style={localStyles.fieldGroup}>
           <Text style={localStyles.fieldLabel}>{draft.ownership === 'personal' ? 'Belongs to' : 'Paid by'}</Text>
@@ -772,6 +821,7 @@ export default function RecurringExpenseRulesScreen() {
               return (
                 <MemberOption
                   accent={accent}
+                  disabled={formLocked}
                   key={member.user_id}
                   label={displayName(member.profile.display_name)}
                   onPress={() => updateDraft({ paidBy: member.user_id })}
@@ -787,11 +837,11 @@ export default function RecurringExpenseRulesScreen() {
             <View style={localStyles.shareHeaderRow}>
               <Text style={localStyles.fieldLabel}>Each person&apos;s share</Text>
               <View style={localStyles.splitQuickRow}>
-                <Pressable onPress={splitEvenly} style={[localStyles.splitQuick, splitEvenlySelected && localStyles.splitQuickActive]}>
+                <Pressable disabled={formLocked} onPress={splitEvenly} style={[localStyles.splitQuick, splitEvenlySelected && localStyles.splitQuickActive, formLocked && localStyles.disabled]}>
                   <Ionicons color={splitEvenlySelected ? colors.secondary : colors.muted} name="checkmark" size={13} />
                   <Text style={[localStyles.splitQuickText, splitEvenlySelected && localStyles.splitQuickTextActive]}>Split evenly</Text>
                 </Pressable>
-                <Pressable onPress={clearSplit} style={localStyles.splitQuick}>
+                <Pressable disabled={formLocked} onPress={clearSplit} style={[localStyles.splitQuick, formLocked && localStyles.disabled]}>
                   <Text style={localStyles.splitQuickText}>Clear</Text>
                 </Pressable>
               </View>
@@ -800,12 +850,14 @@ export default function RecurringExpenseRulesScreen() {
               accent={MEMBER_COLORS[0]}
               label={memberNames[0]}
               onChange={(value) => updateSharedAmount(0, value)}
+              disabled={formLocked}
               value={draft.splitAmountA}
             />
             <ShareAmountRow
               accent={MEMBER_COLORS[1]}
               label={memberNames[1]}
               onChange={(value) => updateSharedAmount(1, value)}
+              disabled={formLocked}
               value={draft.splitAmountB}
             />
             <View style={localStyles.divider} />
@@ -827,12 +879,20 @@ export default function RecurringExpenseRulesScreen() {
       </BentoCard>
 
       <View style={localStyles.activeSaveArea}>
-        <Pressable onPress={toggleDraftActive} style={({ pressed }) => [localStyles.activeRow, pressed && localStyles.pressed]}>
+        <Pressable
+          disabled={orphanSharedRule && !draft.isActive}
+          onPress={toggleDraftActive}
+          style={({ pressed }) => [
+            localStyles.activeRow,
+            orphanSharedRule && !draft.isActive && localStyles.disabled,
+            pressed && !(orphanSharedRule && !draft.isActive) && localStyles.pressed
+          ]}
+        >
           <Text style={localStyles.fieldLabel}>Active immediately</Text>
           <ToggleSwitch active={draft.isActive} />
         </Pressable>
 
-        <Pressable disabled={saving} onPress={() => void saveRule()} style={({ pressed }) => [localStyles.saveButton, saving && localStyles.disabled, pressed && !saving && localStyles.pressed]}>
+        <Pressable disabled={saving || formLocked} onPress={() => void saveRule()} style={({ pressed }) => [localStyles.saveButton, (saving || formLocked) && localStyles.disabled, pressed && !saving && !formLocked && localStyles.pressed]}>
           <Ionicons color="#FFFFFF" name="checkmark" size={18} />
           <Text style={localStyles.saveButtonText}>{saving ? 'Saving...' : 'Save Rule'}</Text>
         </Pressable>
@@ -931,22 +991,26 @@ function GroupHead({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; labe
 
 function MemberOption({
   accent,
+  disabled,
   label,
   onPress,
   selected
 }: {
   accent: string;
+  disabled?: boolean;
   label: string;
   onPress: () => void;
   selected: boolean;
 }) {
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         localStyles.memberOption,
         selected && { backgroundColor: accent, borderColor: accent },
-        pressed && localStyles.pressed
+        disabled && localStyles.disabled,
+        pressed && !disabled && localStyles.pressed
       ]}
     >
       <View style={[
@@ -966,11 +1030,13 @@ function MemberOption({
 
 function ShareAmountRow({
   accent,
+  disabled,
   label,
   onChange,
   value
 }: {
   accent: string;
+  disabled?: boolean;
   label: string;
   onChange: (value: string) => void;
   value: string;
@@ -985,6 +1051,7 @@ function ShareAmountRow({
       <View style={localStyles.shareBody}>
         <Text numberOfLines={1} style={localStyles.shareName}>{label}</Text>
         <TextInput
+          editable={!disabled}
           inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
           inputMode="numeric"
           keyboardType="number-pad"
@@ -992,7 +1059,7 @@ function ShareAmountRow({
           placeholder="¥ 0"
           placeholderTextColor={colors.subtle}
           selection={{ start: displayValue.length, end: displayValue.length }}
-          style={[localStyles.shareInput, { color: accent }]}
+          style={[localStyles.shareInput, { color: accent }, disabled && localStyles.disabled]}
           value={displayValue}
         />
       </View>

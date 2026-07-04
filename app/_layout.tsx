@@ -94,7 +94,7 @@ export default function RootLayout() {
             >
               <Stack.Screen name="index" options={{ headerShown: false }} />
               <Stack.Screen name="auth" options={{ title: 'Sign In' }} />
-              <Stack.Screen name="ledger" options={{ title: 'Shared Ledger' }} />
+              <Stack.Screen name="ledger" options={{ title: 'Ledger' }} />
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               {/* Settings detail screens */}
               <Stack.Screen name="settings/ledgers" options={{ headerLeft: settingsHeaderLeft, title: 'Ledgers' }} />

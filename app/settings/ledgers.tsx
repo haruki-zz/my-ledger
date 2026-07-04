@@ -33,7 +33,7 @@ type LedgerMemberState = {
 
 type LedgerAction = 'create' | 'join' | `switch:${string}` | `delete:${string}` | `leave:${string}`;
 
-const DEFAULT_LEDGER_NAME = 'Shared Ledger';
+const DEFAULT_LEDGER_NAME = 'Ledger';
 const LEDGER_COLORS = ['#CB5F43', '#8AA248', '#4F77BE', '#8A6FB6', '#D2A032', '#4E97B5'];
 
 export default function LedgerManagementScreen() {
@@ -204,7 +204,7 @@ export default function LedgerManagementScreen() {
   }
 
   function confirmLeave(membership: LedgerMembership) {
-    Alert.alert('Leave Ledger', `After leaving "${membership.ledger.name}", you will no longer be able to view this ledger. Historical expenses and unsettled balances remain for other members.`, [
+    Alert.alert('Leave Ledger', `After leaving "${membership.ledger.name}", you will no longer be able to view this ledger. Settle all shared transfer items first.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Leave',
@@ -289,7 +289,7 @@ export default function LedgerManagementScreen() {
         disabled={Boolean(submittingAction)}
         icon="create-outline"
         onSubmit={() => runAfterKeyboardDismiss(handleCreate)}
-        subtitle="Start a new shared ledger and make it current."
+        subtitle="Start a new ledger for personal or shared expense tracking."
         title="Create Ledger"
       >
         <Text style={styles.label}>Ledger Name</Text>
@@ -371,7 +371,7 @@ function LedgerCard({
 
       <MemberPreview
         currentUserId={currentUserId}
-        ledgerOwnerId={membership.ledger.created_by}
+        ledgerOwnerId={membership.ledger.owner_id || membership.ledger.created_by}
         memberState={memberState}
       />
 

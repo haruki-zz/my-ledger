@@ -19,7 +19,7 @@ export default function LedgerScreen() {
     loading,
     reloadLedgers
   } = useLedgerContext();
-  const [ledgerName, setLedgerName] = useState('Shared Ledger');
+  const [ledgerName, setLedgerName] = useState('Ledger');
   const [inviteCode, setInviteCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,8 +83,8 @@ export default function LedgerScreen() {
       contentContainerStyle={styles.content}
     >
       <View>
-        <Text style={styles.title}>Shared Ledger</Text>
-        <Text style={styles.muted}>Each ledger supports up to two members. Both members can add, edit, and delete expenses.</Text>
+        <Text style={styles.title}>Ledger</Text>
+        <Text style={styles.muted}>Use a ledger on your own, or invite one other member when you want to track shared expenses.</Text>
       </View>
 
       {loading ? <ActivityIndicator /> : null}

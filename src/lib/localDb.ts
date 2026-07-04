@@ -2,7 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import { Platform } from 'react-native';
 
 const DATABASE_NAME = 'my-ledger-offline.db';
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const WEB_DATABASE_OPEN_TIMEOUT_MS = 2500;
 const LOCAL_DB_OPEN_TIMEOUT = Symbol('local-db-open-timeout');
 
@@ -431,6 +431,211 @@ async function migrateLocalDb(db: SQLite.SQLiteDatabase) {
       `);
     }
 
+    if (currentVersion < 6) {
+      const pendingLegacyQueue = await db.getFirstAsync<{ count: number }>(
+        `SELECT COUNT(*) as count
+         FROM sync_queue
+         WHERE status IN ('queued', 'syncing', 'failed', 'conflict')
+           AND entity_type IN ('expense', 'category', 'recurring_rule')`
+      );
+
+      if ((pendingLegacyQueue?.count || 0) > 0) {
+        throw new Error(
+          'Local migration blocked: please go online and sync pending offline changes before updating to the transaction schema.'
+        );
+      }
+
+      await addColumnIfMissing(db, 'ledgers', 'owner_id', 'TEXT');
+      await addColumnIfMissing(db, 'ledger_members', 'status', "TEXT NOT NULL DEFAULT 'active'");
+      await addColumnIfMissing(db, 'ledger_members', 'left_at', 'TEXT');
+      await addColumnIfMissing(db, 'ledger_members', 'created_at', 'TEXT');
+      await addColumnIfMissing(db, 'ledger_members', 'updated_at', 'TEXT');
+
+      await db.execAsync(`
+        UPDATE ledgers
+        SET owner_id = created_by
+        WHERE owner_id IS NULL;
+
+        UPDATE ledger_members
+        SET status = COALESCE(status, 'active'),
+            left_at = NULL,
+            created_at = COALESCE(created_at, joined_at),
+            updated_at = COALESCE(updated_at, joined_at);
+
+        CREATE TABLE IF NOT EXISTS categories (
+          id TEXT PRIMARY KEY NOT NULL,
+          type TEXT NOT NULL,
+          parent_id TEXT,
+          display_name TEXT NOT NULL,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS transactions (
+          id TEXT PRIMARY KEY NOT NULL,
+          ledger_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          amount_yen INTEGER NOT NULL,
+          category_id TEXT NOT NULL,
+          occurred_on TEXT NOT NULL,
+          note TEXT,
+          paid_by_member_id TEXT,
+          ownership TEXT,
+          owned_by_member_id TEXT,
+          recorded_by_member_id TEXT NOT NULL,
+          recurring_rule_id TEXT,
+          recurring_month TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          local_status TEXT NOT NULL DEFAULT 'synced',
+          deleted_locally INTEGER NOT NULL DEFAULT 0,
+          base_updated_at TEXT,
+          last_synced_updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS transaction_splits (
+          transaction_id TEXT NOT NULL,
+          responsible_member_id TEXT NOT NULL,
+          amount_yen INTEGER NOT NULL,
+          PRIMARY KEY (transaction_id, responsible_member_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS recurring_transaction_rules (
+          id TEXT PRIMARY KEY NOT NULL,
+          ledger_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          name TEXT NOT NULL,
+          amount_yen INTEGER NOT NULL,
+          category_id TEXT NOT NULL,
+          generate_day INTEGER NOT NULL,
+          start_month TEXT NOT NULL,
+          end_month TEXT,
+          timezone TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          paid_by_member_id TEXT,
+          ownership TEXT,
+          owned_by_member_id TEXT,
+          created_by_member_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          local_status TEXT NOT NULL DEFAULT 'synced',
+          deleted_locally INTEGER NOT NULL DEFAULT 0,
+          base_updated_at TEXT,
+          last_synced_updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS recurring_rule_splits (
+          rule_id TEXT NOT NULL,
+          responsible_member_id TEXT NOT NULL,
+          amount_yen INTEGER NOT NULL,
+          PRIMARY KEY (rule_id, responsible_member_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS budget_templates (
+          id TEXT PRIMARY KEY NOT NULL,
+          ledger_id TEXT NOT NULL,
+          member_id TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          category_id TEXT,
+          amount_yen INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          local_status TEXT NOT NULL DEFAULT 'synced',
+          deleted_locally INTEGER NOT NULL DEFAULT 0,
+          base_updated_at TEXT,
+          last_synced_updated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS budget_monthly_snapshots (
+          id TEXT PRIMARY KEY NOT NULL,
+          ledger_id TEXT NOT NULL,
+          member_id TEXT NOT NULL,
+          month TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          category_id TEXT,
+          amount_yen INTEGER NOT NULL,
+          source TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          local_status TEXT NOT NULL DEFAULT 'synced',
+          deleted_locally INTEGER NOT NULL DEFAULT 0,
+          base_updated_at TEXT,
+          last_synced_updated_at TEXT
+        );
+
+        INSERT OR REPLACE INTO categories (id, type, parent_id, display_name, sort_order, is_active, created_at, updated_at)
+        VALUES
+          ('food_dining', 'expense', NULL, 'Food & Dining', 10, 1, datetime('now'), datetime('now')),
+          ('household', 'expense', NULL, 'Household', 20, 1, datetime('now'), datetime('now')),
+          ('transport', 'expense', NULL, 'Transport', 30, 1, datetime('now'), datetime('now')),
+          ('housing', 'expense', NULL, 'Housing', 40, 1, datetime('now'), datetime('now')),
+          ('utilities', 'expense', NULL, 'Utilities', 50, 1, datetime('now'), datetime('now')),
+          ('communications', 'expense', NULL, 'Communications', 60, 1, datetime('now'), datetime('now')),
+          ('healthcare', 'expense', NULL, 'Healthcare', 70, 1, datetime('now'), datetime('now')),
+          ('entertainment', 'expense', NULL, 'Entertainment', 80, 1, datetime('now'), datetime('now')),
+          ('shopping', 'expense', NULL, 'Shopping', 90, 1, datetime('now'), datetime('now')),
+          ('travel', 'expense', NULL, 'Travel', 100, 1, datetime('now'), datetime('now')),
+          ('other', 'expense', NULL, 'Other', 110, 1, datetime('now'), datetime('now')),
+          ('salary', 'income', NULL, 'Salary', 10, 1, datetime('now'), datetime('now')),
+          ('bonus', 'income', NULL, 'Bonus', 20, 1, datetime('now'), datetime('now')),
+          ('investment_income', 'income', NULL, 'Investment Income', 30, 1, datetime('now'), datetime('now')),
+          ('gift_income', 'income', NULL, 'Gift', 40, 1, datetime('now'), datetime('now')),
+          ('other_income', 'income', NULL, 'Other Income', 90, 1, datetime('now'), datetime('now'));
+
+        INSERT OR REPLACE INTO transactions (
+          id, ledger_id, type, amount_yen, category_id, occurred_on, note,
+          paid_by_member_id, ownership, owned_by_member_id, recorded_by_member_id,
+          recurring_rule_id, recurring_month, created_at, updated_at,
+          local_status, deleted_locally, base_updated_at, last_synced_updated_at
+        )
+        SELECT
+          id, ledger_id, 'expense', amount_yen, COALESCE(category_id, 'other'), spent_on, note,
+          paid_by, ownership, NULL, recorded_by,
+          recurring_rule_id, recurring_month, created_at, updated_at,
+          local_status, deleted_locally, base_updated_at, last_synced_updated_at
+        FROM expenses
+        WHERE deleted_locally = 0;
+
+        INSERT OR REPLACE INTO transaction_splits (transaction_id, responsible_member_id, amount_yen)
+        SELECT expense_id, user_id, amount_yen
+        FROM expense_splits;
+
+        INSERT OR REPLACE INTO recurring_transaction_rules (
+          id, ledger_id, type, name, amount_yen, category_id, generate_day,
+          start_month, end_month, timezone, is_active,
+          paid_by_member_id, ownership, owned_by_member_id, created_by_member_id,
+          created_at, updated_at, local_status, deleted_locally, base_updated_at, last_synced_updated_at
+        )
+        SELECT
+          id, ledger_id, 'expense', name, amount_yen, category_id, generate_day,
+          start_month, end_month, timezone, is_active,
+          paid_by, ownership, NULL, created_by,
+          created_at, updated_at, local_status, deleted_locally, base_updated_at, last_synced_updated_at
+        FROM recurring_expense_rules
+        WHERE deleted_locally = 0;
+
+        CREATE INDEX IF NOT EXISTS transactions_ledger_date_idx
+        ON transactions(ledger_id, occurred_on DESC, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS transactions_type_date_idx
+        ON transactions(ledger_id, type, occurred_on DESC);
+
+        CREATE INDEX IF NOT EXISTS transaction_splits_member_idx
+        ON transaction_splits(responsible_member_id);
+
+        CREATE INDEX IF NOT EXISTS recurring_transaction_rules_ledger_idx
+        ON recurring_transaction_rules(ledger_id, is_active, type, category_id);
+
+        CREATE INDEX IF NOT EXISTS budget_templates_ledger_member_idx
+        ON budget_templates(ledger_id, member_id, scope, category_id);
+
+        CREATE INDEX IF NOT EXISTS budget_monthly_snapshots_ledger_month_idx
+        ON budget_monthly_snapshots(ledger_id, month, member_id, scope, category_id);
+      `);
+    }
+
     await db.runAsync(
       'INSERT OR REPLACE INTO local_meta (key, value) VALUES (?, ?)',
       'schema_version',
@@ -461,6 +666,13 @@ export async function clearLocalBusinessData() {
         DELETE FROM sync_dedupe;
         DELETE FROM sync_queue;
         DELETE FROM transfer_checklist_snapshot;
+        DELETE FROM budget_monthly_snapshots;
+        DELETE FROM budget_templates;
+        DELETE FROM recurring_rule_splits;
+        DELETE FROM recurring_transaction_rules;
+        DELETE FROM transaction_splits;
+        DELETE FROM transactions;
+        DELETE FROM categories;
         DELETE FROM recurring_expense_rules;
         DELETE FROM ledger_categories;
         DELETE FROM expense_splits;

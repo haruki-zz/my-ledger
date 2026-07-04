@@ -59,7 +59,7 @@ import {
   type KeypadKey
 } from '@/src/lib/expenseFormHelpers';
 import { displayName, todayDateString } from '@/src/lib/format';
-import { saveExpense } from '@/src/lib/ledger';
+import { getErrorMessage, saveExpense } from '@/src/lib/ledger';
 import {
   activeRecurringSubcategoryKeys,
   recurringRuleSubcategoryKey
@@ -209,6 +209,9 @@ export function ExpenseForm({
   const memberIds = useMemo(() => sortedMembers.map((member) => member.user_id), [sortedMembers]);
   const firstMemberId = memberIds[0];
   const secondMemberId = memberIds[1];
+  const hasTwoMembers = sortedMembers.length === 2;
+  const isSingleMemberLedger = sortedMembers.length === 1;
+  const sharedExpenseLocked = Boolean(expense?.ownership === 'shared' && !hasTwoMembers);
   const memberColorById = useMemo(() => (
     buildUserColorMap(memberIds, currentUserId)
   ), [currentUserId, memberIds]);
@@ -620,6 +623,10 @@ export function ExpenseForm({
   }
 
   function buildSplits() {
+    if (isSingleMemberLedger) {
+      return [];
+    }
+
     if (!firstMemberId || !secondMemberId) {
       throw new Error('Shared expenses require two ledger members');
     }
@@ -637,6 +644,10 @@ export function ExpenseForm({
   }
 
   function validateForm() {
+    if (sharedExpenseLocked) {
+      return 'This shared record needs two ledger members and cannot be edited while the ledger has one member.';
+    }
+
     if (!amountYen) {
       return 'Enter an amount greater than 0';
     }
@@ -653,10 +664,12 @@ export function ExpenseForm({
       return 'Future dates are not allowed';
     }
 
-    try {
-      buildSplits();
-    } catch (splitError) {
-      return splitError instanceof Error ? splitError.message : 'Check split values';
+    if (!isSingleMemberLedger) {
+      try {
+        buildSplits();
+      } catch (splitError) {
+        return splitError instanceof Error ? splitError.message : 'Check split values';
+      }
     }
 
     return null;
@@ -688,6 +701,7 @@ export function ExpenseForm({
 
     setSubmitting(true);
     try {
+      const ownership = isSingleMemberLedger ? 'personal' : 'shared';
       await saveExpense({
         id: expense?.id,
         ledgerId: ledger.id,
@@ -696,15 +710,15 @@ export function ExpenseForm({
         category: categoryLabel(categoryId),
         subcategory: subcategory.trim() || null,
         paidBy: expense?.paid_by || currentUserId,
-        ownership: 'shared',
+        ownership,
         spentOn,
         note: expense ? expense.note : '',
-        splits: buildSplits()
+        splits: ownership === 'shared' ? buildSplits() : []
       });
 
       dismissForm();
     } catch (submitError) {
-      Alert.alert('Save Failed', submitError instanceof Error ? submitError.message : 'Check the form values');
+      Alert.alert('Save Failed', getErrorMessage(submitError));
     } finally {
       setSubmitting(false);
     }
@@ -785,12 +799,16 @@ export function ExpenseForm({
     );
   }
 
-  if (sortedMembers.length < 2) {
+  if (sortedMembers.length === 0 || sharedExpenseLocked) {
     return renderExpenseSheet(
       <View style={[localStyles.page, { paddingBottom: insets.bottom, paddingTop: insets.top }]}>
         {renderHeader()}
         <View style={localStyles.center}>
-          <Text selectable style={localStyles.errorText}>Shared expenses require two ledger members.</Text>
+          <Text selectable style={localStyles.errorText}>
+            {sharedExpenseLocked
+              ? 'This shared record needs two ledger members and cannot be edited while the ledger has one member.'
+              : 'Loading ledger members.'}
+          </Text>
         </View>
       </View>,
       isEditing ? 'Edit expense' : 'Add expense'
@@ -818,7 +836,7 @@ export function ExpenseForm({
         {renderDateCard()}
         {renderCategoryCard()}
         {renderDetailCard()}
-        {renderSplitCard()}
+        {isSingleMemberLedger ? renderPersonalCard() : renderSplitCard()}
       </ScrollView>
       {keypadVisible ? renderKeypad() : null}
       {renderFooter()}
@@ -1121,6 +1139,28 @@ export function ExpenseForm({
             <View style={[localStyles.memberCards, compactLayout && localStyles.memberCardsCompact]}>
               {renderMemberShareCard(firstMember, firstColor, firstAmount, firstPct)}
               {renderMemberShareCard(secondMember, secondColor, secondAmount, secondPct)}
+            </View>
+          </View>
+        ) : null}
+      </>
+    ));
+  }
+
+  function renderPersonalCard() {
+    const member = sortedMembers[0];
+    const memberName = displayName(member?.profile.display_name);
+
+    return renderAccordionCard(4, (
+      <>
+        {renderCollapsedRow(4, 'OWNER', <Text numberOfLines={1} style={localStyles.rowValue}>{memberName}</Text>)}
+        {step === 4 ? (
+          <View style={localStyles.cardBody}>
+            <View style={localStyles.personalSummary}>
+              <Ionicons color={ACCENT} name="person-circle-outline" size={22} />
+              <View style={localStyles.personalSummaryText}>
+                <Text style={localStyles.personalSummaryTitle}>{memberName}</Text>
+                <Text style={localStyles.personalSummaryMeta}>Personal record - {formatYenText(amountYen)}</Text>
+              </View>
             </View>
           </View>
         ) : null}
@@ -1756,6 +1796,35 @@ const localStyles = StyleSheet.create({
   },
   rowPressed: {
     backgroundColor: 'rgba(42,39,34,0.02)'
+  },
+  personalSummary: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(192,137,46,0.10)',
+    borderColor: 'rgba(192,137,46,0.20)',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 58,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  personalSummaryMeta: {
+    color: '#8A8073',
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  personalSummaryText: {
+    flex: 1,
+    minWidth: 0
+  },
+  personalSummaryTitle: {
+    color: INK,
+    fontFamily: fontFamilies.bold,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 18
   },
   rowRight: {
     alignItems: 'center',
