@@ -313,6 +313,10 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
                 />
               </View>
 
+              {renderedDetail.hasBudget ? (
+                <BudgetPanel detail={renderedDetail} />
+              ) : null}
+
               <View style={sheetStyles.section}>
                 <SectionHeader
                   title={renderedDetail.breakdownKind === 'category' ? 'By source category' : 'By subcategory'}
@@ -368,6 +372,37 @@ export function CategoryDetailSheet({ detail, members, onClose }: CategoryDetail
         </View>
       </View>
     </Modal>
+  );
+}
+
+function BudgetPanel({ detail }: { detail: CategoryDetailStat }) {
+  const remaining = detail.remainingBudgetYen ?? 0;
+  const over = remaining < 0;
+  const usedPercent = detail.budgetUsedPercent ?? 0;
+  return (
+    <View style={sheetStyles.budgetPanel}>
+      <View style={sheetStyles.budgetTopRow}>
+        <View>
+          <Text style={sheetStyles.budgetLabel}>Budget</Text>
+          <Text style={sheetStyles.budgetAmount}>{formatYen(detail.budgetYen ?? 0)}</Text>
+        </View>
+        <View style={sheetStyles.budgetRight}>
+          <Text style={[sheetStyles.budgetState, over && sheetStyles.budgetStateOver]}>
+            {over ? `${formatYen(Math.abs(remaining))} over` : `${formatYen(remaining)} left`}
+          </Text>
+          <Text style={sheetStyles.budgetUsed}>{usedPercent.toFixed(0)}% used</Text>
+        </View>
+      </View>
+      <View style={sheetStyles.budgetTrack}>
+        <View
+          style={[
+            sheetStyles.budgetFill,
+            over && sheetStyles.budgetFillOver,
+            { width: `${Math.min(100, Math.max(0, usedPercent))}%` }
+          ]}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -574,6 +609,72 @@ const sheetStyles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
     minWidth: 3
+  },
+  budgetAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 24
+  },
+  budgetFill: {
+    backgroundColor: colors.success,
+    borderRadius: theme.radii.pill,
+    height: '100%'
+  },
+  budgetFillOver: {
+    backgroundColor: colors.danger
+  },
+  budgetLabel: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    lineHeight: 14,
+    textTransform: 'uppercase'
+  },
+  budgetPanel: {
+    backgroundColor: 'rgba(61,138,94,0.08)',
+    borderColor: 'rgba(61,138,94,0.18)',
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 10,
+    padding: 14
+  },
+  budgetRight: {
+    alignItems: 'flex-end',
+    flexShrink: 1
+  },
+  budgetState: {
+    color: colors.success,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 19,
+    textAlign: 'right'
+  },
+  budgetStateOver: {
+    color: colors.danger
+  },
+  budgetTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between'
+  },
+  budgetTrack: {
+    backgroundColor: 'rgba(42,39,34,0.10)',
+    borderRadius: theme.radii.pill,
+    height: 7,
+    overflow: 'hidden'
+  },
+  budgetUsed: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'right'
   },
   breakdownAmount: {
     color: colors.ink,

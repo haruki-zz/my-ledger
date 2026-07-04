@@ -5,12 +5,16 @@ import {
   cacheProfile,
   cacheTransferItems,
   deleteLocalExpense,
+  deleteLocalBudgetTemplate,
   deleteLocalRecurringRule,
   drainSyncQueue,
+  ensureBudgetMonthlySnapshots,
   getCachedExpense,
   getCachedExpenseByRecurringRule,
   getCachedExpenses,
   getCachedExpensesByMonth,
+  getCachedBudgetMonthlySnapshots,
+  getCachedBudgetTemplates,
   getCachedFirstExpenseSpentOn,
   getCachedLedgerMembers,
   getCachedLedgerMemberships,
@@ -23,7 +27,10 @@ import {
   refreshLedgerMembers,
   refreshMemberships,
   refreshProfiles,
+  refreshBudgetMonthlySnapshots,
+  refreshBudgetTemplates,
   refreshRecurringRules,
+  saveLocalBudgetTemplate,
   saveLocalExpense,
   saveLocalRecurringRule
 } from '@/src/lib/localRepository';
@@ -39,6 +46,8 @@ import type {
   LedgerMemberProfile,
   Profile,
   RecurringExpenseRule,
+  BudgetMonthlySnapshot,
+  BudgetTemplate,
   TransferChecklistItemRow
 } from '@/src/types/database';
 
@@ -320,6 +329,108 @@ export async function deleteRecurringExpenseRule(ledgerId: string, ruleId: strin
   await ignoreLocalCacheError(() => refreshRecurringRules(ledgerId));
 }
 
+export async function getBudgetTemplates(
+  ledgerId: string,
+  memberId: string,
+  options: { refreshFirst?: boolean } = {}
+): Promise<BudgetTemplate[]> {
+  return withLocalFallback(async () => {
+    if (options.refreshFirst) {
+      await ignoreOfflineError(() => refreshBudgetTemplates(ledgerId));
+    }
+
+    const cachedTemplates = await getCachedBudgetTemplates(ledgerId, memberId);
+    if (cachedTemplates.length > 0) {
+      refreshBudgetTemplates(ledgerId).catch((refreshError) => {
+        console.warn('Background budget templates refresh failed:', refreshError instanceof Error ? refreshError.message : String(refreshError));
+      });
+      return cachedTemplates;
+    }
+
+    await ignoreOfflineError(() => refreshBudgetTemplates(ledgerId));
+    return getCachedBudgetTemplates(ledgerId, memberId);
+  }, () => fetchRemoteBudgetTemplates(ledgerId, memberId));
+}
+
+export async function getBudgetMonthlySnapshots(
+  ledgerId: string,
+  memberId: string,
+  month: string,
+  options: { ensureFirst?: boolean; refreshFirst?: boolean } = {}
+): Promise<BudgetMonthlySnapshot[]> {
+  return withLocalFallback(async () => {
+    if (options.ensureFirst) {
+      await ignoreOfflineError(() => ensureBudgetMonthlySnapshots(ledgerId, month));
+    } else if (options.refreshFirst) {
+      await ignoreOfflineError(() => refreshBudgetMonthlySnapshots(ledgerId, month));
+    }
+
+    const cachedSnapshots = await getCachedBudgetMonthlySnapshots(ledgerId, month, memberId);
+    if (cachedSnapshots.length > 0) {
+      return cachedSnapshots;
+    }
+
+    await ignoreOfflineError(() => refreshBudgetMonthlySnapshots(ledgerId, month));
+    return getCachedBudgetMonthlySnapshots(ledgerId, month, memberId);
+  }, async () => {
+    if (options.ensureFirst) {
+      await ensureRemoteBudgetMonthlySnapshots(ledgerId, month);
+    }
+    return fetchRemoteBudgetMonthlySnapshots(ledgerId, memberId, month);
+  });
+}
+
+export type SaveBudgetTemplateInput = {
+  id?: string | null;
+  ledgerId: string;
+  memberId: string;
+  categoryId: string;
+  amountYen: number;
+};
+
+export async function saveBudgetTemplate(input: SaveBudgetTemplateInput): Promise<BudgetTemplate> {
+  try {
+    const savedTemplate = await saveLocalBudgetTemplate(input);
+    if (!savedTemplate) {
+      throw new Error('Could not save budget locally');
+    }
+    return savedTemplate;
+  } catch (error) {
+    if (!isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+
+    return saveRemoteBudgetTemplate(input);
+  }
+}
+
+export async function deleteBudgetTemplate(ledgerId: string, templateId: string): Promise<void> {
+  try {
+    await deleteLocalBudgetTemplate(templateId);
+    return;
+  } catch (error) {
+    if (!isLocalDbUnavailableError(error)) {
+      throw error;
+    }
+  }
+
+  if (!isLocalRepositoryOnline()) {
+    throw new Error('Deleting budgets requires an internet connection');
+  }
+
+  const { error } = await supabase.rpc('delete_budget_template_offline', {
+    p_template_id: templateId,
+    p_ledger_id: ledgerId,
+    p_base_updated_at: null
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await ignoreLocalCacheError(() => refreshBudgetTemplates(ledgerId));
+}
+
 async function saveRemoteRecurringExpenseRule(input: SaveRecurringExpenseRuleInput): Promise<RecurringExpenseRule> {
   const { data, error } = await supabase.rpc('save_recurring_expense_rule_offline', {
     p_rule_id: input.id || createUuid(),
@@ -348,6 +459,25 @@ async function saveRemoteRecurringExpenseRule(input: SaveRecurringExpenseRuleInp
 
   await ignoreLocalCacheError(() => refreshRecurringRules(input.ledgerId));
   return data as RecurringExpenseRule;
+}
+
+async function saveRemoteBudgetTemplate(input: SaveBudgetTemplateInput): Promise<BudgetTemplate> {
+  const { data, error } = await supabase.rpc('save_budget_template_offline', {
+    p_template_id: input.id || createUuid(),
+    p_ledger_id: input.ledgerId,
+    p_member_id: input.memberId,
+    p_scope: 'category',
+    p_category_id: input.categoryId,
+    p_amount_yen: input.amountYen,
+    p_base_updated_at: null
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await ignoreLocalCacheError(() => refreshBudgetTemplates(input.ledgerId));
+  return data as BudgetTemplate;
 }
 
 export type GenerateRecurringExpenseResult = {
@@ -682,6 +812,60 @@ async function fetchRemoteRecurringRules(ledgerId: string): Promise<RecurringExp
   }
 
   return (data || []) as RecurringExpenseRule[];
+}
+
+async function fetchRemoteBudgetTemplates(ledgerId: string, memberId: string): Promise<BudgetTemplate[]> {
+  const { data, error } = await supabase
+    .from('budget_templates')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .eq('member_id', memberId)
+    .eq('scope', 'category')
+    .order('category_id', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []) as BudgetTemplate[];
+}
+
+async function ensureRemoteBudgetMonthlySnapshots(ledgerId: string, month: string): Promise<BudgetMonthlySnapshot[]> {
+  if (!isLocalRepositoryOnline()) {
+    return [];
+  }
+
+  const { data, error } = await supabase.rpc('ensure_budget_monthly_snapshots', {
+    p_ledger_id: ledgerId,
+    p_month: month
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []) as BudgetMonthlySnapshot[];
+}
+
+async function fetchRemoteBudgetMonthlySnapshots(
+  ledgerId: string,
+  memberId: string,
+  month: string
+): Promise<BudgetMonthlySnapshot[]> {
+  const { data, error } = await supabase
+    .from('budget_monthly_snapshots')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .eq('member_id', memberId)
+    .eq('month', month)
+    .eq('scope', 'category')
+    .order('category_id', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || []) as BudgetMonthlySnapshot[];
 }
 
 async function fetchRemoteProfiles(userIds: string[]): Promise<Record<string, Profile>> {

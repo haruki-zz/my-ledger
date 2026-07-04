@@ -748,6 +748,18 @@ type Database = {
         };
         Returns: Database['public']['Tables']['budget_monthly_snapshots']['Row'];
       };
+      sync_budget_template_snapshots: {
+        Args: { p_template_id: string };
+        Returns: Database['public']['Tables']['budget_monthly_snapshots']['Row'][];
+      };
+      delete_budget_template_offline: {
+        Args: {
+          p_template_id: string;
+          p_ledger_id: string;
+          p_base_updated_at?: string | null;
+        };
+        Returns: undefined;
+      };
       ensure_budget_monthly_snapshots: {
         Args: { p_ledger_id: string; p_month: string };
         Returns: Database['public']['Tables']['budget_monthly_snapshots']['Row'][];

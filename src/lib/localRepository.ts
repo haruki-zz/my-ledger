@@ -24,6 +24,9 @@ import type {
   LedgerMemberProfile,
   Profile,
   RecurringExpenseRule,
+  BudgetMonthlySnapshot,
+  BudgetScope,
+  BudgetTemplate,
   TransferChecklistItemRow
 } from '@/src/types/database';
 
@@ -43,6 +46,20 @@ type LocalCategoryRow = LedgerCategory & {
 
 type LocalRecurringRuleRow = RecurringExpenseRule & {
   is_active: boolean | number;
+  local_status: string;
+  deleted_locally: number;
+  base_updated_at: string | null;
+  last_synced_updated_at: string | null;
+};
+
+type LocalBudgetTemplateRow = BudgetTemplate & {
+  local_status: string;
+  deleted_locally: number;
+  base_updated_at: string | null;
+  last_synced_updated_at: string | null;
+};
+
+type LocalBudgetSnapshotRow = BudgetMonthlySnapshot & {
   local_status: string;
   deleted_locally: number;
   base_updated_at: string | null;
@@ -91,6 +108,15 @@ type SaveRecurringRulePayload = {
   endMonth: string | null;
   timezone: string;
   isActive: boolean;
+};
+
+type SaveBudgetTemplatePayload = {
+  id: string;
+  ledgerId: string;
+  memberId: string;
+  scope: BudgetScope;
+  categoryId: string | null;
+  amountYen: number;
 };
 
 type DrainRequester = () => void;
@@ -194,8 +220,12 @@ export async function discardLocalSyncQueueItem(sequence: number) {
         await db.runAsync('DELETE FROM expenses WHERE id = ?', row.entity_id);
       } else if (row.entity_type === 'category') {
         await db.runAsync('DELETE FROM ledger_categories WHERE id = ?', row.entity_id);
-      } else {
+      } else if (row.entity_type === 'recurring_rule') {
         await db.runAsync('DELETE FROM recurring_expense_rules WHERE id = ?', row.entity_id);
+      } else if (row.entity_type === 'budget_template') {
+        await db.runAsync('DELETE FROM budget_templates WHERE id = ?', row.entity_id);
+      } else if (row.entity_type === 'budget_snapshot') {
+        await db.runAsync('DELETE FROM budget_monthly_snapshots WHERE id = ?', row.entity_id);
       }
     }
   });
@@ -204,8 +234,10 @@ export async function discardLocalSyncQueueItem(sequence: number) {
     await refreshExpenses(row.ledger_id);
   } else if (row.entity_type === 'category') {
     await refreshLedgerCategories(row.ledger_id);
-  } else {
+  } else if (row.entity_type === 'recurring_rule') {
     await refreshRecurringRules(row.ledger_id);
+  } else if (row.entity_type === 'budget_template') {
+    await refreshBudgetTemplates(row.ledger_id);
   }
   emitLedgerDataChanged(row.ledger_id);
 }
@@ -721,12 +753,261 @@ export async function refreshRecurringRules(ledgerId: string, options: { emitCha
   }
 }
 
+export async function getCachedBudgetTemplates(ledgerId: string, memberId?: string | null): Promise<BudgetTemplate[]> {
+  const db = await getLocalDb();
+  const rows = memberId
+    ? await db.getAllAsync<LocalBudgetTemplateRow>(
+        `SELECT id, ledger_id, member_id, scope, category_id, amount_yen, created_at, updated_at
+         FROM budget_templates
+         WHERE ledger_id = ? AND member_id = ? AND deleted_locally = 0
+         ORDER BY scope ASC, category_id ASC`,
+        ledgerId,
+        memberId
+      )
+    : await db.getAllAsync<LocalBudgetTemplateRow>(
+        `SELECT id, ledger_id, member_id, scope, category_id, amount_yen, created_at, updated_at
+         FROM budget_templates
+         WHERE ledger_id = ? AND deleted_locally = 0
+         ORDER BY member_id ASC, scope ASC, category_id ASC`,
+        ledgerId
+      );
+  return rows;
+}
+
+export async function getCachedBudgetMonthlySnapshots(
+  ledgerId: string,
+  month: string,
+  memberId?: string | null
+): Promise<BudgetMonthlySnapshot[]> {
+  const db = await getLocalDb();
+  const rows = memberId
+    ? await db.getAllAsync<LocalBudgetSnapshotRow>(
+        `SELECT id, ledger_id, member_id, month, scope, category_id, amount_yen, source, created_at, updated_at
+         FROM budget_monthly_snapshots
+         WHERE ledger_id = ? AND month = ? AND member_id = ? AND deleted_locally = 0
+         ORDER BY scope ASC, category_id ASC`,
+        ledgerId,
+        month,
+        memberId
+      )
+    : await db.getAllAsync<LocalBudgetSnapshotRow>(
+        `SELECT id, ledger_id, member_id, month, scope, category_id, amount_yen, source, created_at, updated_at
+         FROM budget_monthly_snapshots
+         WHERE ledger_id = ? AND month = ? AND deleted_locally = 0
+         ORDER BY member_id ASC, scope ASC, category_id ASC`,
+        ledgerId,
+        month
+      );
+  return rows;
+}
+
+export async function refreshBudgetTemplates(ledgerId: string) {
+  if (!online) {
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('budget_templates')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .order('member_id', { ascending: true })
+    .order('scope', { ascending: true })
+    .order('category_id', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const templateIds = (data || []).map((template) => template.id);
+  const db = await getLocalDb();
+  await withLocalTransaction(async () => {
+    for (const template of data || []) {
+      await upsertRemoteBudgetTemplate(db, template as BudgetTemplate);
+    }
+    if (templateIds.length > 0) {
+      const placeholders = templateIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM budget_templates
+         WHERE ledger_id = ? AND local_status = 'synced' AND id NOT IN (${placeholders})`,
+        [ledgerId, ...templateIds]
+      );
+    } else {
+      await db.runAsync(
+        `DELETE FROM budget_templates
+         WHERE ledger_id = ? AND local_status = 'synced'`,
+        ledgerId
+      );
+    }
+  });
+  emitLedgerDataChanged(ledgerId);
+}
+
+export async function refreshBudgetMonthlySnapshots(ledgerId: string, month: string) {
+  if (!online) {
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('budget_monthly_snapshots')
+    .select('*')
+    .eq('ledger_id', ledgerId)
+    .eq('month', month)
+    .order('member_id', { ascending: true })
+    .order('scope', { ascending: true })
+    .order('category_id', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  await cacheBudgetSnapshots(ledgerId, month, (data || []) as BudgetMonthlySnapshot[]);
+  emitLedgerDataChanged(ledgerId);
+}
+
+export async function ensureBudgetMonthlySnapshots(ledgerId: string, month: string) {
+  if (!online) {
+    return;
+  }
+
+  const { data, error } = await supabase.rpc('ensure_budget_monthly_snapshots', {
+    p_ledger_id: ledgerId,
+    p_month: month
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await cacheBudgetSnapshots(ledgerId, month, (data || []) as BudgetMonthlySnapshot[]);
+  emitLedgerDataChanged(ledgerId);
+}
+
+async function cacheBudgetSnapshots(ledgerId: string, month: string, snapshots: BudgetMonthlySnapshot[]) {
+  const snapshotIds = snapshots.map((snapshot) => snapshot.id);
+  const db = await getLocalDb();
+  await withLocalTransaction(async () => {
+    for (const snapshot of snapshots) {
+      await upsertRemoteBudgetSnapshot(db, snapshot);
+    }
+    if (snapshotIds.length > 0) {
+      const placeholders = snapshotIds.map(() => '?').join(',');
+      await db.runAsync(
+        `DELETE FROM budget_monthly_snapshots
+         WHERE ledger_id = ? AND month = ? AND local_status = 'synced' AND id NOT IN (${placeholders})`,
+        [ledgerId, month, ...snapshotIds]
+      );
+    } else {
+      await db.runAsync(
+        `DELETE FROM budget_monthly_snapshots
+         WHERE ledger_id = ? AND month = ? AND local_status = 'synced'`,
+        ledgerId,
+        month
+      );
+    }
+  });
+}
+
+export async function saveLocalBudgetTemplate(input: {
+  id?: string | null;
+  ledgerId: string;
+  memberId: string;
+  categoryId: string;
+  amountYen: number;
+}) {
+  if (!currentUserId) {
+    throw new Error('Please sign in first');
+  }
+  if (input.memberId !== currentUserId) {
+    throw new Error('Budget member must be the current user');
+  }
+
+  const db = await getLocalDb();
+  const now = new Date().toISOString();
+  const templateId = input.id || createUuid();
+  const existing = input.id
+    ? await db.getFirstAsync<LocalBudgetTemplateRow>('SELECT * FROM budget_templates WHERE id = ?', input.id)
+    : null;
+  const action: SyncAction = existing && existing.deleted_locally === 0 ? 'edit' : 'create';
+  const baseUpdatedAt = syncedBaseUpdatedAt(existing);
+  const primaryCategory = getPrimaryCategory(input.categoryId);
+  const payload: SaveBudgetTemplatePayload = {
+    id: templateId,
+    ledgerId: input.ledgerId,
+    memberId: input.memberId,
+    scope: 'category',
+    categoryId: primaryCategory.id,
+    amountYen: input.amountYen
+  };
+
+  await withLocalTransaction(async () => {
+    await db.runAsync(
+      `INSERT OR REPLACE INTO budget_templates (
+         id, ledger_id, member_id, scope, category_id, amount_yen, created_at, updated_at,
+         local_status, deleted_locally, base_updated_at, last_synced_updated_at
+       ) VALUES (?, ?, ?, 'category', ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+      templateId,
+      input.ledgerId,
+      input.memberId,
+      primaryCategory.id,
+      input.amountYen,
+      existing?.created_at || now,
+      now,
+      baseUpdatedAt,
+      syncedBaseUpdatedAt(existing)
+    );
+    await enqueueMutation(db, 'budget_template', templateId, input.ledgerId, action, payload, baseUpdatedAt);
+  });
+
+  emitLedgerDataChanged(input.ledgerId);
+  requestSyncDrain();
+  return (await getCachedBudgetTemplates(input.ledgerId, input.memberId)).find((template) => template.id === templateId) || null;
+}
+
+export async function deleteLocalBudgetTemplate(templateId: string) {
+  const db = await getLocalDb();
+  const template = await db.getFirstAsync<LocalBudgetTemplateRow>(
+    'SELECT * FROM budget_templates WHERE id = ? AND deleted_locally = 0',
+    templateId
+  );
+  if (!template) {
+    throw new Error('Budget is not available locally');
+  }
+  if (!currentUserId || template.member_id !== currentUserId) {
+    throw new Error('Budget member must be the current user');
+  }
+
+  const now = new Date().toISOString();
+  await withLocalTransaction(async () => {
+    await db.runAsync(
+      `UPDATE budget_templates
+       SET local_status = 'pending', deleted_locally = 1, updated_at = ?, base_updated_at = ?
+       WHERE id = ?`,
+      now,
+      syncedBaseUpdatedAt(template),
+      templateId
+    );
+    await enqueueMutation(
+      db,
+      'budget_template',
+      templateId,
+      template.ledger_id,
+      'delete',
+      { id: templateId, ledgerId: template.ledger_id },
+      syncedBaseUpdatedAt(template)
+    );
+  });
+
+  emitLedgerDataChanged(template.ledger_id);
+  requestSyncDrain();
+}
+
 export async function refreshLedgerLocalData(ledgerId: string) {
   await Promise.allSettled([
     refreshExpenses(ledgerId),
     refreshLedgerCategories(ledgerId),
     refreshLedgerMembers(ledgerId),
-    refreshRecurringRules(ledgerId)
+    refreshRecurringRules(ledgerId),
+    refreshBudgetTemplates(ledgerId)
   ]);
 }
 
@@ -1023,6 +1304,45 @@ async function syncQueueRow(row: SyncQueueRecord<unknown>) {
     return;
   }
 
+  if (row.entity_type === 'budget_template') {
+    if (row.action === 'delete') {
+      const payload = row.payload as { id: string; ledgerId: string };
+      const { error } = await supabase.rpc('delete_budget_template_offline', {
+        p_template_id: payload.id,
+        p_ledger_id: payload.ledgerId || row.ledger_id,
+        p_base_updated_at: row.base_updated_at
+      });
+      if (error) {
+        throw error;
+      }
+      const db = await getLocalDb();
+      await db.runAsync('DELETE FROM budget_templates WHERE id = ?', payload.id);
+      await refreshBudgetTemplates(row.ledger_id);
+      return;
+    }
+
+    const payload = row.payload as SaveBudgetTemplatePayload;
+    const { data, error } = await supabase.rpc('save_budget_template_offline', {
+      p_template_id: payload.id,
+      p_ledger_id: payload.ledgerId,
+      p_member_id: payload.memberId,
+      p_scope: payload.scope,
+      p_category_id: payload.categoryId,
+      p_amount_yen: payload.amountYen,
+      p_base_updated_at: row.base_updated_at
+    });
+    if (error) {
+      throw error;
+    }
+    await cacheSyncedBudgetTemplate(data as BudgetTemplate);
+    await refreshBudgetTemplates(payload.ledgerId);
+    return;
+  }
+
+  if (row.entity_type !== 'category') {
+    throw new Error(`Unsupported sync entity type: ${row.entity_type}`);
+  }
+
   if (row.action === 'delete') {
     const payload = row.payload as { id: string; ledgerId: string; categoryName: string };
     const { error } = await supabase.rpc('delete_ledger_category_offline', {
@@ -1100,6 +1420,19 @@ async function cacheSyncedRecurringRule(rule: RecurringExpenseRule) {
       'recurring_rule',
       rule.id,
       rule.updated_at
+    );
+  });
+}
+
+async function cacheSyncedBudgetTemplate(template: BudgetTemplate) {
+  const db = await getLocalDb();
+  await withLocalTransaction(async () => {
+    await upsertRemoteBudgetTemplate(db, template, true);
+    await db.runAsync(
+      'INSERT OR REPLACE INTO sync_dedupe (entity_type, entity_id, updated_at) VALUES (?, ?, ?)',
+      'budget_template',
+      template.id,
+      template.updated_at
     );
   });
 }
@@ -1240,8 +1573,12 @@ async function enqueueMutation(
       await tx.runAsync('DELETE FROM expenses WHERE id = ?', entityId);
     } else if (entityType === 'category') {
       await tx.runAsync('DELETE FROM ledger_categories WHERE id = ?', entityId);
-    } else {
+    } else if (entityType === 'recurring_rule') {
       await tx.runAsync('DELETE FROM recurring_expense_rules WHERE id = ?', entityId);
+    } else if (entityType === 'budget_template') {
+      await tx.runAsync('DELETE FROM budget_templates WHERE id = ?', entityId);
+    } else if (entityType === 'budget_snapshot') {
+      await tx.runAsync('DELETE FROM budget_monthly_snapshots WHERE id = ?', entityId);
     }
     return;
   }
@@ -1450,6 +1787,54 @@ async function upsertRemoteRecurringRule(tx: LocalTransaction, rule: RecurringEx
   );
 }
 
+async function upsertRemoteBudgetTemplate(tx: LocalTransaction, template: BudgetTemplate, force = false) {
+  const local = await tx.getFirstAsync<LocalBudgetTemplateRow>('SELECT * FROM budget_templates WHERE id = ?', template.id);
+  if (!force && local && local.local_status !== 'synced') {
+    return;
+  }
+
+  await tx.runAsync(
+    `INSERT OR REPLACE INTO budget_templates (
+       id, ledger_id, member_id, scope, category_id, amount_yen, created_at, updated_at,
+       local_status, deleted_locally, base_updated_at, last_synced_updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
+    template.id,
+    template.ledger_id,
+    template.member_id,
+    template.scope,
+    template.category_id,
+    template.amount_yen,
+    template.created_at,
+    template.updated_at,
+    template.updated_at
+  );
+}
+
+async function upsertRemoteBudgetSnapshot(tx: LocalTransaction, snapshot: BudgetMonthlySnapshot, force = false) {
+  const local = await tx.getFirstAsync<LocalBudgetSnapshotRow>('SELECT * FROM budget_monthly_snapshots WHERE id = ?', snapshot.id);
+  if (!force && local && local.local_status !== 'synced') {
+    return;
+  }
+
+  await tx.runAsync(
+    `INSERT OR REPLACE INTO budget_monthly_snapshots (
+       id, ledger_id, member_id, month, scope, category_id, amount_yen, source, created_at, updated_at,
+       local_status, deleted_locally, base_updated_at, last_synced_updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, NULL, ?)`,
+    snapshot.id,
+    snapshot.ledger_id,
+    snapshot.member_id,
+    snapshot.month,
+    snapshot.scope,
+    snapshot.category_id,
+    snapshot.amount_yen,
+    snapshot.source,
+    snapshot.created_at,
+    snapshot.updated_at,
+    snapshot.updated_at
+  );
+}
+
 async function markLocalEntityStatus(entityType: SyncEntityType, entityId: string, status: string) {
   const db = await getLocalDb();
   if (entityType === 'expense') {
@@ -1460,7 +1845,17 @@ async function markLocalEntityStatus(entityType: SyncEntityType, entityId: strin
     await db.runAsync('UPDATE ledger_categories SET local_status = ? WHERE id = ?', status, entityId);
     return;
   }
-  await db.runAsync('UPDATE recurring_expense_rules SET local_status = ? WHERE id = ?', status, entityId);
+  if (entityType === 'recurring_rule') {
+    await db.runAsync('UPDATE recurring_expense_rules SET local_status = ? WHERE id = ?', status, entityId);
+    return;
+  }
+  if (entityType === 'budget_template') {
+    await db.runAsync('UPDATE budget_templates SET local_status = ? WHERE id = ?', status, entityId);
+    return;
+  }
+  if (entityType === 'budget_snapshot') {
+    await db.runAsync('UPDATE budget_monthly_snapshots SET local_status = ? WHERE id = ?', status, entityId);
+  }
 }
 
 function mapLocalRecurringRule(row: LocalRecurringRuleRow): RecurringExpenseRule {

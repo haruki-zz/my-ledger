@@ -5,6 +5,7 @@ import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import {
   generateRecurringExpenses,
+  getBudgetMonthlySnapshots,
   getExpensesByMonth,
   getFirstExpenseSpentOn,
   getLedgerMembers,
@@ -21,6 +22,7 @@ import {
   monthKeyFromDateString,
   monthStartDateString,
   resolveDashboardDateRange,
+  type DashboardCategoryBudget,
   type DashboardPeriod
 } from '@/src/lib/stats';
 import type { Expense, Ledger, LedgerMemberProfile, Profile, RecurringExpenseRule } from '@/src/types/database';
@@ -35,6 +37,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [recurringRules, setRecurringRules] = useState<RecurringExpenseRule[] | null>(null);
+  const [budgetSnapshots, setBudgetSnapshots] = useState<DashboardCategoryBudget[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [otherUserId, setOtherUserId] = useState<string | null>(null);
@@ -111,13 +114,18 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
           console.warn('Dashboard fixed expense generation failed:', generateError instanceof Error ? generateError.message : String(generateError));
         });
       }
-      const [nextMembers, firstExpenseSpentOn, nextExpenses, nextRecurringRules] = await Promise.all([
+      const budgetMonth = monthStartDateString(coverageDateRange.effectiveMonthKey);
+      const [nextMembers, firstExpenseSpentOn, nextExpenses, nextRecurringRules, nextBudgetSnapshots] = await Promise.all([
         getLedgerMembers(activeLedger.id),
         getFirstExpenseSpentOn(activeLedger.id),
         getExpensesByMonth(activeLedger.id, extendedStartDateString, coverageDateRange.endDateString, { refreshFirst: true }),
         getRecurringExpenseRules(activeLedger.id, { emitChange: false, refreshFirst: true }).catch((rulesError) => {
           console.warn('Dashboard fixed expense rules reload failed:', rulesError instanceof Error ? rulesError.message : String(rulesError));
           return null;
+        }),
+        getBudgetMonthlySnapshots(activeLedger.id, userId, budgetMonth, { ensureFirst: true }).catch((budgetError) => {
+          console.warn('Dashboard budget reload failed:', budgetError instanceof Error ? budgetError.message : String(budgetError));
+          return [];
         })
       ]);
 
@@ -145,6 +153,12 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
       if (nextRecurringRules !== null) {
         setRecurringRules(nextRecurringRules);
       }
+      setBudgetSnapshots(nextBudgetSnapshots
+        .filter((snapshot) => snapshot.scope === 'category')
+        .map((snapshot) => ({
+          amountYen: snapshot.amount_yen,
+          categoryId: snapshot.category_id
+        })));
       setProfiles(nextProfiles);
       setCurrentUserId(userId);
       setOtherUserId(nextOtherUserId);
@@ -186,6 +200,7 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
     setMembers([]);
     setExpenses([]);
     setRecurringRules(null);
+    setBudgetSnapshots([]);
     setProfiles({});
     setCurrentUserId(null);
     setOtherUserId(null);
@@ -236,12 +251,13 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
       expenses: settledExpenses,
       monthKey: statsMonthKey,
       period: statsPeriod,
+      budgets: statsPeriod === 'month' && !flipped ? budgetSnapshots : null,
       offset: hasCurrentCoverage ? periodOffset : 0,
       currentUserId,
       otherUserId,
       viewerUserId: currentUserId
     }),
-    [currentUserId, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
+    [budgetSnapshots, currentUserId, flipped, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
   );
   const combinedStats = useMemo(
     () => buildDashboardPeriodStats({

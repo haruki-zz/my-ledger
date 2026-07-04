@@ -490,6 +490,94 @@ describe('buildDashboardPeriodStats', () => {
     });
   });
 
+  it('adds category budget progress when monthly personal budgets are provided', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 700, category: 'Food & Dining', ownership: 'personal', paidBy: CURRENT_USER_ID, spentOn: '2026-06-01' })
+      ],
+      budgets: [{ amountYen: 1000, categoryId: 'food_dining' }],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: null,
+      today: '2026-06-03',
+      viewerUserId: CURRENT_USER_ID
+    });
+    const food = stats.categories.find((category) => category.detailKey === 'food_dining');
+    const detail = stats.getCategoryDetail('food_dining');
+
+    expect(food).toMatchObject({
+      budgetStatus: 'under',
+      budgetUsedPercent: 70,
+      budgetYen: 1000,
+      hasBudget: true,
+      remainingBudgetYen: 300
+    });
+    expect(detail).toMatchObject({
+      budgetYen: 1000,
+      hasBudget: true,
+      remainingBudgetYen: 300
+    });
+  });
+
+  it('keeps unset budgets distinct from zero-yen budgets', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 100, category: 'Food & Dining', ownership: 'personal', paidBy: CURRENT_USER_ID, spentOn: '2026-06-01' }),
+        expense({ amountYen: 50, category: 'Transport', ownership: 'personal', paidBy: CURRENT_USER_ID, spentOn: '2026-06-01' })
+      ],
+      budgets: [{ amountYen: 0, categoryId: 'food_dining' }],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: null,
+      today: '2026-06-03',
+      viewerUserId: CURRENT_USER_ID
+    });
+
+    expect(stats.categories.find((category) => category.detailKey === 'food_dining')).toMatchObject({
+      budgetStatus: 'over',
+      budgetYen: 0,
+      hasBudget: true,
+      remainingBudgetYen: -100
+    });
+    expect(stats.categories.find((category) => category.detailKey === 'transport')).toMatchObject({
+      hasBudget: false
+    });
+  });
+
+  it('sums source category budgets into the aggregated Other row', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+        expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+        expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+        expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+        expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+        expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-02' }),
+        expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' })
+      ],
+      budgets: [
+        { amountYen: 500, categoryId: 'travel' },
+        { amountYen: 250, categoryId: 'healthcare' }
+      ],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: OTHER_USER_ID,
+      today: '2026-06-03'
+    });
+    const other = stats.categories.find((category) => category.category === 'Other');
+
+    expect(other).toMatchObject({
+      amountYen: 300,
+      budgetYen: 750,
+      hasBudget: true,
+      remainingBudgetYen: 450,
+      sourceCategories: ['travel', 'healthcare']
+    });
+  });
+
   it('keeps a real Other category at the bottom when it is not aggregated', () => {
     const stats = buildStats('month', [
       expense({ amountYen: 1000, category: 'Other', spentOn: '2026-06-01' }),

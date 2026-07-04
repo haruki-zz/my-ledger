@@ -17,10 +17,22 @@ export type DashboardPeriod = 'today' | 'week' | 'month';
 export type CategoryStat = {
   category: string;
   amountYen: number;
+  budgetStatus?: BudgetStatus;
+  budgetUsedPercent?: number;
+  budgetYen?: number;
   percentage: number;
   color: string;
   detailKey: string;
+  hasBudget?: boolean;
+  remainingBudgetYen?: number;
   sourceCategories?: string[];
+};
+
+export type BudgetStatus = 'under' | 'near' | 'over';
+
+export type DashboardCategoryBudget = {
+  amountYen: number;
+  categoryId: string | null;
 };
 
 type DailyStat = {
@@ -99,13 +111,18 @@ export type CategoryDetailStat = {
   averagePerDayYen: number;
   breakdown: CategoryDetailBreakdownItem[];
   breakdownKind: CategoryDetailBreakdownKind;
+  budgetStatus?: BudgetStatus;
+  budgetUsedPercent?: number;
+  budgetYen?: number;
   category: string;
   color: string;
   comparison: AmountComparisonStat;
   daily: CategoryDetailDailyStat[];
   detailKey: string;
+  hasBudget?: boolean;
   icon: CategoryIconName;
   memberSplits: CategoryDetailMemberSplit[];
+  remainingBudgetYen?: number;
   shareOfTotal: number;
   sourceCategories: string[];
   topDay: {
@@ -410,6 +427,7 @@ export function buildDashboardPeriodStats(input: {
   period: DashboardPeriod;
   currentUserId: string | null;
   otherUserId: string | null;
+  budgets?: DashboardCategoryBudget[] | null;
   offset?: number;
   today?: Date | string;
   viewerUserId?: string | null;
@@ -446,6 +464,7 @@ export function buildDashboardPeriodStats(input: {
   const totalYen = viewerPeriodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
   const previousTotalYen = viewerComparisonExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
   const categories = buildDashboardCategoryStats({
+    budgets: input.budgets,
     expenses: viewerPeriodExpenses,
     totalYen
   });
@@ -784,6 +803,7 @@ export function buildMonthlyReceipts(input: {
 }
 
 function buildDashboardCategoryStats(input: {
+  budgets?: DashboardCategoryBudget[] | null;
   expenses: Expense[];
   totalYen: number;
 }): CategoryStat[] {
@@ -791,6 +811,13 @@ function buildDashboardCategoryStats(input: {
   for (const expense of input.expenses) {
     const categoryId = expenseCategoryId(expense);
     amountsByCategory.set(categoryId, (amountsByCategory.get(categoryId) || 0) + expense.amount_yen);
+  }
+
+  const budgetsByCategory = buildBudgetMap(input.budgets);
+  for (const categoryId of budgetsByCategory.keys()) {
+    if (!amountsByCategory.has(categoryId)) {
+      amountsByCategory.set(categoryId, 0);
+    }
   }
 
   const sortedCategories = [...amountsByCategory.entries()].sort(compareCategoryEntries);
@@ -820,9 +847,11 @@ function buildDashboardCategoryStats(input: {
     const sourceCategories = shouldAggregateOther && index === DASHBOARD_CATEGORY_LIMIT - 1
       ? aggregateSources.map(([sourceCategory]) => sourceCategory)
       : [categoryId];
+    const budgetSummary = budgetSummaryForCategories(budgetsByCategory, sourceCategories, amountYen);
     return {
       category: categoryLabel(categoryId),
       amountYen,
+      ...budgetSummary,
       percentage: input.totalYen > 0 ? (amountYen / input.totalYen) * 100 : 0,
       color: index === DASHBOARD_CATEGORY_LIMIT - 1 && shouldAggregateOther
         ? DASHBOARD_OTHER_CATEGORY_COLOR
@@ -831,6 +860,58 @@ function buildDashboardCategoryStats(input: {
       sourceCategories
     };
   });
+}
+
+function buildBudgetMap(budgets: DashboardCategoryBudget[] | null | undefined) {
+  const budgetByCategory = new Map<string, number>();
+  for (const budget of budgets || []) {
+    if (!budget.categoryId) {
+      continue;
+    }
+    const categoryId = getPrimaryCategory(budget.categoryId).id;
+    budgetByCategory.set(categoryId, budget.amountYen);
+  }
+  return budgetByCategory;
+}
+
+function budgetSummaryForCategories(
+  budgetsByCategory: Map<string, number>,
+  sourceCategories: string[],
+  amountYen: number
+): Pick<CategoryStat, 'budgetStatus' | 'budgetUsedPercent' | 'budgetYen' | 'hasBudget' | 'remainingBudgetYen'> {
+  let hasBudget = false;
+  let budgetYen = 0;
+  for (const categoryId of sourceCategories) {
+    if (!budgetsByCategory.has(categoryId)) {
+      continue;
+    }
+    hasBudget = true;
+    budgetYen += budgetsByCategory.get(categoryId) || 0;
+  }
+
+  if (!hasBudget) {
+    return { hasBudget: false };
+  }
+
+  const remainingBudgetYen = budgetYen - amountYen;
+  const budgetUsedPercent = budgetYen > 0
+    ? (amountYen / budgetYen) * 100
+    : amountYen > 0
+      ? 100
+      : 0;
+  const budgetStatus: BudgetStatus = amountYen > budgetYen
+    ? 'over'
+    : budgetYen > 0 && budgetUsedPercent >= 80
+      ? 'near'
+      : 'under';
+
+  return {
+    budgetStatus,
+    budgetUsedPercent,
+    budgetYen,
+    hasBudget: true,
+    remainingBudgetYen
+  };
 }
 
 type DashboardCategoryDetailInput = {
@@ -921,6 +1002,9 @@ function buildDashboardCategoryDetailForCategory(
       ? buildCategoryBreakdown(categoryExpenses, sourceCategories, category.amountYen)
       : buildSubcategoryBreakdown(categoryExpenses, sourceCategories[0], category.amountYen),
     breakdownKind: isAggregate ? 'category' : 'subcategory',
+    budgetStatus: category.budgetStatus,
+    budgetUsedPercent: category.budgetUsedPercent,
+    budgetYen: category.budgetYen,
     category: category.category,
     color: category.color,
     comparison: buildAmountComparison(category.amountYen, previousAmountYen),
@@ -934,8 +1018,10 @@ function buildDashboardCategoryDetailForCategory(
       };
     }),
     detailKey: category.detailKey,
+    hasBudget: category.hasBudget,
     icon: categoryIconName(sourceCategories.length === 1 ? sourceCategories[0] : 'other'),
     memberSplits,
+    remainingBudgetYen: category.remainingBudgetYen,
     shareOfTotal: input.totalYen > 0 ? (category.amountYen / input.totalYen) * 100 : 0,
     sourceCategories,
     topDay: {

@@ -31,6 +31,7 @@ import { displayName, formatYen } from '@/src/lib/format';
 import {
   deleteRecurringGeneratedExpense,
   generateRecurringExpenses,
+  getBudgetTemplates,
   getErrorMessage,
   getLedgerMembers,
   getRecurringExpenseRules,
@@ -38,7 +39,7 @@ import {
   updateMyProfile,
   type LedgerMembership
 } from '@/src/lib/ledger';
-import type { LedgerMemberProfile, RecurringExpenseRule } from '@/src/types/database';
+import type { BudgetTemplate, LedgerMemberProfile, RecurringExpenseRule } from '@/src/types/database';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -83,6 +84,7 @@ export default function SettingsScreen() {
   const ledgerId = ledger?.id;
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [rules, setRules] = useState<RecurringExpenseRule[]>([]);
+  const [budgetTemplates, setBudgetTemplates] = useState<BudgetTemplate[]>([]);
   const [fixedExpensesExpanded, setFixedExpensesExpanded] = useState(false);
   const [togglingRuleIds, setTogglingRuleIds] = useState<Set<string>>(() => new Set());
   const [, setDetailsLoading] = useState(false);
@@ -101,20 +103,24 @@ export default function SettingsScreen() {
     setDetailsError(null);
 
     try {
-      const [nextMembers, nextRules] = await Promise.all([
+      const userId = session?.user.id || null;
+      const [nextMembers, nextRules, nextBudgetTemplates] = await Promise.all([
         getLedgerMembers(ledgerId),
-        getRecurringExpenseRules(ledgerId)
+        getRecurringExpenseRules(ledgerId),
+        userId ? getBudgetTemplates(ledgerId, userId, { refreshFirst: true }) : Promise.resolve([])
       ]);
       setMembers(nextMembers);
       setRules((currentRules) => preserveExistingRuleOrder(currentRules, nextRules));
+      setBudgetTemplates(nextBudgetTemplates);
     } catch (loadError) {
       setMembers([]);
       setRules([]);
+      setBudgetTemplates([]);
       setDetailsError(getErrorMessage(loadError));
     } finally {
       setDetailsLoading(false);
     }
-  }, [ledgerId]);
+  }, [ledgerId, session?.user.id]);
 
   useEffect(() => {
     void loadDetails();
@@ -135,6 +141,7 @@ export default function SettingsScreen() {
   const memberCount = members.length;
   const activeRules = rules.filter((rule) => rule.is_active);
   const recurringTotal = activeRules.reduce((sum, rule) => sum + rule.amount_yen, 0);
+  const budgetTotal = budgetTemplates.reduce((sum, template) => sum + template.amount_yen, 0);
   const otherLedgers = ledgers.filter((membership) => membership.ledger.id !== activeLedger?.ledger.id).slice(0, 2);
 
   async function refresh() {
@@ -331,6 +338,16 @@ export default function SettingsScreen() {
         togglingRuleIds={togglingRuleIds}
         total={recurringTotal}
       />
+
+      <Card>
+        <DashboardRow
+          description={`${budgetTemplates.length} categories · ${formatYen(budgetTotal)} monthly`}
+          icon="wallet-outline"
+          onPress={() => router.push('/settings/budgets')}
+          title="Budgets"
+          tone="accent"
+        />
+      </Card>
 
       <Card>
         <DashboardRow

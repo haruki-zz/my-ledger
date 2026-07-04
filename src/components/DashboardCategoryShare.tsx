@@ -60,9 +60,23 @@ export function DashboardCategoryShare({
                 {category.category}
               </Text>
               <Text style={localStyles.fullPercent}>{category.percentage.toFixed(1)}%</Text>
-              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.fullAmount}>
-                {formatYen(category.amountYen)}
-              </Text>
+              <View style={localStyles.fullAmountGroup}>
+                <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.fullAmount}>
+                  {formatYen(category.amountYen)}
+                </Text>
+                {category.hasBudget ? (
+                  <Text
+                    adjustsFontSizeToFit
+                    numberOfLines={1}
+                    style={[
+                      localStyles.fullBudget,
+                      category.budgetStatus === 'over' && localStyles.fullBudgetOver
+                    ]}
+                  >
+                    {budgetProgressLabel(category)}
+                  </Text>
+                ) : null}
+              </View>
               <Ionicons color="#C7BDAE" name="chevron-forward" size={15} />
             </Pressable>
           )) : (
@@ -253,6 +267,14 @@ function buildCapsuleColors(categories: CategoryStat[]) {
   return colorsOut.slice(0, CAPSULE_COUNT);
 }
 
+function budgetProgressLabel(category: CategoryStat) {
+  const remaining = category.remainingBudgetYen ?? 0;
+  if (remaining < 0) {
+    return `${formatCompactYen(Math.abs(remaining))} over`;
+  }
+  return `${formatCompactYen(remaining)} left`;
+}
+
 function largestRemainder(weights: number[], slots: number) {
   const total = weights.reduce((sum, value) => sum + value, 0);
   if (total <= 0) {
@@ -330,6 +352,22 @@ const localStyles = StyleSheet.create({
     lineHeight: 18,
     minWidth: 72,
     textAlign: 'right'
+  },
+  fullAmountGroup: {
+    alignItems: 'flex-end',
+    minWidth: 82
+  },
+  fullBudget: {
+    color: colors.success,
+    fontFamily: fontFamilies.monoSemiBold,
+    fontSize: 9.5,
+    fontWeight: '600',
+    lineHeight: 12,
+    maxWidth: 92,
+    textAlign: 'right'
+  },
+  fullBudgetOver: {
+    color: colors.danger
   },
   fullDot: {
     borderRadius: 4,
