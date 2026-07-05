@@ -21,6 +21,7 @@ type DashboardCategoryShareProps = {
   colorAnimationDurationMs?: number;
   onCategoryPress: (category: CategoryStat) => void;
   selectedCategoryKey?: string | null;
+  showBudgets?: boolean;
   totalYen: number;
 };
 
@@ -33,6 +34,7 @@ export function DashboardCategoryShare({
   colorAnimationDurationMs = 900,
   onCategoryPress,
   selectedCategoryKey,
+  showBudgets = true,
   totalYen
 }: DashboardCategoryShareProps) {
   const [open, setOpen] = useState(false);
@@ -55,29 +57,34 @@ export function DashboardCategoryShare({
                 pressed && localStyles.rowPressed
               ]}
             >
-              <View style={[localStyles.fullDot, { backgroundColor: mutedChartColor(category.color) }]} />
-              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.fullName}>
-                {category.category}
-              </Text>
-              <Text style={localStyles.fullPercent}>{category.percentage.toFixed(1)}%</Text>
-              <View style={localStyles.fullAmountGroup}>
-                <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.fullAmount}>
-                  {formatYen(category.amountYen)}
+              <View style={localStyles.fullRowTop}>
+                <View style={[localStyles.fullDot, { backgroundColor: mutedChartColor(category.color) }]} />
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.fullName}>
+                  {category.category}
                 </Text>
-                {category.hasBudget ? (
-                  <Text
-                    adjustsFontSizeToFit
-                    numberOfLines={1}
-                    style={[
-                      localStyles.fullBudget,
-                      category.budgetStatus === 'over' && localStyles.fullBudgetOver
-                    ]}
-                  >
-                    {budgetProgressLabel(category)}
+                <Text style={localStyles.fullPercent}>{category.percentage.toFixed(1)}%</Text>
+                <View style={localStyles.fullAmountGroup}>
+                  <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.fullAmount}>
+                    {formatYen(category.amountYen)}
                   </Text>
-                ) : null}
+                  {showBudgets && category.hasBudget ? (
+                    <Text
+                      adjustsFontSizeToFit
+                      numberOfLines={1}
+                      style={[
+                        localStyles.fullBudget,
+                        category.budgetStatus === 'over' && localStyles.fullBudgetOver
+                      ]}
+                    >
+                      {budgetProgressLabel(category)}
+                    </Text>
+                  ) : null}
+                </View>
+                <Ionicons color="#C7BDAE" name="chevron-forward" size={15} />
               </View>
-              <Ionicons color="#C7BDAE" name="chevron-forward" size={15} />
+              {showBudgets && category.hasBudget ? (
+                <BudgetMiniBar category={category} />
+              ) : null}
             </Pressable>
           )) : (
             <Text style={localStyles.emptyText}>No category expenses to chart yet</Text>
@@ -275,6 +282,44 @@ function budgetProgressLabel(category: CategoryStat) {
   return `${formatCompactYen(remaining)} left`;
 }
 
+function BudgetMiniBar({ category }: { category: CategoryStat }) {
+  const ratio = Math.max(0, (category.budgetUsedPercent || 0) / 100);
+  const color = budgetColorForRatio(ratio);
+  return (
+    <View style={localStyles.budgetTrack}>
+      <View style={localStyles.budgetMainZone}>
+        <View style={[localStyles.budgetFill, { backgroundColor: color, width: `${Math.min(1, ratio) * 100}%` }]} />
+      </View>
+      <View style={localStyles.budgetMarker} />
+      <View style={localStyles.budgetOverflowZone}>
+        {ratio > 1 ? (
+          <View
+            style={[
+              localStyles.budgetFill,
+              {
+                backgroundColor: colors.danger,
+                width: `${Math.min(1, (ratio - 1) / 0.5) * 100}%`
+              }
+            ]}
+          />
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function budgetColorForRatio(ratio: number) {
+  if (ratio < 0.6) {
+    return '#5FB8B2';
+  }
+
+  if (ratio < 0.9) {
+    return colors.accent;
+  }
+
+  return colors.danger;
+}
+
 function largestRemainder(weights: number[], slots: number) {
   const total = weights.reduce((sum, value) => sum + value, 0);
   if (total <= 0) {
@@ -399,13 +444,16 @@ const localStyles = StyleSheet.create({
     textAlign: 'right'
   },
   fullRow: {
-    alignItems: 'center',
     borderRadius: 9,
-    flexDirection: 'row',
-    gap: 10,
-    minHeight: 36,
+    gap: 6,
+    minHeight: 44,
     paddingHorizontal: 6,
     paddingVertical: 6
+  },
+  fullRowTop: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10
   },
   morph: {
     position: 'relative'
@@ -452,5 +500,33 @@ const localStyles = StyleSheet.create({
     flexGrow: 1,
     gap: 7,
     minWidth: 0
+  },
+  budgetFill: {
+    borderRadius: 999,
+    height: '100%'
+  },
+  budgetMainZone: {
+    backgroundColor: 'rgba(42,39,34,0.07)',
+    borderBottomLeftRadius: 999,
+    borderTopLeftRadius: 999,
+    flex: 1,
+    overflow: 'hidden'
+  },
+  budgetMarker: {
+    backgroundColor: 'rgba(42,39,34,0.34)',
+    width: 2
+  },
+  budgetOverflowZone: {
+    backgroundColor: 'rgba(192,57,43,0.14)',
+    borderBottomRightRadius: 999,
+    borderTopRightRadius: 999,
+    overflow: 'hidden',
+    width: 36
+  },
+  budgetTrack: {
+    flexDirection: 'row',
+    height: 5,
+    marginLeft: 21,
+    overflow: 'hidden'
   }
 });

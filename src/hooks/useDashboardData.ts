@@ -251,13 +251,13 @@ export function useDashboardData(monthKey: string, period: DashboardPeriod, peri
       expenses: settledExpenses,
       monthKey: statsMonthKey,
       period: statsPeriod,
-      budgets: statsPeriod === 'month' && !flipped ? budgetSnapshots : null,
+      budgets: statsPeriod === 'month' ? budgetSnapshots : null,
       offset: hasCurrentCoverage ? periodOffset : 0,
       currentUserId,
       otherUserId,
       viewerUserId: currentUserId
     }),
-    [budgetSnapshots, currentUserId, flipped, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
+    [budgetSnapshots, currentUserId, hasCurrentCoverage, otherUserId, periodOffset, settledExpenses, statsMonthKey, statsPeriod]
   );
   const combinedStats = useMemo(
     () => buildDashboardPeriodStats({

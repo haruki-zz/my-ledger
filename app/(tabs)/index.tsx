@@ -19,12 +19,11 @@ import Animated, {
   withTiming,
   type SharedValue
 } from 'react-native-reanimated';
-import Svg, { Circle, Line, Polyline } from 'react-native-svg';
+import Svg, { Circle } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CategoryDetailSheet } from '@/src/components/CategoryDetailSheet';
 import { DashboardCategoryShare } from '@/src/components/DashboardCategoryShare';
-import { DashboardDailyActivity } from '@/src/components/DashboardDailyActivity';
 import { motionCardResizeTransition } from '@/src/components/motion';
 import { SlidingValueText } from '@/src/components/SlidingValueText';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
@@ -36,8 +35,6 @@ import { categoryColor, categoryLabel } from '@/src/lib/categorySystem';
 import { buildUserColorMap, colorForDarkSurface, DEFAULT_PARTNER_COLOR, DEFAULT_USER_COLOR } from '@/src/lib/entityColors';
 import { DEFAULT_LEDGER_TIME_ZONE, displayName, formatCompactYen, formatYen, todayDateString } from '@/src/lib/format';
 import { motionDuration, motionEasings, useReduceMotion } from '@/src/lib/motion';
-import { getSpendComparisonPresentation } from '@/src/lib/spendComparison';
-import { isIntentionalMonthSwipe } from '@/src/lib/swipe';
 import {
   addMonths,
   amountForUser,
@@ -47,45 +44,86 @@ import {
   monthEndDateString,
   monthKeyFromDateString,
   monthStartDateString,
-  resolveDashboardPeriodNavigation,
   type CategoryStat,
-  type DashboardPeriod,
-  type DashboardPeriodStats
+  type DashboardPeriodStats,
+  type HeatDay
 } from '@/src/lib/stats';
 import type { Expense } from '@/src/types/database';
 
-const HERO_FLIP_DURATION_MS = 900;
-const PERIOD_OPTIONS: { shortLabel: string; label: string; value: DashboardPeriod }[] = [
-  { shortLabel: 'D', label: 'Day', value: 'today' },
-  { shortLabel: 'W', label: 'Week', value: 'week' },
-  { shortLabel: 'M', label: 'Month', value: 'month' }
-];
+const HERO_FLIP_DURATION_MS = 520;
+const BUDGET_UNDER_COLOR = '#5FB8B2';
+const BUDGET_WARNING_COLOR = '#C0892E';
+const BUDGET_OVER_COLOR = '#C14B34';
+const HEAT_COLORS = [
+  'rgba(42,39,34,0.05)',
+  'rgba(192,137,46,0.20)',
+  'rgba(192,137,46,0.42)',
+  'rgba(176,122,30,0.70)',
+  '#8A5A12'
+] as const;
+
+type BudgetSummary = {
+  budgetYen: number;
+  color: string;
+  dailyAllowanceYen: number | null;
+  hasBudget: boolean;
+  line: string;
+  paceRatio: number;
+  remainingYen: number;
+  spentYen: number;
+  usedPercent: number;
+  usedRatio: number;
+};
+
+type RecentExpenseItem = {
+  amountYen: number;
+  categoryColor: string;
+  id: string;
+  label: string;
+  paidBy: string;
+  relativeTime: string;
+};
+
+type RecentExpenseItemWithSort = RecentExpenseItem & {
+  sortKey: string;
+};
+
+type CategoryMixSegment = {
+  amountYen: number;
+  color: string;
+  label: string;
+  percentage: number;
+};
+
+type SpendDay = {
+  amountYen: number;
+  categories: CategoryMixSegment[];
+  date: string;
+};
 
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const reduceMotion = useReduceMotion();
   const currentDashboardMonthKey = currentMonthKey();
-  const [period, setPeriod] = useState<DashboardPeriod>('month');
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
+  const [selectedActivityDate, setSelectedActivityDate] = useState<string | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [jumpSheetOpen, setJumpSheetOpen] = useState(false);
-  const [periodDragHandled, setPeriodDragHandled] = useState(false);
   const heroFlipProgress = useSharedValue(0);
   const {
     ledger,
     members,
     currentUserId,
     otherUserId,
-    minimumMonthKey,
     settledExpenses,
     combinedStats,
     personalStats,
     stats,
     error,
     reload
-  } = useDashboardData(currentDashboardMonthKey, period, periodOffset, flipped);
+  } = useDashboardData(currentDashboardMonthKey, 'month', periodOffset, flipped);
   const {
     items: transferItems,
     loading: transferLoading,
@@ -97,9 +135,6 @@ export default function DashboardScreen() {
 
   const currentUserName = displayName(members.find((member) => member.user_id === currentUserId)?.profile.display_name);
   const otherUserName = displayName(members.find((member) => member.user_id === otherUserId)?.profile.display_name);
-  const combinedMemberStats = combinedStats.memberTotals;
-  const currentMemberStat = combinedMemberStats.find((member) => member.userId === currentUserId);
-  const otherMemberStat = combinedMemberStats.find((member) => member.userId === otherUserId);
   const userIds = useMemo(() => (
     members.map((member) => member.user_id)
   ), [members]);
@@ -110,25 +145,38 @@ export default function DashboardScreen() {
   const otherUserColor = otherUserId ? userColorById.get(otherUserId) || DEFAULT_PARTNER_COLOR : DEFAULT_PARTNER_COLOR;
   const currentUserColorOnDark = colorForDarkSurface(currentUserColor);
   const otherUserColorOnDark = colorForDarkSurface(otherUserColor);
-  const heatmapMonthKey = stats.dateRange.effectiveMonthKey;
+  const activeMonthKey = stats.dateRange.effectiveMonthKey;
+  const activeMonthLabel = formatDashboardMonthTitle(activeMonthKey);
   const ledgerTodayString = todayDateString(DEFAULT_LEDGER_TIME_ZONE);
-  const periodNavigation = resolveDashboardPeriodNavigation({
-    minimumMonthKey,
-    monthKey: currentDashboardMonthKey,
-    offset: periodOffset,
-    period,
-    today: ledgerTodayString
-  });
+  const activityEndDateString = stats.dateRange.endDateString;
+  const budgetSummary = useMemo(() => (
+    buildBudgetSummary({
+      monthKey: activeMonthKey,
+      stats: personalStats,
+      todayString: ledgerTodayString
+    })
+  ), [activeMonthKey, ledgerTodayString, personalStats]);
+  const combinedMemberStats = combinedStats.memberTotals;
+  const currentMemberStat = combinedMemberStats.find((member) => member.userId === currentUserId);
+  const otherMemberStat = combinedMemberStats.find((member) => member.userId === otherUserId);
   const heatDays = useMemo(() => (
     buildDashboardHeatDays({
       expenses: settledExpenses,
-      monthKey: heatmapMonthKey,
+      monthKey: activeMonthKey,
       members,
       currentUserId,
       today: ledgerTodayString,
       viewerUserId: flipped ? null : currentUserId
     })
-  ), [currentUserId, flipped, heatmapMonthKey, ledgerTodayString, members, settledExpenses]);
+  ), [activeMonthKey, currentUserId, flipped, ledgerTodayString, members, settledExpenses]);
+  const trailingDays = useMemo(() => (
+    buildTrailingSpendDays({
+      days: 7,
+      endDateString: activityEndDateString,
+      expenses: settledExpenses,
+      viewerUserId: flipped ? null : currentUserId
+    })
+  ), [activityEndDateString, currentUserId, flipped, settledExpenses]);
   const selectedCategoryDetail = useMemo(() => (
     selectedCategoryKey
       ? stats.getCategoryDetail(selectedCategoryKey)
@@ -141,17 +189,9 @@ export default function DashboardScreen() {
       viewerUserId: flipped ? null : currentUserId
     })
   ), [currentUserId, flipped, ledgerTodayString, settledExpenses]);
-  const paceData = useMemo(() => (
-    buildPaceData({
-      expenses: settledExpenses,
-      monthKey: heatmapMonthKey,
-      todayString: ledgerTodayString,
-      viewerUserId: flipped ? null : currentUserId
-    })
-  ), [currentUserId, flipped, heatmapMonthKey, ledgerTodayString, settledExpenses]);
   const jumpMonths = useMemo(() => (
-    Array.from({ length: 6 }, (_, index) => {
-      const offset = index - 5;
+    Array.from({ length: 8 }, (_, index) => {
+      const offset = index - 7;
       const monthKey = addMonths(currentDashboardMonthKey, offset);
       return {
         label: formatJumpMonthLabel(monthKey),
@@ -188,16 +228,6 @@ export default function DashboardScreen() {
     () => setSelectedCategoryKey(null)
   ), []));
 
-  const movePeriod = useCallback((amount: number) => {
-    setSelectedCategoryKey(null);
-    setPeriodOffset((current) => current + amount);
-  }, []);
-
-  const resetPeriodOffset = useCallback(() => {
-    setSelectedCategoryKey(null);
-    setPeriodOffset(0);
-  }, []);
-
   const refreshDashboard = useCallback(async () => {
     setManualRefreshing(true);
     try {
@@ -206,16 +236,6 @@ export default function DashboardScreen() {
       setManualRefreshing(false);
     }
   }, [reload, reloadTransfers]);
-
-  function selectPeriod(nextPeriod: DashboardPeriod) {
-    if (nextPeriod === period) {
-      return;
-    }
-
-    setSelectedCategoryKey(null);
-    setPeriod(nextPeriod);
-    setPeriodOffset(0);
-  }
 
   function openJumpSheet() {
     setJumpSheetOpen(true);
@@ -226,13 +246,15 @@ export default function DashboardScreen() {
   }
 
   function jumpToday() {
-    resetPeriodOffset();
+    setSelectedCategoryKey(null);
+    setSelectedActivityDate(null);
+    setPeriodOffset(0);
     closeJumpSheet();
   }
 
   function jumpMonth(offset: number) {
     setSelectedCategoryKey(null);
-    setPeriod('month');
+    setSelectedActivityDate(null);
     setPeriodOffset(offset);
     closeJumpSheet();
   }
@@ -252,37 +274,6 @@ export default function DashboardScreen() {
     });
   }
 
-  const periodSwipeResponder = useMemo(() => PanResponder.create({
-    onMoveShouldSetPanResponderCapture: () => false,
-    onMoveShouldSetPanResponder: (_, gestureState) => {
-      return isIntentionalMonthSwipe(
-        gestureState.dx,
-        gestureState.dy,
-        gestureState.vx,
-        gestureState.vy
-      );
-    },
-    onPanResponderGrant: () => {
-      setPeriodDragHandled(false);
-    },
-    onPanResponderRelease: (_, gestureState) => {
-      if (!isIntentionalMonthSwipe(gestureState.dx, gestureState.dy, gestureState.vx, gestureState.vy)) {
-        return;
-      }
-
-      if (gestureState.dx > 0 && periodNavigation.canGoPrevious) {
-        setPeriodDragHandled(true);
-        movePeriod(-1);
-      }
-
-      if (gestureState.dx < 0 && periodNavigation.canGoNext) {
-        setPeriodDragHandled(true);
-        movePeriod(1);
-      }
-    },
-    onPanResponderTerminationRequest: () => true
-  }), [movePeriod, periodNavigation.canGoNext, periodNavigation.canGoPrevious]);
-
   return (
     <>
       <ScrollView
@@ -297,48 +288,31 @@ export default function DashboardScreen() {
         contentContainerStyle={[styles.content, localStyles.content, { paddingTop: Math.max(0, insets.top) }]}
       >
         <View style={localStyles.dashboardContent}>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? <Text selectable style={styles.error}>{error}</Text> : null}
+
+          <DashboardMonthTitle
+            active={periodOffset === 0}
+            label={activeMonthLabel}
+            onOpen={openJumpSheet}
+            onReset={jumpToday}
+          />
 
           <View style={localStyles.heroZone}>
             <Animated.View layout={heroResize}>
               <BentoCard variant="hero" style={localStyles.heroCard}>
-                <View style={localStyles.heroTop} {...periodSwipeResponder.panHandlers}>
-                  <View style={localStyles.heroSwitch}>
-                    <Pressable
-                      accessibilityHint="Opens the Jump to sheet. Swipe left or right on this row to change period."
-                      accessibilityLabel={`Jump to ${periodNavigation.label}`}
-                      accessibilityRole="button"
-                      onPress={() => {
-                        if (periodDragHandled) {
-                          setPeriodDragHandled(false);
-                          return;
-                        }
-                        openJumpSheet();
-                      }}
-                      style={({ pressed }) => [localStyles.heroTitleButton, pressed && localStyles.heroTitleButtonPressed]}
-                    >
-                      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.heroMonth}>
-                        {periodNavigation.label}
-                      </Text>
-                      <Ionicons color="rgba(255,253,247,0.50)" name="chevron-down" size={13} />
-                    </Pressable>
-                    {periodOffset !== 0 ? (
-                      <Pressable
-                        accessibilityLabel="Show current period"
-                        accessibilityRole="button"
-                        onPress={resetPeriodOffset}
-                        style={({ pressed }) => [localStyles.periodResetDot, pressed && localStyles.periodResetDotPressed]}
-                      />
+                <View style={localStyles.heroHeader}>
+                  <SectionLabel dark title={flipped ? 'Together' : 'Budget'} />
+                  <View style={localStyles.heroScopeDots}>
+                    <View style={[localStyles.heroScopeDot, { backgroundColor: flipped ? currentUserColorOnDark : 'rgba(255,253,247,0.82)' }]} />
+                    {flipped ? (
+                      <View style={[localStyles.heroScopeDot, localStyles.heroScopeDotOverlap, { backgroundColor: otherUserColorOnDark }]} />
                     ) : null}
                   </View>
-
-                  <PeriodSegment onChange={selectPeriod} period={period} />
                 </View>
 
                 <HeroFlipZone
                   backFace={(
-                    <HeroFaceContent
-                      comparison={comparisonBadgeForDirection(combinedStats.comparison.direction)}
+                    <HeroCombinedFace
                       currentUserColor={currentUserColorOnDark}
                       currentUserName={currentUserName}
                       currentUserTotalYen={currentMemberStat?.amountYen || 0}
@@ -346,22 +320,13 @@ export default function DashboardScreen() {
                       otherUserId={otherUserId}
                       otherUserName={otherUserName}
                       otherUserTotalYen={otherMemberStat?.amountYen || 0}
-                      scope="combined"
                       stats={combinedStats}
                     />
                   )}
                   canFlip={Boolean(otherUserId)}
                   frontFace={(
-                    <HeroFaceContent
-                      comparison={comparisonBadgeForDirection(personalStats.comparison.direction)}
-                      currentUserColor={currentUserColorOnDark}
-                      currentUserName={currentUserName}
-                      currentUserTotalYen={currentMemberStat?.amountYen || 0}
-                      otherUserColor={otherUserColorOnDark}
-                      otherUserId={otherUserId}
-                      otherUserName={otherUserName}
-                      otherUserTotalYen={otherMemberStat?.amountYen || 0}
-                      scope="personal"
+                    <HeroBudgetFace
+                      budget={budgetSummary}
                       stats={personalStats}
                     />
                   )}
@@ -387,16 +352,35 @@ export default function DashboardScreen() {
           </View>
 
           <View style={localStyles.insightGrid}>
-            <DashboardRecentCard items={scopedRecentExpenses} />
-            <DashboardPaceCard data={paceData} />
+            <DashboardNowCard
+              budget={budgetSummary}
+              flipped={flipped}
+              trailingDays={trailingDays}
+            />
+            <DashboardRecentCard
+              combined={flipped}
+              items={scopedRecentExpenses}
+              userColorById={userColorById}
+            />
           </View>
 
-          <DashboardDailyActivity
-            barAnimationDurationMs={HERO_FLIP_DURATION_MS}
-            days={heatDays}
-            monthKey={heatmapMonthKey}
-            onViewHistoryDate={viewHistoryDate}
-            todayString={ledgerTodayString}
+          <View style={localStyles.insightGrid}>
+            <DashboardHeatMapCard
+              days={heatDays}
+              monthKey={activeMonthKey}
+              todayString={ledgerTodayString}
+            />
+            <DashboardBudgetWatchCard
+              categories={personalStats.categories}
+              flipped={flipped}
+            />
+          </View>
+
+          <DashboardSevenDayActivity
+            days={trailingDays}
+            onOpenHistory={viewHistoryDate}
+            onSelectDate={setSelectedActivityDate}
+            selectedDate={selectedActivityDate}
           />
 
           <DashboardCategoryShare
@@ -404,6 +388,7 @@ export default function DashboardScreen() {
             colorAnimationDurationMs={HERO_FLIP_DURATION_MS}
             onCategoryPress={openCategoryDetail}
             selectedCategoryKey={selectedCategoryKey}
+            showBudgets={!flipped}
             totalYen={stats.totalYen}
           />
 
@@ -416,7 +401,7 @@ export default function DashboardScreen() {
         onClose={closeCategoryDetail}
       />
       <JumpToSheet
-        activeMonthOffset={period === 'month' ? periodOffset : null}
+        activeMonthOffset={periodOffset}
         months={jumpMonths}
         onClose={closeJumpSheet}
         onJumpMonth={jumpMonth}
@@ -427,221 +412,174 @@ export default function DashboardScreen() {
   );
 }
 
-function PeriodSegment({
-  onChange,
-  period
+function DashboardMonthTitle({
+  active,
+  label,
+  onOpen,
+  onReset
 }: {
-  onChange: (period: DashboardPeriod) => void;
-  period: DashboardPeriod;
-}) {
-  const reduceMotion = useReduceMotion();
-  const layout = motionCardResizeTransition(reduceMotion);
-
-  return (
-    <Animated.View layout={layout} style={localStyles.periodSegment}>
-      {PERIOD_OPTIONS.map((option) => {
-        const active = option.value === period;
-        return (
-          <Animated.View key={option.value} layout={layout}>
-            <Pressable
-            accessibilityLabel={`Show ${periodLabel(option.value)} dashboard`}
-            accessibilityRole="button"
-            accessibilityState={{ selected: active }}
-            onPress={() => onChange(option.value)}
-            style={({ pressed }) => [
-              localStyles.periodOption,
-              active && localStyles.periodOptionActive,
-              pressed && !active && localStyles.periodOptionPressed
-            ]}
-          >
-            <Text style={[localStyles.periodText, active && localStyles.periodTextActive]}>
-              {active ? option.label : option.shortLabel}
-            </Text>
-          </Pressable>
-          </Animated.View>
-        );
-      })}
-    </Animated.View>
-  );
-}
-
-type RecentExpenseItem = {
-  amountYen: number;
-  color: string;
-  id: string;
+  active: boolean;
   label: string;
-  relativeTime: string;
-};
-
-type RecentExpenseItemWithSort = RecentExpenseItem & {
-  sortKey: string;
-};
-
-type PaceData = {
-  currentPoints: string;
-  currentTotalYen: number;
-  dot: { x: number; y: number };
-  ghostPoints: string;
-  projectionPoints: string;
-  projectedYen: number;
-};
-
-function DashboardRecentCard({ items }: { items: RecentExpenseItem[] }) {
-  return (
-    <BentoCard style={localStyles.insightCard}>
-      <View style={localStyles.insightHeader}>
-        <View style={localStyles.insightTick} />
-        <Text style={localStyles.insightTitle}>RECENT</Text>
-      </View>
-      <View style={localStyles.recentList}>
-        {items.length > 0 ? items.map((item) => (
-          <View key={item.id} style={localStyles.recentRow}>
-            <View style={[localStyles.recentDot, { backgroundColor: item.color }]} />
-            <View style={localStyles.recentTextBlock}>
-              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.recentName}>
-                {item.label}
-              </Text>
-              <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.recentTime}>
-                {item.relativeTime}
-              </Text>
-            </View>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.recentAmount}>
-              {formatCompactYen(item.amountYen)}
-            </Text>
-          </View>
-        )) : (
-          <View style={localStyles.emptyInsight}>
-            <Text style={localStyles.emptyInsightTitle}>No recent records</Text>
-            <Text style={localStyles.emptyInsightText}>New expenses will appear here.</Text>
-          </View>
-        )}
-      </View>
-    </BentoCard>
-  );
-}
-
-function DashboardPaceCard({ data }: { data: PaceData }) {
-  return (
-    <BentoCard style={localStyles.insightCard}>
-      <View style={localStyles.insightHeader}>
-        <View style={localStyles.insightTick} />
-        <Text style={localStyles.insightTitle}>PACE</Text>
-      </View>
-      <View style={localStyles.paceChart}>
-        <Svg height={72} viewBox="0 0 132 72" width="100%">
-          <Line stroke="rgba(42,39,34,0.08)" strokeWidth={1} x1={4} x2={128} y1={62} y2={62} />
-          <Polyline
-            fill="none"
-            points={data.ghostPoints}
-            stroke="rgba(42,39,34,0.22)"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-          />
-          <Polyline
-            fill="none"
-            points={data.projectionPoints}
-            stroke="rgba(192,137,46,0.48)"
-            strokeDasharray="4 4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-          />
-          <Polyline
-            fill="none"
-            points={data.currentPoints}
-            stroke="#C0892E"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={3}
-          />
-          <Circle cx={data.dot.x} cy={data.dot.y} fill="#FFFDF7" r={4.5} stroke="#C0892E" strokeWidth={2} />
-        </Svg>
-      </View>
-      <Text numberOfLines={1} adjustsFontSizeToFit style={localStyles.paceLabel}>
-        on pace for {formatCompactYen(data.projectedYen)}
-      </Text>
-    </BentoCard>
-  );
-}
-
-function JumpToSheet({
-  activeMonthOffset,
-  months,
-  onClose,
-  onJumpMonth,
-  onToday,
-  visible
-}: {
-  activeMonthOffset: number | null;
-  months: { label: string; monthKey: string; offset: number }[];
-  onClose: () => void;
-  onJumpMonth: (offset: number) => void;
-  onToday: () => void;
-  visible: boolean;
+  onOpen: () => void;
+  onReset: () => void;
 }) {
-  const sheetPanResponder = useMemo(() => (
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 42) {
-          onClose();
-        }
-      },
-      onPanResponderTerminationRequest: () => true
-    })
-  ), [onClose]);
+  return (
+    <View style={localStyles.monthTitleRow}>
+      <Pressable
+        accessibilityHint="Opens the Jump to month sheet"
+        accessibilityLabel={`Jump from ${label}`}
+        accessibilityRole="button"
+        onPress={onOpen}
+        style={({ pressed }) => [localStyles.monthTitleButton, pressed && localStyles.monthTitleButtonPressed]}
+      >
+        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.monthTitle}>{label}</Text>
+        <Ionicons color="rgba(42,39,34,0.38)" name="chevron-down" size={13} />
+      </Pressable>
+      {!active ? (
+        <Pressable
+          accessibilityLabel="Return to current month"
+          accessibilityRole="button"
+          onPress={onReset}
+          style={({ pressed }) => [localStyles.monthResetDot, pressed && localStyles.monthResetDotPressed]}
+        />
+      ) : null}
+    </View>
+  );
+}
 
-  if (!visible) {
-    return null;
-  }
+function HeroBudgetFace({
+  budget,
+  stats
+}: {
+  budget: BudgetSummary;
+  stats: DashboardPeriodStats;
+}) {
+  return (
+    <View style={localStyles.heroBudgetFace}>
+      <BudgetRing budget={budget} />
+      <View style={localStyles.heroBudgetCopy}>
+        <Text style={localStyles.heroMetricLabel}>MONTH SPEND</Text>
+        <SlidingValueText
+          formatValue={formatYen}
+          textStyle={localStyles.heroAmount}
+          value={stats.totalYen}
+          wrapperStyle={localStyles.heroAmountSlot}
+        />
+        <Text
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[localStyles.heroBudgetLine, { color: budget.hasBudget ? budget.color : 'rgba(255,253,247,0.70)' }]}
+        >
+          {budget.line}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function BudgetRing({ budget }: { budget: BudgetSummary }) {
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  const used = budget.hasBudget ? Math.min(1, Math.max(0, budget.usedRatio)) : 0;
+  const arcLength = circumference * used;
+  const paceAngle = -90 + budget.paceRatio * 360;
+  const paceRadians = (paceAngle * Math.PI) / 180;
+  const paceX = 50 + radius * Math.cos(paceRadians);
+  const paceY = 50 + radius * Math.sin(paceRadians);
 
   return (
-    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
-      <Pressable style={localStyles.jumpScrim} onPress={onClose}>
-        <Pressable
-          accessibilityLabel="Jump to period"
-          accessibilityViewIsModal
-          onPress={(event) => event.stopPropagation()}
-          style={localStyles.jumpSheet}
-        >
-          <View style={localStyles.jumpHandleHitArea} {...sheetPanResponder.panHandlers}>
-            <View style={localStyles.jumpHandle} />
-          </View>
-          <Text style={localStyles.jumpTitle}>Jump to</Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={onToday}
-            style={({ pressed }) => [localStyles.jumpTodayButton, pressed && localStyles.jumpPressed]}
-          >
-            <Ionicons color="#3A322A" name="today-outline" size={18} />
-            <Text style={localStyles.jumpTodayText}>Today</Text>
-          </Pressable>
-          <View style={localStyles.jumpMonthGrid}>
-            {months.map((month) => {
-              const active = activeMonthOffset === month.offset;
-              return (
-                <Pressable
-                  accessibilityLabel={`Show ${month.label}`}
-                  accessibilityRole="button"
-                  key={month.monthKey}
-                  onPress={() => onJumpMonth(month.offset)}
-                  style={({ pressed }) => [
-                    localStyles.jumpMonthButton,
-                    active && localStyles.jumpMonthButtonActive,
-                    pressed && localStyles.jumpPressed
-                  ]}
-                >
-                  <Text style={[localStyles.jumpMonthText, active && localStyles.jumpMonthTextActive]}>
-                    {month.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <View style={localStyles.budgetRing}>
+      <Svg height={112} viewBox="0 0 100 100" width={112}>
+        <Circle
+          cx={50}
+          cy={50}
+          fill="none"
+          r={radius}
+          stroke="rgba(255,253,247,0.12)"
+          strokeWidth={9}
+        />
+        {budget.hasBudget ? (
+          <>
+            <Circle
+              cx={50}
+              cy={50}
+              fill="none"
+              r={radius}
+              rotation={-90}
+              origin="50, 50"
+              stroke={budget.color}
+              strokeDasharray={`${arcLength} ${circumference - arcLength}`}
+              strokeLinecap="round"
+              strokeWidth={9}
+            />
+            <Circle
+              cx={paceX}
+              cy={paceY}
+              fill="#FFFDF7"
+              r={3.4}
+              stroke="#3A322A"
+              strokeWidth={1.3}
+            />
+          </>
+        ) : null}
+      </Svg>
+      <View style={localStyles.budgetRingLabel}>
+        <Text style={localStyles.budgetRingPercent}>{budget.hasBudget ? `${Math.round(budget.usedPercent)}%` : '--'}</Text>
+        <Text style={localStyles.budgetRingCaption}>{budget.hasBudget ? 'of budget' : 'no budget'}</Text>
+      </View>
+    </View>
+  );
+}
+
+function HeroCombinedFace({
+  currentUserColor,
+  currentUserName,
+  currentUserTotalYen,
+  otherUserColor,
+  otherUserId,
+  otherUserName,
+  otherUserTotalYen,
+  stats
+}: {
+  currentUserColor: string;
+  currentUserName: string;
+  currentUserTotalYen: number;
+  otherUserColor: string;
+  otherUserId: string | null;
+  otherUserName: string;
+  otherUserTotalYen: number;
+  stats: DashboardPeriodStats;
+}) {
+  return (
+    <View style={localStyles.heroCombinedFace}>
+      <Text style={localStyles.heroMetricLabel}>TOGETHER SPEND</Text>
+      <SlidingValueText
+        formatValue={formatYen}
+        textStyle={localStyles.heroAmount}
+        value={stats.totalYen}
+        wrapperStyle={localStyles.heroAmountSlot}
+      />
+      <Text style={localStyles.heroCombinedCaption}>Budgets are personal, so the household face focuses on split.</Text>
+      <View style={localStyles.heroSecondary}>
+        <View style={localStyles.memberSplitRow}>
+          <MemberSplit
+            amountYen={currentUserTotalYen}
+            color={currentUserColor}
+            label={currentUserName}
+          />
+          {otherUserId ? (
+            <>
+              <View style={localStyles.memberDivider} />
+              <MemberSplit
+                amountYen={otherUserTotalYen}
+                color={otherUserColor}
+                label={otherUserName}
+              />
+            </>
+          ) : null}
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -666,7 +604,7 @@ function HeroFlipZone({
   const [backFaceHeight, setBackFaceHeight] = useState(0);
   const hasMeasuredFaces = frontFaceHeight > 0 && backFaceHeight > 0;
   const rotorShellStyle = useAnimatedStyle(() => {
-    const fallbackHeight = frontFaceHeight || backFaceHeight || 96;
+    const fallbackHeight = frontFaceHeight || backFaceHeight || 116;
     return {
       height: canFlip && hasMeasuredFaces
         ? interpolate(progress.value, [0, 1], [frontFaceHeight, backFaceHeight], Extrapolation.CLAMP)
@@ -704,8 +642,8 @@ function HeroFlipZone({
       </View>
 
       <Pressable
-        accessibilityHint="Flips between your spending only and combined spending with your partner"
-        accessibilityLabel={flipped ? 'Show only your spending' : `Show combined spending with ${otherUserName}`}
+        accessibilityHint="Flips between your budget view and combined spending with your partner"
+        accessibilityLabel={flipped ? 'Show your budget view' : `Show combined spending with ${otherUserName}`}
         accessibilityRole="button"
         onPress={onToggle}
         style={localStyles.heroFlipPressable}
@@ -723,133 +661,376 @@ function HeroFlipZone({
   );
 }
 
-type ComparisonBadgePresentation = {
-  badgeBackgroundColor: string;
-  color: string;
-  icon: keyof typeof Ionicons.glyphMap;
-};
-
-function HeroFaceContent({
-  comparison,
-  currentUserColor,
-  currentUserName,
-  currentUserTotalYen,
-  otherUserColor,
-  otherUserId,
-  otherUserName,
-  otherUserTotalYen,
-  scope,
-  stats
+function DashboardNowCard({
+  budget,
+  flipped,
+  trailingDays
 }: {
-  comparison: ComparisonBadgePresentation;
-  currentUserColor: string;
-  currentUserName: string;
-  currentUserTotalYen: number;
-  otherUserColor: string;
-  otherUserId: string | null;
-  otherUserName: string;
-  otherUserTotalYen: number;
-  scope: 'combined' | 'personal';
-  stats: DashboardPeriodStats;
+  budget: BudgetSummary;
+  flipped: boolean;
+  trailingDays: SpendDay[];
+}) {
+  const today = trailingDays[trailingDays.length - 1] || null;
+  const weekAmount = trailingDays.reduce((sum, day) => sum + day.amountYen, 0);
+  const weekMix = mergeCategoryMix(trailingDays.flatMap((day) => day.categories));
+  const todayRatio = !flipped && budget.dailyAllowanceYen && budget.dailyAllowanceYen > 0
+    ? today?.amountYen ? today.amountYen / budget.dailyAllowanceYen : 0
+    : null;
+  const ratioTone = todayRatio === null
+    ? colors.subtle
+    : todayRatio > 1.3
+      ? BUDGET_OVER_COLOR
+      : todayRatio > 0.9
+        ? BUDGET_WARNING_COLOR
+        : BUDGET_UNDER_COLOR;
+
+  return (
+    <BentoCard style={localStyles.insightCard}>
+      <CardHeader right="MIX" title="NOW" />
+      <View style={localStyles.nowMetric}>
+        <View style={localStyles.nowMetricLine}>
+          <Text style={localStyles.nowMetricLabel}>Today</Text>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.nowMetricAmount}>
+            {formatYen(today?.amountYen || 0)}
+          </Text>
+        </View>
+        <ActualMixBar segments={today?.categories || []} />
+      </View>
+      <View style={localStyles.nowMetric}>
+        <View style={localStyles.nowMetricLine}>
+          <Text style={localStyles.nowMetricLabel}>Week</Text>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.nowMetricAmount}>
+            {formatYen(weekAmount)}
+          </Text>
+        </View>
+        <ActualMixBar segments={weekMix} />
+      </View>
+      <Text numberOfLines={2} style={[localStyles.nowCaption, { color: ratioTone }]}>
+        {todayRatio === null ? 'bars show actual category share' : `today is ${todayRatio.toFixed(1)}x daily allowance`}
+      </Text>
+    </BentoCard>
+  );
+}
+
+function DashboardRecentCard({
+  combined,
+  items,
+  userColorById
+}: {
+  combined: boolean;
+  items: RecentExpenseItem[];
+  userColorById: Map<string, string>;
 }) {
   return (
-    <View style={localStyles.heroFaceContent}>
-      <View style={localStyles.heroScopeRow}>
-        <HeroScopePill
-          currentUserColor={currentUserColor}
-          currentUserName={currentUserName}
-          otherUserColor={otherUserColor}
-          scope={scope}
-        />
-        <Text style={localStyles.heroRecordCount}>
-          {formatRecordCount(stats.count)}
-        </Text>
-      </View>
-
-      <View style={localStyles.heroAmountRow}>
-        <View style={localStyles.heroAmountBlock}>
-          <SlidingValueText
-            formatValue={formatYen}
-            textStyle={localStyles.heroAmount}
-            value={stats.totalYen}
-            wrapperStyle={localStyles.heroAmountSlot}
-          />
-        </View>
-        <View style={localStyles.comparisonStack}>
-          <View style={localStyles.comparisonTopLine}>
-            <Ionicons
-              color={comparison.color}
-              name={comparison.icon}
-              size={13}
-            />
-            <SlidingValueText
-              formatValue={formatComparisonAmount}
-              textStyle={[localStyles.comparisonAmountText, { color: comparison.color }]}
-              value={Math.abs(stats.comparison.deltaYen)}
-              wrapperStyle={localStyles.comparisonAmountSlot}
-            />
-            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.comparisonText}>
-              {stats.comparison.label}
-            </Text>
+    <BentoCard style={localStyles.insightCard}>
+      <CardHeader right="LAST 3" title="RECENT" />
+      <View style={localStyles.recentList}>
+        {items.length > 0 ? items.map((item) => {
+          const dotColor = combined
+            ? userColorById.get(item.paidBy) || DEFAULT_PARTNER_COLOR
+            : item.categoryColor;
+          return (
+            <View key={item.id} style={localStyles.recentRow}>
+              <View style={[localStyles.recentDot, { backgroundColor: dotColor }]} />
+              <View style={localStyles.recentTextBlock}>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.recentName}>
+                  {item.label}
+                </Text>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.recentTime}>
+                  {item.relativeTime}
+                </Text>
+              </View>
+              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.recentAmount}>
+                {formatCompactYen(item.amountYen)}
+              </Text>
+            </View>
+          );
+        }) : (
+          <View style={localStyles.emptyInsight}>
+            <Text style={localStyles.emptyInsightTitle}>No recent records</Text>
+            <Text style={localStyles.emptyInsightText}>New expenses will appear here.</Text>
           </View>
-          <View style={[localStyles.percentBadge, { backgroundColor: comparison.badgeBackgroundColor }]}>
-            <Text style={[localStyles.percentBadgeText, { color: comparison.color }]}>
-              {formatComparisonPercentage(stats.comparison.percentage)}
-            </Text>
-          </View>
-        </View>
+        )}
       </View>
+    </BentoCard>
+  );
+}
 
-      {scope === 'combined' ? (
-        <View style={localStyles.heroSecondary}>
-          <View style={localStyles.memberSplitRow}>
-            <MemberSplit
-              amountYen={currentUserTotalYen}
-              color={currentUserColor}
-              label={currentUserName}
-            />
-            {otherUserId ? (
-              <>
-                <View style={localStyles.memberDivider} />
-                <MemberSplit
-                  amountYen={otherUserTotalYen}
-                  color={otherUserColor}
-                  label={otherUserName}
+function DashboardHeatMapCard({
+  days,
+  monthKey,
+  todayString
+}: {
+  days: HeatDay[];
+  monthKey: string;
+  todayString: string;
+}) {
+  const rows = useMemo(() => buildHeatMapRows(days, monthKey, todayString), [days, monthKey, todayString]);
+
+  return (
+    <BentoCard style={localStyles.insightCard}>
+      <CardHeader right="MTD" title="HEAT MAP" />
+      <View style={localStyles.heatWeekdayRow}>
+        {['Sun', '', 'Tue', '', 'Thu', '', 'Sat'].map((label, index) => (
+          <Text key={`${label}-${index}`} style={localStyles.heatWeekday}>{label}</Text>
+        ))}
+      </View>
+      <View style={localStyles.heatGrid}>
+        {rows.map((row, rowIndex) => (
+          <View key={`heat-row-${rowIndex}`} style={localStyles.heatGridRow}>
+            {row.map((cell, columnIndex) => (
+              <View
+                key={`heat-cell-${rowIndex}-${columnIndex}`}
+                style={[
+                  localStyles.heatCell,
+                  {
+                    backgroundColor: cell.color,
+                    borderColor: cell.today ? colors.primary : 'transparent',
+                    opacity: cell.empty ? 0 : 1
+                  }
+                ]}
+              />
+            ))}
+          </View>
+        ))}
+      </View>
+      <View style={localStyles.heatLegend}>
+        <Text style={localStyles.heatLegendText}>less</Text>
+        {HEAT_COLORS.slice(1).map((color) => (
+          <View key={color} style={[localStyles.heatLegendDot, { backgroundColor: color }]} />
+        ))}
+        <Text style={[localStyles.heatLegendText, localStyles.heatLegendMore]}>more</Text>
+      </View>
+    </BentoCard>
+  );
+}
+
+function DashboardBudgetWatchCard({
+  categories,
+  flipped
+}: {
+  categories: CategoryStat[];
+  flipped: boolean;
+}) {
+  const budgetRows = useMemo(() => (
+    categories
+      .filter((category) => category.hasBudget && (category.budgetYen || 0) > 0)
+      .map((category) => {
+        const ratio = (category.budgetUsedPercent || 0) / 100;
+        return {
+          category,
+          color: budgetColorForRatio(ratio),
+          ratio
+        };
+      })
+      .sort((a, b) => b.ratio - a.ratio)
+      .slice(0, 3)
+  ), [categories]);
+  const overCount = categories.filter((category) => category.budgetStatus === 'over').length;
+
+  return (
+    <BentoCard style={localStyles.insightCard}>
+      <CardHeader right={flipped ? '' : overCount > 0 ? `${overCount} OVER` : 'OK'} title="BUDGET WATCH" />
+      {flipped ? (
+        <View style={localStyles.quietState}>
+          <Ionicons color={colors.subtle} name="lock-closed-outline" size={17} />
+          <Text style={localStyles.quietStateText}>Budgets are personal</Text>
+        </View>
+      ) : budgetRows.length > 0 ? (
+        <View style={localStyles.budgetWatchList}>
+          {budgetRows.map(({ category, color, ratio }) => (
+            <View key={category.detailKey} style={localStyles.budgetWatchRow}>
+              <View style={localStyles.budgetWatchLine}>
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.budgetWatchName}>
+                  {category.category}
+                </Text>
+                <Text style={[localStyles.budgetWatchPercent, { color }]}>
+                  {Math.round(ratio * 100)}%
+                </Text>
+              </View>
+              <BudgetOverflowBar color={color} ratio={ratio} />
+            </View>
+          ))}
+        </View>
+      ) : (
+        <View style={localStyles.quietState}>
+          <Ionicons color={colors.subtle} name="wallet-outline" size={17} />
+          <Text style={localStyles.quietStateText}>No category budgets</Text>
+        </View>
+      )}
+    </BentoCard>
+  );
+}
+
+function DashboardSevenDayActivity({
+  days,
+  onOpenHistory,
+  onSelectDate,
+  selectedDate
+}: {
+  days: SpendDay[];
+  onOpenHistory: (date: string) => void;
+  onSelectDate: (date: string | null) => void;
+  selectedDate: string | null;
+}) {
+  const average = days.length > 0
+    ? days.reduce((sum, day) => sum + day.amountYen, 0) / days.length
+    : 0;
+  const maxAmount = Math.max(1, ...days.map((day) => day.amountYen));
+  const peakDay = days.reduce<SpendDay | null>((peak, day) => (
+    !peak || day.amountYen > peak.amountYen ? day : peak
+  ), null);
+  const selectedDay = days.find((day) => day.date === selectedDate) || null;
+
+  return (
+    <BentoCard style={localStyles.activityCard}>
+      <CardHeader right={peakDay ? `PEAK ${formatMonthDay(peakDay.date).toUpperCase()}` : ''} title="DAILY ACTIVITY" />
+      <View style={localStyles.activityBars}>
+        {days.map((day) => {
+          const selected = selectedDate === day.date;
+          const barHeight = Math.max(4, Math.round((day.amountYen / maxAmount) * 76));
+          const ratio = average > 0 ? day.amountYen / average : 0;
+          const barColor = activityColorForRatio(ratio);
+          return (
+            <Pressable
+              accessibilityLabel={`${formatFullDay(day.date)} ${formatYen(day.amountYen)}`}
+              accessibilityRole="button"
+              key={day.date}
+              onPress={() => onSelectDate(selected ? null : day.date)}
+              style={({ pressed }) => [
+                localStyles.activityColumn,
+                selected && localStyles.activityColumnSelected,
+                pressed && localStyles.activityColumnPressed
+              ]}
+            >
+              <View style={localStyles.activityBarSlot}>
+                <View
+                  style={[
+                    localStyles.activityBar,
+                    {
+                      backgroundColor: barColor,
+                      height: barHeight
+                    }
+                  ]}
                 />
-              </>
-            ) : null}
+              </View>
+              <Text style={[localStyles.activityDate, selected && localStyles.activityDateSelected]}>
+                {formatMonthDay(day.date)}
+              </Text>
+              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.activityAmount}>
+                {formatCompactYen(day.amountYen).replace('¥', '')}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {selectedDay ? (
+        <View style={localStyles.dayBreakdown}>
+          <View style={localStyles.dayBreakdownHeader}>
+            <View>
+              <Text style={localStyles.dayBreakdownDate}>{formatFullDay(selectedDay.date)}</Text>
+              <Text style={localStyles.dayBreakdownTotal}>{formatYen(selectedDay.amountYen)} total</Text>
+            </View>
+            <Pressable
+              accessibilityLabel={`Open history for ${formatFullDay(selectedDay.date)}`}
+              accessibilityRole="button"
+              onPress={() => onOpenHistory(selectedDay.date)}
+              style={({ pressed }) => [localStyles.historyButton, pressed && localStyles.historyButtonPressed]}
+            >
+              <Ionicons color={colors.primary} name="arrow-forward" size={15} />
+            </Pressable>
+          </View>
+          <View style={localStyles.dayBreakdownRows}>
+            {selectedDay.categories.slice(0, 2).map((category) => (
+              <View key={category.label} style={localStyles.dayBreakdownRow}>
+                <View style={[localStyles.dayBreakdownDot, { backgroundColor: category.color }]} />
+                <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.dayBreakdownName}>
+                  {category.label}
+                </Text>
+                <Text style={localStyles.dayBreakdownAmount}>{formatYen(category.amountYen)}</Text>
+              </View>
+            ))}
           </View>
         </View>
+      ) : null}
+    </BentoCard>
+  );
+}
+
+function CardHeader({
+  right,
+  title
+}: {
+  right?: string;
+  title: string;
+}) {
+  return (
+    <View style={localStyles.cardHeader}>
+      <SectionLabel title={title} />
+      {right ? (
+        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.cardHeaderRight}>
+          {right}
+        </Text>
       ) : null}
     </View>
   );
 }
 
-function HeroScopePill({
-  currentUserColor,
-  currentUserName,
-  otherUserColor,
-  scope
-}: {
-  currentUserColor: string;
-  currentUserName: string;
-  otherUserColor: string;
-  scope: 'combined' | 'personal';
-}) {
+function SectionLabel({ dark = false, title }: { dark?: boolean; title: string }) {
   return (
-    <View style={localStyles.heroScopePill}>
-      {scope === 'personal' ? (
-        <View style={[localStyles.heroScopeDot, { backgroundColor: currentUserColor }]} />
-      ) : (
-        <View style={localStyles.heroTogetherDots}>
-          <View style={[localStyles.heroScopeDot, { backgroundColor: currentUserColor }]} />
-          <View style={[localStyles.heroScopeDot, localStyles.heroScopeDotOverlap, { backgroundColor: otherUserColor }]} />
-        </View>
+    <View style={localStyles.sectionLabel}>
+      <View style={localStyles.insightTick} />
+      <Text style={[localStyles.insightTitle, dark && localStyles.insightTitleDark]}>{title}</Text>
+    </View>
+  );
+}
+
+function ActualMixBar({ segments }: { segments: CategoryMixSegment[] }) {
+  const total = segments.reduce((sum, segment) => sum + segment.amountYen, 0);
+  const visibleSegments = total > 0 ? segments.filter((segment) => segment.amountYen > 0).slice(0, 5) : [];
+
+  return (
+    <View style={localStyles.actualMixTrack}>
+      {visibleSegments.length > 0 ? visibleSegments.map((segment, index) => (
+        <View
+          key={`${segment.label}-${index}`}
+          style={[
+            localStyles.actualMixSegment,
+            {
+              backgroundColor: segment.color,
+              flexGrow: Math.max(1, segment.amountYen)
+            }
+          ]}
+        />
+      )) : (
+        <View style={localStyles.actualMixEmpty} />
       )}
-      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.heroScopeText}>
-        {scope === 'personal' ? displayName(currentUserName) : 'Together'}
-      </Text>
-      <Ionicons color="rgba(255,253,247,0.48)" name="swap-horizontal" size={12} />
+    </View>
+  );
+}
+
+function BudgetOverflowBar({
+  color,
+  ratio
+}: {
+  color: string;
+  ratio: number;
+}) {
+  const boundedRatio = Math.max(0, ratio);
+  const budgetWidth = `${Math.min(1, boundedRatio) * 100}%` as `${number}%`;
+  const overflowWidth = `${Math.min(1, Math.max(0, boundedRatio - 1) / 0.5) * 100}%` as `${number}%`;
+
+  return (
+    <View style={localStyles.budgetOverflowTrack}>
+      <View style={localStyles.budgetOverflowBudgetZone}>
+        <View style={[localStyles.budgetOverflowFill, { backgroundColor: color, width: budgetWidth }]} />
+      </View>
+      <View style={localStyles.budgetOverflowMarker} />
+      <View style={localStyles.budgetOverflowZone}>
+        {boundedRatio > 1 ? (
+          <View style={[localStyles.budgetOverflowFill, { backgroundColor: BUDGET_OVER_COLOR, width: overflowWidth }]} />
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -881,72 +1062,138 @@ function MemberSplit({
   );
 }
 
-function periodLabel(period: DashboardPeriod) {
-  if (period === 'today') {
-    return 'today';
+function JumpToSheet({
+  activeMonthOffset,
+  months,
+  onClose,
+  onJumpMonth,
+  onToday,
+  visible
+}: {
+  activeMonthOffset: number;
+  months: { label: string; monthKey: string; offset: number }[];
+  onClose: () => void;
+  onJumpMonth: (offset: number) => void;
+  onToday: () => void;
+  visible: boolean;
+}) {
+  const sheetPanResponder = useMemo(() => (
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 8 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 42) {
+          onClose();
+        }
+      },
+      onPanResponderTerminationRequest: () => true
+    })
+  ), [onClose]);
+
+  if (!visible) {
+    return null;
   }
 
-  if (period === 'week') {
-    return 'week';
-  }
-
-  return 'month';
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
+      <Pressable style={localStyles.jumpScrim} onPress={onClose}>
+        <Pressable
+          accessibilityLabel="Jump to month"
+          accessibilityViewIsModal
+          onPress={(event) => event.stopPropagation()}
+          style={localStyles.jumpSheet}
+        >
+          <View style={localStyles.jumpHandleHitArea} {...sheetPanResponder.panHandlers}>
+            <View style={localStyles.jumpHandle} />
+          </View>
+          <View style={localStyles.jumpHeader}>
+            <Text style={localStyles.jumpTitle}>Jump to month</Text>
+            <Pressable
+              accessibilityLabel="Close jump to month"
+              accessibilityRole="button"
+              onPress={onClose}
+              style={({ pressed }) => [localStyles.jumpCloseButton, pressed && localStyles.jumpPressed]}
+            >
+              <Ionicons color={colors.muted} name="close" size={18} />
+            </Pressable>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={onToday}
+            style={({ pressed }) => [localStyles.jumpTodayButton, pressed && localStyles.jumpPressed]}
+          >
+            <Ionicons color="#3A322A" name="today-outline" size={18} />
+            <Text style={localStyles.jumpTodayText}>Current month</Text>
+          </Pressable>
+          <View style={localStyles.jumpMonthGrid}>
+            {months.map((month) => {
+              const active = activeMonthOffset === month.offset;
+              return (
+                <Pressable
+                  accessibilityLabel={`Show ${month.label}`}
+                  accessibilityRole="button"
+                  key={month.monthKey}
+                  onPress={() => onJumpMonth(month.offset)}
+                  style={({ pressed }) => [
+                    localStyles.jumpMonthButton,
+                    active && localStyles.jumpMonthButtonActive,
+                    pressed && localStyles.jumpPressed
+                  ]}
+                >
+                  <Text style={[localStyles.jumpMonthText, active && localStyles.jumpMonthTextActive]}>
+                    {month.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 }
 
-function comparisonBadgeForDirection(direction: DashboardPeriodStats['comparison']['direction']): ComparisonBadgePresentation {
-  if (direction === 'over') {
-    return {
-      badgeBackgroundColor: 'rgba(232,149,123,0.16)',
-      color: '#E8957B',
-      icon: 'caret-up'
-    };
-  }
-
-  if (direction === 'under') {
-    return {
-      badgeBackgroundColor: 'rgba(95,184,178,0.16)',
-      color: '#7FC4BE',
-      icon: 'caret-down'
-    };
-  }
-
-  const presentation = getSpendComparisonPresentation(direction, {
-    neutralIcon: 'remove',
-    tone: 'onDark'
-  });
+function buildBudgetSummary(input: {
+  monthKey: string;
+  stats: DashboardPeriodStats;
+  todayString: string;
+}): BudgetSummary {
+  const budgetedCategories = input.stats.categories.filter((category) => category.hasBudget && (category.budgetYen || 0) > 0);
+  const budgetYen = budgetedCategories.reduce((sum, category) => sum + (category.budgetYen || 0), 0);
+  const spentYen = budgetedCategories.reduce((sum, category) => sum + category.amountYen, 0);
+  const usedRatio = budgetYen > 0 ? spentYen / budgetYen : 0;
+  const remainingYen = budgetYen - spentYen;
+  const monthDays = Number(monthEndDateString(input.monthKey).slice(8, 10));
+  const selectedMonthIsCurrent = input.monthKey === monthKeyFromDateString(input.todayString);
+  const elapsedDays = selectedMonthIsCurrent
+    ? Math.min(Number(input.todayString.slice(8, 10)), monthDays)
+    : monthDays;
+  const remainingDays = selectedMonthIsCurrent
+    ? Math.max(0, monthDays - elapsedDays)
+    : 0;
+  const dailyAllowanceYen = remainingYen > 0 && remainingDays > 0
+    ? Math.round(remainingYen / remainingDays)
+    : null;
+  const color = budgetColorForRatio(usedRatio);
+  const line = budgetYen <= 0
+    ? 'Set category budgets to unlock pace'
+    : remainingYen < 0
+      ? `over budget by ${formatYen(Math.abs(remainingYen))}`
+      : dailyAllowanceYen !== null
+        ? `${formatYen(dailyAllowanceYen)}/day left`
+        : `${formatYen(remainingYen)} unspent`;
 
   return {
-    badgeBackgroundColor: 'rgba(255,253,247,0.12)',
-    color: presentation.color,
-    icon: presentation.icon
+    budgetYen,
+    color,
+    dailyAllowanceYen,
+    hasBudget: budgetYen > 0,
+    line,
+    paceRatio: monthDays > 0 ? elapsedDays / monthDays : 0,
+    remainingYen,
+    spentYen,
+    usedPercent: usedRatio * 100,
+    usedRatio
   };
-}
-
-function formatRecordCount(count: number) {
-  return `${count} ${count === 1 ? 'record' : 'records'}`;
-}
-
-function formatComparisonAmount(amountYen: number) {
-  if (amountYen <= 100) {
-    return formatYen(amountYen);
-  }
-
-  const value = amountYen / 1000;
-  const rounded = value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
-  return `¥${rounded}k`;
-}
-
-function formatComparisonPercentage(percentage: number | null) {
-  if (percentage === null) {
-    return '--';
-  }
-
-  if (percentage === 0) {
-    return '0.0%';
-  }
-
-  const sign = percentage > 0 ? '+' : '-';
-  return `${sign}${Math.abs(percentage).toFixed(1)}%`;
 }
 
 function buildRecentExpenses(input: {
@@ -963,12 +1210,13 @@ function buildRecentExpenses(input: {
 
     const categoryId = expenseCategoryId(expense);
     items.push({
-        amountYen,
-        color: categoryColor(categoryId),
-        id: expense.id,
-        label: expense.subcategory || categoryLabel(categoryId),
-        relativeTime: formatRelativeExpenseDate(expense.spent_on, input.todayString),
-        sortKey: `${expense.spent_on}T${expense.created_at || expense.updated_at || ''}`
+      amountYen,
+      categoryColor: categoryColor(categoryId),
+      id: expense.id,
+      label: expense.subcategory || categoryLabel(categoryId),
+      paidBy: expense.paid_by,
+      relativeTime: formatRelativeExpenseDate(expense.spent_on, input.todayString),
+      sortKey: `${expense.spent_on}T${expense.created_at || expense.updated_at || ''}`
     });
   }
 
@@ -978,82 +1226,180 @@ function buildRecentExpenses(input: {
     .map(({ sortKey, ...item }) => item);
 }
 
-function buildPaceData(input: {
+function buildTrailingSpendDays(input: {
+  days: number;
+  endDateString: string;
   expenses: Expense[];
-  monthKey: string;
-  todayString: string;
   viewerUserId: string | null;
-}): PaceData {
-  const previousMonthKey = addMonths(input.monthKey, -1);
-  const monthDays = Number(monthEndDateString(input.monthKey).slice(8, 10));
-  const selectedMonthIsCurrent = input.monthKey === monthKeyFromDateString(input.todayString);
-  const elapsedDays = selectedMonthIsCurrent
-    ? Math.min(Number(input.todayString.slice(8, 10)), monthDays)
-    : monthDays;
-  const currentDaily = dailyAmountsForMonth(input.expenses, input.monthKey, input.viewerUserId);
-  const previousDaily = dailyAmountsForMonth(input.expenses, previousMonthKey, input.viewerUserId);
-  const currentCumulative = cumulativeAmounts(currentDaily, elapsedDays);
-  const previousCumulative = cumulativeAmounts(previousDaily, Number(monthEndDateString(previousMonthKey).slice(8, 10)));
-  const currentTotalYen = currentCumulative[currentCumulative.length - 1] || 0;
-  const projectedYen = elapsedDays > 0 ? Math.round((currentTotalYen / elapsedDays) * monthDays) : 0;
-  const maxYen = Math.max(projectedYen, currentTotalYen, ...previousCumulative, 1);
-  const pointFor = (day: number, value: number) => {
-    const x = 4 + ((Math.max(1, day) - 1) / Math.max(1, monthDays - 1)) * 124;
-    const y = 62 - (value / maxYen) * 52;
-    return { x: roundPoint(x), y: roundPoint(y) };
-  };
-  const currentPoints = currentCumulative
-    .map((value, index) => pointFor(index + 1, value))
-    .map(pointToString)
-    .join(' ');
-  const ghostPoints = previousCumulative
-    .slice(0, monthDays)
-    .map((value, index) => pointFor(index + 1, value))
-    .map(pointToString)
-    .join(' ');
-  const startProjection = pointFor(Math.max(1, elapsedDays), currentTotalYen);
-  const endProjection = pointFor(monthDays, projectedYen);
+}): SpendDay[] {
+  const dateStrings = Array.from({ length: input.days }, (_, index) => (
+    addDaysToDateString(input.endDateString, index - input.days + 1)
+  ));
+  const dateSet = new Set(dateStrings);
+  const amountByDate = new Map<string, number>();
+  const categoryAmountsByDate = new Map<string, Map<string, { amountYen: number; color: string; label: string }>>();
 
-  return {
-    currentPoints: currentPoints || pointToString(pointFor(1, 0)),
-    currentTotalYen,
-    dot: startProjection,
-    ghostPoints: ghostPoints || pointToString(pointFor(1, 0)),
-    projectionPoints: `${pointToString(startProjection)} ${pointToString(endProjection)}`,
-    projectedYen
-  };
-}
+  for (const date of dateStrings) {
+    amountByDate.set(date, 0);
+    categoryAmountsByDate.set(date, new Map());
+  }
 
-function dailyAmountsForMonth(expenses: Expense[], monthKey: string, viewerUserId: string | null) {
-  const days = Number(monthEndDateString(monthKey).slice(8, 10));
-  const amounts = Array.from({ length: days }, () => 0);
-  for (const expense of expenses) {
-    if (monthKeyFromDateString(expense.spent_on) !== monthKey) {
+  for (const expense of input.expenses) {
+    if (!dateSet.has(expense.spent_on)) {
       continue;
     }
 
-    const day = Number(expense.spent_on.slice(8, 10));
-    amounts[day - 1] += viewerUserId ? amountForUser(expense, viewerUserId) : expense.amount_yen;
+    const amountYen = input.viewerUserId ? amountForUser(expense, input.viewerUserId) : expense.amount_yen;
+    if (amountYen <= 0) {
+      continue;
+    }
+
+    const categoryId = expenseCategoryId(expense);
+    const categoryMap = categoryAmountsByDate.get(expense.spent_on);
+    if (!categoryMap) {
+      continue;
+    }
+    const current = categoryMap.get(categoryId) || {
+      amountYen: 0,
+      color: categoryColor(categoryId),
+      label: categoryLabel(categoryId)
+    };
+    current.amountYen += amountYen;
+    categoryMap.set(categoryId, current);
+    amountByDate.set(expense.spent_on, (amountByDate.get(expense.spent_on) || 0) + amountYen);
   }
-  return amounts;
+
+  return dateStrings.map((date) => {
+    const categories = [...(categoryAmountsByDate.get(date)?.values() || [])]
+      .sort((a, b) => b.amountYen - a.amountYen)
+      .map((category) => ({
+        ...category,
+        percentage: amountByDate.get(date) ? (category.amountYen / (amountByDate.get(date) || 1)) * 100 : 0
+      }));
+    return {
+      amountYen: amountByDate.get(date) || 0,
+      categories,
+      date
+    };
+  });
 }
 
-function cumulativeAmounts(amounts: number[], count: number) {
-  const result: number[] = [];
-  let runningTotal = 0;
-  for (let index = 0; index < Math.min(count, amounts.length); index += 1) {
-    runningTotal += amounts[index] || 0;
-    result.push(runningTotal);
+function buildHeatMapRows(days: HeatDay[], monthKey: string, todayString: string) {
+  const daysInMonth = Number(monthEndDateString(monthKey).slice(8, 10));
+  const leadingEmptyCount = sundayFirstColumn(monthKey);
+  const dayByDate = new Map(days.map((day) => [day.date, day]));
+  const visibleAmounts = days.filter((day) => !isFutureDay(day.date, monthKey, todayString)).map((day) => day.amount);
+  const maxAmount = Math.max(0, ...visibleAmounts);
+  const cells: { color: string; empty: boolean; today: boolean }[] = [
+    ...Array.from({ length: leadingEmptyCount }, () => ({
+      color: 'transparent',
+      empty: true,
+      today: false
+    }))
+  ];
+
+  for (let dayNumber = 1; dayNumber <= daysInMonth; dayNumber += 1) {
+    const date = `${monthKey}-${String(dayNumber).padStart(2, '0')}`;
+    const future = isFutureDay(date, monthKey, todayString);
+    const amount = dayByDate.get(date)?.amount || 0;
+    const ratio = maxAmount > 0 ? amount / maxAmount : 0;
+    const level = amount <= 0
+      ? 0
+      : ratio < 0.22
+        ? 1
+        : ratio < 0.45
+          ? 2
+          : ratio < 0.72
+            ? 3
+            : 4;
+    cells.push({
+      color: future ? 'rgba(42,39,34,0.045)' : HEAT_COLORS[level],
+      empty: false,
+      today: date === todayString
+    });
   }
-  return result;
+
+  while (cells.length % 7 !== 0) {
+    cells.push({
+      color: 'transparent',
+      empty: true,
+      today: false
+    });
+  }
+
+  const rows: { color: string; empty: boolean; today: boolean }[][] = [];
+  for (let index = 0; index < cells.length; index += 7) {
+    rows.push(cells.slice(index, index + 7));
+  }
+  return rows;
 }
 
-function pointToString(point: { x: number; y: number }) {
-  return `${point.x},${point.y}`;
+function mergeCategoryMix(categories: CategoryMixSegment[]) {
+  const byLabel = new Map<string, CategoryMixSegment>();
+  for (const category of categories) {
+    const current = byLabel.get(category.label) || {
+      amountYen: 0,
+      color: category.color,
+      label: category.label,
+      percentage: 0
+    };
+    current.amountYen += category.amountYen;
+    byLabel.set(category.label, current);
+  }
+  const total = [...byLabel.values()].reduce((sum, category) => sum + category.amountYen, 0);
+  return [...byLabel.values()]
+    .sort((a, b) => b.amountYen - a.amountYen)
+    .map((category) => ({
+      ...category,
+      percentage: total > 0 ? (category.amountYen / total) * 100 : 0
+    }));
 }
 
-function roundPoint(value: number) {
-  return Math.round(value * 10) / 10;
+function budgetColorForRatio(ratio: number) {
+  if (ratio < 0.6) {
+    return BUDGET_UNDER_COLOR;
+  }
+
+  if (ratio < 0.9) {
+    return BUDGET_WARNING_COLOR;
+  }
+
+  return BUDGET_OVER_COLOR;
+}
+
+function activityColorForRatio(ratio: number) {
+  if (ratio > 1.6) {
+    return BUDGET_OVER_COLOR;
+  }
+
+  if (ratio > 1.15) {
+    return '#CC7A2E';
+  }
+
+  if (ratio < 0.5) {
+    return 'rgba(192,137,46,0.35)';
+  }
+
+  return BUDGET_WARNING_COLOR;
+}
+
+function isFutureDay(date: string, monthKey: string, todayString: string) {
+  const todayMonthKey = todayString.slice(0, 7);
+  return monthKey === todayMonthKey && date > todayString;
+}
+
+function sundayFirstColumn(monthKey: string) {
+  return parseDateString(`${monthKey}-01`).getDay();
+}
+
+function addDaysToDateString(dateString: string, amount: number) {
+  const date = parseDateString(dateString);
+  date.setDate(date.getDate() + amount);
+  return toDateString(date);
+}
+
+function toDateString(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function formatRelativeExpenseDate(dateString: string, todayString: string) {
@@ -1084,51 +1430,250 @@ function formatShortDate(dateString: string) {
   return new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short' }).format(parseDateString(dateString));
 }
 
+function formatFullDay(dateString: string) {
+  return new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short', weekday: 'short' }).format(parseDateString(dateString));
+}
+
+function formatMonthDay(dateString: string) {
+  return new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short' }).format(parseDateString(dateString));
+}
+
+function formatDashboardMonthTitle(monthKey: string) {
+  return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(parseDateString(monthStartDateString(monthKey)));
+}
+
 function formatJumpMonthLabel(monthKey: string) {
-  return new Intl.DateTimeFormat('en-US', { month: 'short' }).format(parseDateString(monthStartDateString(monthKey)));
+  return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(parseDateString(monthStartDateString(monthKey)));
 }
 
 const localStyles = StyleSheet.create({
-  comparisonAmountSlot: {
-    flexShrink: 0,
-    height: 18
-  },
-  comparisonAmountText: {
-    flexShrink: 0,
+  activityAmount: {
+    color: colors.ink,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 12.5,
+    fontSize: 9.5,
     fontWeight: '700',
-    lineHeight: 18
+    lineHeight: 12,
+    maxWidth: 42,
+    textAlign: 'center'
   },
-  comparisonStack: {
+  activityBar: {
+    borderRadius: 8,
+    width: 26
+  },
+  activityBars: {
     alignItems: 'flex-end',
-    gap: 6,
-    justifyContent: 'center',
-    maxWidth: 152,
-    paddingBottom: 3,
-    paddingTop: 3
+    flexDirection: 'row',
+    gap: 7,
+    justifyContent: 'space-between'
   },
-  comparisonTopLine: {
+  activityBarSlot: {
+    alignItems: 'center',
+    height: 78,
+    justifyContent: 'flex-end',
+    width: 32
+  },
+  activityCard: {
+    borderRadius: 20,
+    gap: 12,
+    padding: 14
+  },
+  activityColumn: {
+    alignItems: 'center',
+    borderRadius: 12,
+    flex: 1,
+    gap: 5,
+    minHeight: 122,
+    minWidth: 0,
+    paddingHorizontal: 3,
+    paddingVertical: 6
+  },
+  activityColumnPressed: {
+    opacity: 0.76
+  },
+  activityColumnSelected: {
+    backgroundColor: 'rgba(42,39,34,0.06)'
+  },
+  activityDate: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.mono,
+    fontSize: 9,
+    lineHeight: 12,
+    textAlign: 'center'
+  },
+  activityDateSelected: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontWeight: '700'
+  },
+  actualMixEmpty: {
+    backgroundColor: 'rgba(42,39,34,0.05)',
+    flex: 1
+  },
+  actualMixSegment: {
+    height: '100%'
+  },
+  actualMixTrack: {
+    backgroundColor: 'rgba(42,39,34,0.08)',
+    borderRadius: 999,
+    flexDirection: 'row',
+    height: 10,
+    overflow: 'hidden'
+  },
+  budgetOverflowBudgetZone: {
+    backgroundColor: 'rgba(42,39,34,0.07)',
+    borderBottomLeftRadius: 999,
+    borderTopLeftRadius: 999,
+    flex: 1,
+    overflow: 'hidden'
+  },
+  budgetOverflowFill: {
+    borderRadius: 999,
+    height: '100%'
+  },
+  budgetOverflowMarker: {
+    backgroundColor: 'rgba(42,39,34,0.34)',
+    width: 2
+  },
+  budgetOverflowTrack: {
+    flexDirection: 'row',
+    height: 5,
+    overflow: 'hidden'
+  },
+  budgetOverflowZone: {
+    backgroundColor: 'rgba(193,75,52,0.14)',
+    borderBottomRightRadius: 999,
+    borderTopRightRadius: 999,
+    overflow: 'hidden',
+    width: 34
+  },
+  budgetRing: {
+    alignItems: 'center',
+    height: 112,
+    justifyContent: 'center',
+    width: 112
+  },
+  budgetRingCaption: {
+    color: 'rgba(255,253,247,0.54)',
+    fontFamily: fontFamilies.regular,
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: 'center'
+  },
+  budgetRingLabel: {
+    alignItems: 'center',
+    gap: 1,
+    position: 'absolute'
+  },
+  budgetRingPercent: {
+    color: '#FFFDF7',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 24
+  },
+  budgetWatchLine: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 4,
-    justifyContent: 'flex-end',
-    maxWidth: 152
+    justifyContent: 'space-between'
   },
-  comparisonText: {
-    color: 'rgba(255,253,247,0.66)',
-    fontFamily: fontFamilies.regular,
-    fontSize: 10.5,
-    flexShrink: 1,
-    lineHeight: 13,
-    maxWidth: 82,
+  budgetWatchList: {
+    gap: 10
+  },
+  budgetWatchName: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
+    minWidth: 0
+  },
+  budgetWatchPercent: {
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 15,
+    textAlign: 'right'
+  },
+  budgetWatchRow: {
+    gap: 5
+  },
+  cardHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+    minHeight: 18
+  },
+  cardHeaderRight: {
+    color: colors.muted,
+    flexShrink: 0,
+    fontFamily: fontFamilies.monoSemiBold,
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 14,
+    maxWidth: 76,
     textAlign: 'right'
   },
   content: {
     gap: 0
   },
   dashboardContent: {
-    gap: 13
+    gap: 12
+  },
+  dayBreakdown: {
+    backgroundColor: 'rgba(42,39,34,0.04)',
+    borderRadius: 14,
+    gap: 10,
+    padding: 12
+  },
+  dayBreakdownAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 11.5,
+    fontWeight: '700',
+    lineHeight: 15,
+    textAlign: 'right'
+  },
+  dayBreakdownDate: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 17
+  },
+  dayBreakdownDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  dayBreakdownHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  dayBreakdownName: {
+    color: colors.muted,
+    flex: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16,
+    minWidth: 0
+  },
+  dayBreakdownRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8
+  },
+  dayBreakdownRows: {
+    gap: 7
+  },
+  dayBreakdownTotal: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.monoSemiBold,
+    fontSize: 10.5,
+    fontWeight: '600',
+    lineHeight: 14
   },
   emptyInsight: {
     gap: 4,
@@ -1148,39 +1693,100 @@ const localStyles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 16
   },
+  heatCell: {
+    aspectRatio: 1,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    flex: 1
+  },
+  heatGrid: {
+    gap: 4
+  },
+  heatGridRow: {
+    flexDirection: 'row',
+    gap: 4
+  },
+  heatLegend: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4
+  },
+  heatLegendDot: {
+    borderRadius: 999,
+    height: 7,
+    width: 12
+  },
+  heatLegendMore: {
+    marginLeft: 'auto',
+    textAlign: 'right'
+  },
+  heatLegendText: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.mono,
+    fontSize: 8.5,
+    lineHeight: 11
+  },
+  heatWeekday: {
+    color: colors.subtle,
+    flex: 1,
+    fontFamily: fontFamilies.monoSemiBold,
+    fontSize: 8,
+    fontWeight: '600',
+    lineHeight: 11,
+    textAlign: 'center'
+  },
+  heatWeekdayRow: {
+    flexDirection: 'row',
+    gap: 4
+  },
   heroAmount: {
     color: '#FFFDF7',
     fontFamily: fontFamilies.monoBold,
-    fontSize: 37,
+    fontSize: 34,
     fontWeight: '700',
     letterSpacing: 0,
-    lineHeight: 40
-  },
-  heroAmountBlock: {
-    flex: 1,
-    minWidth: 0
-  },
-  heroAmountRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between'
+    lineHeight: 38
   },
   heroAmountSlot: {
-    height: 40,
-    marginTop: 0
+    height: 38
+  },
+  heroBudgetCopy: {
+    flex: 1,
+    gap: 5,
+    justifyContent: 'center',
+    minWidth: 0
+  },
+  heroBudgetFace: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 14
+  },
+  heroBudgetLine: {
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16
   },
   heroCard: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
     borderRadius: 22,
     boxShadow: '0 20px 40px -20px rgba(42,39,34,0.55)',
-    gap: 0,
+    gap: 12,
     minHeight: 0,
     overflow: 'hidden',
-    paddingBottom: 12,
+    paddingBottom: 14,
     paddingHorizontal: 16,
-    paddingTop: 11
+    paddingTop: 14
+  },
+  heroCombinedCaption: {
+    color: 'rgba(255,253,247,0.58)',
+    fontFamily: fontFamilies.regular,
+    fontSize: 11.5,
+    lineHeight: 15
+  },
+  heroCombinedFace: {
+    gap: 9
   },
   heroFace: {
     backfaceVisibility: 'hidden',
@@ -1188,9 +1794,6 @@ const localStyles = StyleSheet.create({
     position: 'absolute',
     right: 0,
     top: 0
-  },
-  heroFaceContent: {
-    gap: 13
   },
   heroFaceMeasurer: {
     left: 0,
@@ -1210,32 +1813,18 @@ const localStyles = StyleSheet.create({
     overflow: 'visible',
     position: 'relative'
   },
-  heroMonth: {
-    color: '#FFFDF7',
-    flexShrink: 1,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 18,
-    fontWeight: '800',
-    lineHeight: 22,
-    maxWidth: 170,
-    minWidth: 0,
-    textAlign: 'left'
+  heroHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
   },
-  heroSecondary: {
-    backgroundColor: 'rgba(255,253,247,0.05)',
-    borderRadius: 14,
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10
-  },
-  heroRecordCount: {
-    color: 'rgba(255,253,247,0.44)',
-    flexShrink: 0,
-    fontFamily: fontFamilies.monoSemiBold,
-    fontSize: 11,
-    fontWeight: '600',
-    lineHeight: 15,
-    textAlign: 'right'
+  heroMetricLabel: {
+    color: 'rgba(255,253,247,0.56)',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    lineHeight: 14
   },
   heroScopeDot: {
     borderRadius: 4,
@@ -1245,89 +1834,44 @@ const localStyles = StyleSheet.create({
   heroScopeDotOverlap: {
     marginLeft: -3
   },
-  heroScopePill: {
+  heroScopeDots: {
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(255,253,247,0.09)',
-    borderColor: 'rgba(255,253,247,0.10)',
-    borderRadius: 999,
-    borderWidth: 1,
     flexDirection: 'row',
-    gap: 6,
-    maxWidth: 176,
-    minHeight: 26,
-    paddingHorizontal: 9,
-    paddingVertical: 5
+    minWidth: 14
   },
-  heroScopeRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
+  heroSecondary: {
+    backgroundColor: 'rgba(255,253,247,0.05)',
+    borderRadius: 14,
     gap: 10,
-    justifyContent: 'space-between',
-    minHeight: 26
-  },
-  heroScopeText: {
-    color: 'rgba(255,253,247,0.78)',
-    flexShrink: 1,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 11.5,
-    fontWeight: '600',
-    lineHeight: 15,
-    minWidth: 0
-  },
-  heroSwitch: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 7,
-    minWidth: 0
-  },
-  heroTitleButton: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    borderRadius: 10,
-    flexDirection: 'row',
-    gap: 5,
-    maxWidth: 205,
-    minHeight: 30,
-    minWidth: 0,
-    paddingHorizontal: 7,
-    paddingVertical: 4
-  },
-  heroTitleButtonPressed: {
-    backgroundColor: 'rgba(255,253,247,0.10)'
-  },
-  heroTop: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between',
-    marginBottom: 12
+    paddingHorizontal: 12,
+    paddingVertical: 10
   },
   heroZone: {
     transformOrigin: 'top center'
   },
-  heroTogetherDots: {
+  historyButton: {
     alignItems: 'center',
-    flexDirection: 'row',
-    width: 13
+    backgroundColor: 'rgba(42,39,34,0.06)',
+    borderRadius: 10,
+    height: 34,
+    justifyContent: 'center',
+    width: 34
+  },
+  historyButtonPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.96 }]
   },
   insightCard: {
     borderRadius: 16,
     flex: 1,
     gap: 10,
-    minHeight: 138,
+    minHeight: 148,
     minWidth: 0,
     padding: 13
   },
   insightGrid: {
     flexDirection: 'row',
     gap: 10
-  },
-  insightHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 7
   },
   insightTick: {
     backgroundColor: colors.accent,
@@ -1343,6 +1887,17 @@ const localStyles = StyleSheet.create({
     letterSpacing: 1.1,
     lineHeight: 14
   },
+  insightTitleDark: {
+    color: 'rgba(255,253,247,0.60)'
+  },
+  jumpCloseButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.06)',
+    borderRadius: 10,
+    height: 34,
+    justifyContent: 'center',
+    width: 34
+  },
   jumpHandle: {
     backgroundColor: 'rgba(42,39,34,0.22)',
     borderRadius: 999,
@@ -1356,6 +1911,11 @@ const localStyles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: -4,
     width: 96
+  },
+  jumpHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
   },
   jumpMonthButton: {
     alignItems: 'center',
@@ -1377,7 +1937,7 @@ const localStyles = StyleSheet.create({
   jumpMonthText: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     lineHeight: 18
   },
@@ -1472,75 +2032,84 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 14
   },
-  percentBadge: {
-    backgroundColor: 'rgba(232,149,123,0.16)',
-    borderRadius: 7,
-    paddingHorizontal: 7,
-    paddingVertical: 3
-  },
-  percentBadgeText: {
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 11,
-    fontWeight: '700',
-    lineHeight: 15
-  },
-  periodOption: {
-    alignItems: 'center',
-    borderRadius: 6,
-    height: 24,
-    justifyContent: 'center',
-    minWidth: 24,
-    paddingHorizontal: 8,
-    zIndex: 1
-  },
-  periodOptionActive: {
-    backgroundColor: 'rgba(255,253,247,0.92)',
-    minWidth: 54
-  },
-  periodOptionPressed: {
-    backgroundColor: 'rgba(255,253,247,0.12)'
-  },
-  periodSegment: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,253,247,0.08)',
-    borderRadius: 9,
-    flexDirection: 'row',
-    gap: 2,
-    overflow: 'hidden',
-    padding: 3,
-    position: 'relative'
-  },
-  periodResetDot: {
-    backgroundColor: '#FFFDF7',
-    borderColor: 'rgba(255,253,247,0.20)',
+  monthResetDot: {
+    backgroundColor: colors.accent,
     borderRadius: 999,
-    borderWidth: 2,
-    height: 11,
-    width: 11
+    height: 8,
+    width: 8
   },
-  periodResetDotPressed: {
+  monthResetDotPressed: {
     transform: [{ scale: 0.86 }]
   },
-  periodText: {
-    color: 'rgba(255,253,247,0.50)',
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10.5,
-    fontWeight: '700',
+  monthTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 28,
+    fontWeight: '800',
+    lineHeight: 33,
+    maxWidth: 260
+  },
+  monthTitleButton: {
+    alignItems: 'center',
+    borderRadius: 13,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 6
+  },
+  monthTitleButtonPressed: {
+    backgroundColor: 'rgba(42,39,34,0.05)'
+  },
+  monthTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 48
+  },
+  nowCaption: {
+    fontFamily: fontFamilies.regular,
+    fontSize: 11,
     lineHeight: 14
   },
-  periodTextActive: {
-    color: colors.primary
+  nowMetric: {
+    gap: 5
   },
-  paceChart: {
-    height: 72,
-    justifyContent: 'center'
-  },
-  paceLabel: {
+  nowMetricAmount: {
     color: colors.ink,
+    flex: 1,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 11,
+    fontSize: 12.5,
     fontWeight: '700',
-    lineHeight: 15
+    lineHeight: 17,
+    textAlign: 'right'
+  },
+  nowMetricLabel: {
+    color: colors.ink,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 12.5,
+    fontWeight: '600',
+    lineHeight: 17
+  },
+  nowMetricLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between'
+  },
+  quietState: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 6,
+    justifyContent: 'center',
+    minHeight: 88,
+    paddingHorizontal: 8
+  },
+  quietStateText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: 'center'
   },
   recentAmount: {
     color: colors.ink,
@@ -1582,5 +2151,11 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.regular,
     fontSize: 10.5,
     lineHeight: 13
+  },
+  sectionLabel: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    minWidth: 0
   }
 });
