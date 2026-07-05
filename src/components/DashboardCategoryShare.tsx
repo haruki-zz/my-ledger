@@ -497,7 +497,8 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     flexBasis: '47%',
     flexDirection: 'row',
-    flexGrow: 1,
+    flexGrow: 0,
+    flexShrink: 0,
     gap: 7,
     minWidth: 0
   },

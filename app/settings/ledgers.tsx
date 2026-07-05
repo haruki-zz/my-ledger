@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,10 +18,10 @@ import { KeyboardAwareScrollView } from '@/src/components/KeyboardAwareScrollVie
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
+import { tintFromAccent } from '@/src/lib/color';
 import { displayName } from '@/src/lib/format';
 import { runAfterKeyboardDismiss } from '@/src/lib/keyboard';
 import { getErrorMessage, getLedgerMembers, type LedgerMembership } from '@/src/lib/ledger';
-import { tintFromAccent } from '@/src/lib/color';
 import type { LedgerMemberProfile } from '@/src/types/database';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
@@ -31,7 +32,7 @@ type LedgerMemberState = {
   members: LedgerMemberProfile[];
 };
 
-type LedgerAction = 'create' | 'join' | `switch:${string}` | `delete:${string}` | `leave:${string}`;
+type LedgerAction = 'create' | 'join' | `switch:${string}`;
 
 const DEFAULT_LEDGER_NAME = 'Ledger';
 const LEDGER_COLORS = ['#CB5F43', '#8AA248', '#4F77BE', '#8A6FB6', '#D2A032', '#4E97B5'];
@@ -41,10 +42,8 @@ export default function LedgerManagementScreen() {
   const {
     activeLedger,
     createAndSelect,
-    deleteLedger,
     error: ledgerError,
     joinAndSelect,
-    leaveLedger,
     ledgers,
     loading,
     reloadLedgers,
@@ -52,14 +51,14 @@ export default function LedgerManagementScreen() {
   } = useLedgerContext();
   const [ledgerName, setLedgerName] = useState(DEFAULT_LEDGER_NAME);
   const [inviteCode, setInviteCode] = useState('');
+  const [createPanelOpen, setCreatePanelOpen] = useState(false);
+  const [joinPanelOpen, setJoinPanelOpen] = useState(false);
   const [submittingAction, setSubmittingAction] = useState<LedgerAction | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [memberStateByLedgerId, setMemberStateByLedgerId] = useState<Record<string, LedgerMemberState>>({});
 
   const activeLedgerId = activeLedger?.ledger.id || null;
-  const currentLedger = ledgers.find((membership) => membership.ledger.id === activeLedgerId) || null;
-  const otherLedgers = ledgers.filter((membership) => membership.ledger.id !== activeLedgerId);
   const memberErrorCount = useMemo(
     () => Object.values(memberStateByLedgerId).filter((state) => state.error).length,
     [memberStateByLedgerId]
@@ -140,8 +139,12 @@ export default function LedgerManagementScreen() {
     setError(null);
 
     try {
-      await createAndSelect(ledgerName);
+      const membership = await createAndSelect(ledgerName);
       setLedgerName(DEFAULT_LEDGER_NAME);
+      setCreatePanelOpen(false);
+      if (membership) {
+        router.push({ pathname: '/settings/ledger/[ledgerId]', params: { ledgerId: membership.ledger.id } });
+      }
     } catch (createError) {
       Alert.alert('Create Failed', getErrorMessage(createError));
     } finally {
@@ -154,8 +157,12 @@ export default function LedgerManagementScreen() {
     setError(null);
 
     try {
-      await joinAndSelect(inviteCode);
+      const membership = await joinAndSelect(inviteCode);
       setInviteCode('');
+      setJoinPanelOpen(false);
+      if (membership) {
+        router.push({ pathname: '/settings/ledger/[ledgerId]', params: { ledgerId: membership.ledger.id } });
+      }
     } catch (joinError) {
       Alert.alert('Join Failed', getErrorMessage(joinError));
     } finally {
@@ -177,71 +184,6 @@ export default function LedgerManagementScreen() {
     }
   }
 
-  function confirmDelete(membership: LedgerMembership) {
-    Alert.alert(
-      'Delete Ledger',
-      `After deleting "${membership.ledger.name}", the ledger, expense history, categories, and member-visible data will be permanently deleted.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            const action: LedgerAction = `delete:${membership.ledger.id}`;
-            setSubmittingAction(action);
-            setError(null);
-            try {
-              await deleteLedger(membership.ledger.id);
-            } catch (deleteError) {
-              Alert.alert('Delete Failed', getErrorMessage(deleteError));
-            } finally {
-              setSubmittingAction(null);
-            }
-          }
-        }
-      ]
-    );
-  }
-
-  function confirmLeave(membership: LedgerMembership) {
-    Alert.alert('Leave Ledger', `After leaving "${membership.ledger.name}", you will no longer be able to view this ledger. Settle all shared transfer items first.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Leave',
-        style: 'destructive',
-        onPress: async () => {
-          const action: LedgerAction = `leave:${membership.ledger.id}`;
-          setSubmittingAction(action);
-          setError(null);
-          try {
-            await leaveLedger(membership.ledger.id);
-          } catch (leaveError) {
-            Alert.alert('Leave Failed', getErrorMessage(leaveError));
-          } finally {
-            setSubmittingAction(null);
-          }
-        }
-      }
-    ]);
-  }
-
-  function renderLedgerCard(membership: LedgerMembership, isActive: boolean) {
-    const ledgerId = membership.ledger.id;
-    return (
-      <LedgerCard
-        currentUserId={session?.user.id || null}
-        isActive={isActive}
-        key={ledgerId}
-        memberState={memberStateByLedgerId[ledgerId]}
-        membership={membership}
-        onDelete={() => confirmDelete(membership)}
-        onLeave={() => confirmLeave(membership)}
-        onSwitch={() => handleSelect(ledgerId)}
-        submittingAction={submittingAction}
-      />
-    );
-  }
-
   const pageError = ledgerError || error;
 
   return (
@@ -258,150 +200,162 @@ export default function LedgerManagementScreen() {
       ) : null}
       {loading ? <ActivityIndicator /> : null}
 
-      <SectionHead title="Current Ledger" />
-      {currentLedger ? (
-        renderLedgerCard(currentLedger, true)
-      ) : (
-        <EmptyState
-          icon="journal-outline"
-          title="No current ledger"
-          description="Create a new ledger or join one with an invite code to start tracking expenses."
-        />
-      )}
+      <SectionHead title="Ledgers" />
+      <View style={localStyles.card}>
+        {ledgers.length > 0 ? ledgers.map((membership, index) => (
+          <LedgerListRow
+            currentUserId={session?.user.id || null}
+            isActive={membership.ledger.id === activeLedgerId}
+            key={membership.ledger.id}
+            memberState={memberStateByLedgerId[membership.ledger.id]}
+            membership={membership}
+            onOpen={() => router.push({ pathname: '/settings/ledger/[ledgerId]', params: { ledgerId: membership.ledger.id } })}
+            onSwitch={() => {
+              void handleSelect(membership.ledger.id);
+            }}
+            showDivider={index > 0}
+            submitting={submittingAction === `switch:${membership.ledger.id}`}
+          />
+        )) : (
+          <EmptyState
+            icon="journal-outline"
+            title="No ledgers"
+            description="Create a new ledger or join one with an invite code to start tracking expenses."
+          />
+        )}
+      </View>
 
-      <SectionHead title="Other Ledgers" />
-      {otherLedgers.length > 0 ? (
-        <View style={localStyles.ledgerList}>
-          {otherLedgers.map((membership) => renderLedgerCard(membership, false))}
+      <View style={localStyles.card}>
+        <View style={localStyles.actionChooser}>
+          <Pressable
+            disabled={Boolean(submittingAction)}
+            onPress={() => {
+              setCreatePanelOpen((current) => !current);
+              setJoinPanelOpen(false);
+            }}
+            style={({ pressed }) => [localStyles.primaryAction, submittingAction && localStyles.disabled, pressed && !submittingAction && localStyles.pressed]}
+          >
+            <Ionicons color="#FFFFFF" name="add" size={16} />
+            <Text style={localStyles.primaryActionText}>Create ledger</Text>
+          </Pressable>
+          <Pressable
+            disabled={Boolean(submittingAction)}
+            onPress={() => {
+              setJoinPanelOpen((current) => !current);
+              setCreatePanelOpen(false);
+            }}
+            style={({ pressed }) => [localStyles.secondaryAction, submittingAction && localStyles.disabled, pressed && !submittingAction && localStyles.pressed]}
+          >
+            <Text style={localStyles.secondaryActionText}>Join with code</Text>
+          </Pressable>
         </View>
-      ) : (
-        <EmptyState
-          compact
-          icon="albums-outline"
-          title="No other ledgers"
-          description={ledgers.length === 0 ? 'Your ledgers will appear here after you create or join one.' : 'Additional ledgers will appear here.'}
-        />
-      )}
 
-      <FormCard
-        actionIcon="add-circle-outline"
-        actionLabel={submittingAction === 'create' ? 'Processing...' : 'Create and Select'}
-        disabled={Boolean(submittingAction)}
-        icon="create-outline"
-        onSubmit={() => runAfterKeyboardDismiss(handleCreate)}
-        subtitle="Start a new ledger for personal or shared expense tracking."
-        title="Create Ledger"
-      >
-        <Text style={styles.label}>Ledger Name</Text>
-        <TextInput
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-          onChangeText={setLedgerName}
-          returnKeyType="done"
-          style={styles.input}
-          submitBehavior="blurAndSubmit"
-          value={ledgerName}
-        />
-      </FormCard>
+        {createPanelOpen ? (
+          <InlinePanel>
+            <Text style={localStyles.fieldLabel}>Ledger name</Text>
+            <TextInput
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+              onChangeText={setLedgerName}
+              returnKeyType="done"
+              style={localStyles.input}
+              submitBehavior="blurAndSubmit"
+              value={ledgerName}
+            />
+            <SubmitButton
+              disabled={Boolean(submittingAction)}
+              icon="checkmark"
+              label={submittingAction === 'create' ? 'Creating...' : 'Create and set active'}
+              onPress={() => runAfterKeyboardDismiss(handleCreate)}
+            />
+          </InlinePanel>
+        ) : null}
 
-      <FormCard
-        actionIcon="enter-outline"
-        actionLabel={submittingAction === 'join' ? 'Processing...' : 'Join and Select'}
-        disabled={Boolean(submittingAction)}
-        icon="key-outline"
-        onSubmit={() => runAfterKeyboardDismiss(handleJoin)}
-        secondary
-        subtitle="Use an invite code from another member."
-        title="Join Ledger"
-      >
-        <Text style={styles.label}>Invite Code</Text>
-        <TextInput
-          autoCapitalize="characters"
-          inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
-          onChangeText={setInviteCode}
-          placeholder="Example: A1B2C3D4"
-          returnKeyType="done"
-          style={[styles.input, { fontFamily: fontFamilies.mono }]}
-          submitBehavior="blurAndSubmit"
-          value={inviteCode}
-        />
-      </FormCard>
+        {joinPanelOpen ? (
+          <InlinePanel>
+            <Text style={localStyles.fieldLabel}>Invite code</Text>
+            <TextInput
+              autoCapitalize="characters"
+              inputAccessoryViewID={KEYBOARD_DONE_ACCESSORY_ID}
+              onChangeText={setInviteCode}
+              placeholder="Example: A1B2C3D4"
+              placeholderTextColor={colors.subtle}
+              returnKeyType="done"
+              style={[localStyles.input, localStyles.monoInput]}
+              submitBehavior="blurAndSubmit"
+              value={inviteCode}
+            />
+            <SubmitButton
+              disabled={Boolean(submittingAction) || inviteCode.trim().length === 0}
+              icon="enter-outline"
+              label={submittingAction === 'join' ? 'Joining...' : 'Join and set active'}
+              onPress={() => runAfterKeyboardDismiss(handleJoin)}
+            />
+          </InlinePanel>
+        ) : null}
+      </View>
     </KeyboardAwareScrollView>
   );
 }
 
-function LedgerCard({
+function LedgerListRow({
   currentUserId,
   isActive,
   memberState,
   membership,
-  onDelete,
-  onLeave,
+  onOpen,
   onSwitch,
-  submittingAction
+  showDivider,
+  submitting
 }: {
   currentUserId: string | null;
   isActive: boolean;
   memberState?: LedgerMemberState;
   membership: LedgerMembership;
-  onDelete: () => void;
-  onLeave: () => void;
+  onOpen: () => void;
   onSwitch: () => void;
-  submittingAction: LedgerAction | null;
+  showDivider: boolean;
+  submitting: boolean;
 }) {
   const ledgerColor = colorForId(membership.ledger.id);
-  const destructiveAction: LedgerAction = membership.isOwner ? `delete:${membership.ledger.id}` : `leave:${membership.ledger.id}`;
-  const switchAction: LedgerAction = `switch:${membership.ledger.id}`;
-  const actionDisabled = Boolean(submittingAction);
-  const destructiveLabel = membership.isOwner ? 'Delete Ledger' : 'Leave Ledger';
+  const memberCount = memberState?.members.length ?? 0;
 
   return (
-    <View style={[localStyles.card, localStyles.ledgerCard, isActive && localStyles.activeCard]}>
-      <View style={localStyles.ledgerHeader}>
-        <CircleIcon
-          backgroundColor={isActive ? ledgerColor : tintFromAccent(ledgerColor)}
-          color={isActive ? '#FFFFFF' : ledgerColor}
-          icon={isActive ? 'journal' : 'journal-outline'}
-          shadowColor={isActive ? ledgerColor : undefined}
-          size={40}
-        />
-        <View style={localStyles.ledgerTitleBlock}>
-          <Text numberOfLines={1} style={localStyles.ledgerName}>{membership.ledger.name}</Text>
-        </View>
-      </View>
-
-      <MemberPreview
-        currentUserId={currentUserId}
-        ledgerOwnerId={membership.ledger.owner_id || membership.ledger.created_by}
-        memberState={memberState}
-      />
-
-      <View style={localStyles.inviteCodeBox}>
-        <Ionicons color={colors.primaryDark} name="key-outline" size={17} />
-        <View style={localStyles.inviteTextBlock}>
-          <Text style={localStyles.inviteLabel}>INVITE CODE</Text>
-          <Text numberOfLines={1} selectable style={localStyles.inviteCode}>{membership.ledger.invite_code}</Text>
-        </View>
-      </View>
-
-      <View style={localStyles.actionRow}>
-        {!isActive ? (
-          <LedgerActionButton
-            compact
-            disabled={actionDisabled}
-            icon="swap-horizontal"
-            label={submittingAction === switchAction ? 'Switching...' : 'Switch'}
-            onPress={onSwitch}
+    <View>
+      {showDivider ? <View style={localStyles.insetDivider} /> : null}
+      <View style={localStyles.ledgerRow}>
+        <Pressable onPress={onOpen} style={({ pressed }) => [localStyles.ledgerMain, pressed && localStyles.pressed]}>
+          <CircleIcon
+            backgroundColor={isActive ? ledgerColor : tintFromAccent(ledgerColor)}
+            color={isActive ? '#FFFFFF' : ledgerColor}
+            icon={isActive ? 'journal' : 'journal-outline'}
+            shadowColor={isActive ? ledgerColor : undefined}
+            size={40}
           />
-        ) : null}
-        <LedgerActionButton
-          compact
-          danger
-          disabled={actionDisabled}
-          icon={membership.isOwner ? 'trash-outline' : 'log-out-outline'}
-          label={submittingAction === destructiveAction ? 'Processing...' : destructiveLabel}
-          onPress={membership.isOwner ? onDelete : onLeave}
-          secondary={!isActive}
-        />
+          <View style={localStyles.ledgerTitleBlock}>
+            <View style={localStyles.ledgerTitleLine}>
+              <Text numberOfLines={1} style={localStyles.ledgerName}>{membership.ledger.name}</Text>
+              {isActive ? <ActiveBadge /> : null}
+            </View>
+            <Text numberOfLines={1} style={localStyles.ledgerMeta}>
+              {membership.isOwner ? 'Owner' : 'Member'} · {memberState?.loading ? 'loading members' : `${memberCount} member${memberCount === 1 ? '' : 's'}`}
+            </Text>
+            <MemberPreview
+              currentUserId={currentUserId}
+              ledgerOwnerId={membership.ledger.owner_id || membership.ledger.created_by}
+              memberState={memberState}
+            />
+          </View>
+        </Pressable>
+
+        {isActive ? null : (
+          <Pressable
+            disabled={submitting}
+            onPress={onSwitch}
+            style={({ pressed }) => [localStyles.switchPill, submitting && localStyles.disabled, pressed && !submitting && localStyles.pressed]}
+          >
+            {submitting ? <ActivityIndicator size="small" /> : <Text style={localStyles.switchPillText}>Switch</Text>}
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -417,17 +371,12 @@ function MemberPreview({
   memberState?: LedgerMemberState;
 }) {
   if (!memberState || memberState.loading) {
-    return (
-      <View style={localStyles.memberLoadingRow}>
-        <ActivityIndicator size="small" />
-        <Text style={localStyles.memberMuted}>Loading members</Text>
-      </View>
-    );
+    return null;
   }
 
   if (memberState.error) {
     return (
-      <View style={localStyles.pillRow}>
+      <View style={localStyles.memberChips}>
         <InfoPill color={colors.danger} icon="warning-outline" label="Members unavailable" />
       </View>
     );
@@ -435,7 +384,7 @@ function MemberPreview({
 
   if (memberState.members.length === 0) {
     return (
-      <View style={localStyles.pillRow}>
+      <View style={localStyles.memberChips}>
         <InfoPill color={colors.muted} icon="people-outline" label="No members" />
       </View>
     );
@@ -462,110 +411,49 @@ function MemberPreview({
   );
 }
 
-function FormCard({
-  actionIcon,
-  actionLabel,
-  children,
-  disabled,
-  icon,
-  onSubmit,
-  secondary,
-  subtitle,
-  title
-}: {
-  actionIcon: IoniconName;
-  actionLabel: string;
-  children: React.ReactNode;
-  disabled: boolean;
-  icon: IoniconName;
-  onSubmit: () => void;
-  secondary?: boolean;
-  subtitle: string;
-  title: string;
-}) {
-  const iconColor = secondary ? colors.accent : colors.primaryDark;
+function InlinePanel({ children }: { children: React.ReactNode }) {
   return (
-    <View style={localStyles.card}>
-      <View style={localStyles.formHeader}>
-        <CircleIcon
-          backgroundColor={tintFromAccent(iconColor)}
-          color={iconColor}
-          icon={icon}
-          size={42}
-        />
-        <View style={localStyles.ledgerTitleBlock}>
-          <Text style={localStyles.formTitle}>{title}</Text>
-          <Text style={localStyles.formSubtitle}>{subtitle}</Text>
-        </View>
-      </View>
-      <View style={localStyles.formBody}>
-        {children}
-        <LedgerActionButton
-          disabled={disabled}
-          icon={actionIcon}
-          label={actionLabel}
-          onPress={onSubmit}
-          secondary={secondary}
-        />
-      </View>
+    <View style={localStyles.inlinePanel}>
+      {children}
     </View>
   );
 }
 
-function LedgerActionButton({
-  danger,
+function SubmitButton({
   disabled,
   icon,
   label,
-  onPress,
-  secondary,
-  compact
+  onPress
 }: {
-  compact?: boolean;
-  danger?: boolean;
   disabled: boolean;
   icon: IoniconName;
   label: string;
   onPress: () => void;
-  secondary?: boolean;
 }) {
   return (
     <Pressable
-      accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [
-        localStyles.actionButton,
-        compact && localStyles.compactActionButton,
-        secondary && localStyles.secondaryButton,
-        danger && localStyles.dangerButton,
-        danger && secondary && localStyles.secondaryDangerButton,
-        disabled && localStyles.disabled,
-        pressed && !disabled && localStyles.pressed
-      ]}
+      style={({ pressed }) => [localStyles.submitButton, disabled && localStyles.disabled, pressed && !disabled && localStyles.pressed]}
     >
-      <Ionicons color={buttonTextColor(danger, secondary)} name={icon} size={17} />
-      <Text numberOfLines={1} style={[localStyles.actionButtonText, (secondary || danger) && { color: buttonTextColor(danger, secondary) }]}>
-        {label}
-      </Text>
+      <Ionicons color="#FFFFFF" name={icon} size={17} />
+      <Text style={localStyles.submitButtonText}>{label}</Text>
     </Pressable>
   );
 }
 
 function EmptyState({
-  compact,
   description,
   icon,
   title
 }: {
-  compact?: boolean;
   description: string;
   icon: IoniconName;
   title: string;
 }) {
   return (
-    <View style={[localStyles.emptyState, compact && localStyles.emptyStateCompact]}>
-      <CircleIcon backgroundColor="rgba(255,255,255,0.88)" color={colors.muted} icon={icon} size={42} />
+    <View style={localStyles.emptyState}>
+      <CircleIcon backgroundColor="rgba(42,39,34,0.05)" color={colors.muted} icon={icon} size={42} />
       <View style={localStyles.ledgerTitleBlock}>
         <Text style={localStyles.emptyTitle}>{title}</Text>
         <Text style={localStyles.emptyDescription}>{description}</Text>
@@ -578,6 +466,14 @@ function SectionHead({ title }: { title: string }) {
   return (
     <View style={localStyles.sectionHead}>
       <Text style={localStyles.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function ActiveBadge() {
+  return (
+    <View style={localStyles.activeBadge}>
+      <Text style={localStyles.activeBadgeText}>Active</Text>
     </View>
   );
 }
@@ -648,56 +544,35 @@ function colorForId(id?: string | null) {
   return LEDGER_COLORS[total % LEDGER_COLORS.length];
 }
 
-function buttonTextColor(danger?: boolean, secondary?: boolean) {
-  if (danger) {
-    return secondary ? colors.danger : '#FFFFFF';
-  }
-  return secondary ? colors.primaryDark : '#FFFFFF';
-}
-
 const localStyles = StyleSheet.create({
-  actionButton: {
-    alignItems: 'center',
+  actionChooser: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14
+  },
+  activeBadge: {
     backgroundColor: colors.primary,
-    borderRadius: theme.radii.control,
-    flexDirection: 'row',
-    flex: 1,
-    gap: 8,
-    justifyContent: 'center',
-    minHeight: 48,
-    minWidth: 0,
-    paddingHorizontal: 14,
-    paddingVertical: 12
+    borderRadius: theme.radii.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 4
   },
-  actionButtonText: {
-    color: '#FFFFFF',
-    fontFamily: fontFamilies.bold,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18
-  },
-  actionRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8
-  },
-  activeCard: {
-    backgroundColor: colors.tint,
-    borderColor: colors.secondary
+  activeBadgeText: {
+    color: '#FFFDF7',
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 10,
+    fontWeight: '800',
+    lineHeight: 13
   },
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.line,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
-    gap: 15,
     overflow: 'hidden',
-    padding: 16,
     shadowColor: '#2A2722',
-    shadowOffset: { height: 8, width: 0 },
+    shadowOffset: { height: 12, width: 0 },
     shadowOpacity: 0.06,
-    shadowRadius: 18,
-    elevation: 2
+    shadowRadius: 22
   },
   circleIcon: {
     alignItems: 'center',
@@ -707,20 +582,12 @@ const localStyles = StyleSheet.create({
     alignSelf: 'center',
     gap: 14,
     maxWidth: 720,
-    padding: 20,
-    paddingBottom: 128,
+    padding: 18,
+    paddingBottom: 44,
     width: '100%'
   },
-  compactActionButton: {
-    minHeight: 40,
-    paddingHorizontal: 12,
-    paddingVertical: 9
-  },
-  dangerButton: {
-    backgroundColor: colors.danger
-  },
   disabled: {
-    opacity: 0.46
+    opacity: 0.45
   },
   emptyDescription: {
     color: colors.muted,
@@ -730,197 +597,225 @@ const localStyles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.58)',
-    borderColor: colors.line,
-    borderRadius: 18,
-    borderWidth: 1,
     flexDirection: 'row',
-    gap: 14,
+    gap: 12,
+    minHeight: 92,
     padding: 16
   },
-  emptyStateCompact: {
-    paddingVertical: 14
-  },
   emptyTitle: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20
-  },
-  formBody: {
-    gap: 12
-  },
-  formHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12
-  },
-  formSubtitle: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 13,
-    lineHeight: 18
-  },
-  formTitle: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
     fontSize: 16,
     fontWeight: '700',
     lineHeight: 21
   },
+  fieldLabel: {
+    color: colors.muted,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    lineHeight: 14,
+    textTransform: 'uppercase'
+  },
   infoPill: {
     alignItems: 'center',
     borderRadius: theme.radii.pill,
     flexDirection: 'row',
     gap: 5,
-    maxWidth: '100%',
-    minHeight: 22,
-    paddingHorizontal: 7,
-    paddingVertical: 3
+    maxWidth: 150,
+    paddingHorizontal: 8,
+    paddingVertical: 4
   },
   infoPillDot: {
-    borderRadius: 3,
-    height: 6,
-    width: 6
+    borderRadius: 2.5,
+    height: 5,
+    width: 5
   },
   infoPillText: {
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 13,
-    maxWidth: 170
-  },
-  inviteCode: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: 1,
-    lineHeight: 18
-  },
-  inviteCodeBox: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.86)',
-    borderColor: colors.line,
-    borderRadius: theme.radii.control,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 9,
-    minHeight: 42,
-    paddingHorizontal: 11,
-    paddingVertical: 7
-  },
-  inviteLabel: {
-    color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 9,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 9.5,
     fontWeight: '800',
-    letterSpacing: 0.4,
-    lineHeight: 12
+    lineHeight: 13
   },
-  inviteTextBlock: {
+  inlinePanel: {
+    borderTopColor: 'rgba(42,39,34,0.08)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 10,
+    padding: 14,
+    paddingTop: 12
+  },
+  input: {
+    backgroundColor: 'rgba(42,39,34,0.04)',
+    borderColor: colors.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    color: colors.ink,
+    fontFamily: fontFamilies.regular,
+    fontSize: 16,
+    minHeight: 48,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  insetDivider: {
+    backgroundColor: 'rgba(42,39,34,0.08)',
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 68
+  },
+  ledgerMain: {
+    alignItems: 'center',
     flex: 1,
+    flexDirection: 'row',
+    gap: 12,
     minWidth: 0
   },
-  ledgerHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10
-  },
-  ledgerCard: {
-    gap: 10,
-    padding: 12
-  },
-  ledgerList: {
-    gap: 12
+  ledgerMeta: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16
   },
   ledgerName: {
     color: colors.ink,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 24,
-    fontWeight: '800',
-    lineHeight: 30
+    flexShrink: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 21
+  },
+  ledgerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 74,
+    paddingHorizontal: 14,
+    paddingVertical: 12
   },
   ledgerTitleBlock: {
     flex: 1,
     gap: 4,
     minWidth: 0
   },
+  ledgerTitleLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0
+  },
   memberChip: {
     alignItems: 'center',
     borderRadius: theme.radii.pill,
     flexDirection: 'row',
-    gap: 6,
-    maxWidth: '100%',
+    gap: 5,
+    maxWidth: 132,
     paddingHorizontal: 8,
     paddingVertical: 4
+  },
+  memberChipText: {
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 9.5,
+    fontWeight: '800',
+    lineHeight: 13
   },
   memberChips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8
-  },
-  memberChipText: {
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 14,
-    maxWidth: 180
-  },
-  memberDot: {
-    borderRadius: 4,
-    height: 8,
-    width: 8
-  },
-  memberLoadingRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    minHeight: 24
-  },
-  memberMuted: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 13,
-    lineHeight: 18
-  },
-  pillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 6
   },
+  memberDot: {
+    borderRadius: 2.5,
+    height: 5,
+    width: 5
+  },
+  monoInput: {
+    fontFamily: fontFamilies.monoBold,
+    fontWeight: '700',
+    letterSpacing: 0.8
+  },
   pressed: {
-    opacity: 0.76
+    opacity: 0.7
   },
-  secondaryButton: {
-    backgroundColor: 'rgba(255,255,255,0.78)',
-    borderColor: colors.line,
-    borderWidth: 1
+  primaryAction: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: theme.radii.pill,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 12
   },
-  secondaryDangerButton: {
-    backgroundColor: 'rgba(255,255,255,0.78)',
-    borderColor: 'rgba(220,38,38,0.24)',
-    borderWidth: 1
+  primaryActionText: {
+    color: '#FFFFFF',
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18
+  },
+  secondaryAction: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.04)',
+    borderColor: 'rgba(42,39,34,0.14)',
+    borderRadius: theme.radii.pill,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 12
+  },
+  secondaryActionText: {
+    color: colors.ink,
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18
   },
   sectionHead: {
-    paddingTop: 3
+    paddingHorizontal: 4,
+    paddingTop: 2
   },
   sectionTitle: {
     color: colors.muted,
-    fontFamily: fontFamilies.extraBold,
+    fontFamily: fontFamilies.monoExtraBold,
     fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.4,
-    lineHeight: 15,
+    letterSpacing: 1.4,
+    lineHeight: 16,
     textTransform: 'uppercase'
   },
-  subtitle: {
+  submitButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: theme.radii.pill,
+    flexDirection: 'row',
+    gap: 7,
+    justifyContent: 'center',
+    minHeight: 46
+  },
+  submitButtonText: {
+    color: '#FFFFFF',
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18
+  },
+  switchPill: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: 'rgba(42,39,34,0.14)',
+    borderRadius: theme.radii.pill,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 32,
+    minWidth: 68,
+    paddingHorizontal: 11
+  },
+  switchPillText: {
     color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 14,
-    lineHeight: 20
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 10.5,
+    fontWeight: '800',
+    lineHeight: 14
   }
 });

@@ -98,13 +98,14 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               {/* Settings detail screens */}
               <Stack.Screen name="settings/ledgers" options={{ headerLeft: settingsHeaderLeft, title: 'Ledgers' }} />
+              <Stack.Screen name="settings/ledger/[ledgerId]" options={{ headerLeft: settingsHeaderLeft, title: 'Ledger' }} />
               <Stack.Screen name="settings/budgets" options={{ headerLeft: settingsHeaderLeft, title: 'Budgets' }} />
               <Stack.Screen
                 name="settings/recurring"
                 options={{
                   headerLeft: settingsHeaderLeft,
                   headerTitleAlign: 'center',
-                  title: 'Fixed Expense'
+                  title: 'Fixed Expenses'
                 }}
               />
               <Stack.Screen name="settings/sync" options={{ headerLeft: settingsHeaderLeft, title: 'Sync Status' }} />

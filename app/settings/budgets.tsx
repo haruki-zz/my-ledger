@@ -14,10 +14,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
+import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
-import { PRIMARY_CATEGORIES, categoryColor, categoryIconName } from '@/src/lib/categorySystem';
+import { PRIMARY_CATEGORIES, categoryColor } from '@/src/lib/categorySystem';
 import { formatYen } from '@/src/lib/format';
 import {
   deleteBudgetTemplate,
@@ -47,7 +47,8 @@ export default function BudgetsScreen() {
       .filter((template) => template.scope === 'category' && template.category_id)
       .map((template) => [template.category_id as string, template]))
   ), [templates]);
-  const totalBudget = templates.reduce((sum, template) => sum + template.amount_yen, 0);
+  const liveTotalBudget = PRIMARY_CATEGORIES.reduce((sum, category) => sum + Number(drafts[category.id] || 0), 0);
+  const liveCategoryCount = PRIMARY_CATEGORIES.filter((category) => Number(drafts[category.id] || 0) > 0).length;
 
   const loadBudgets = useCallback(async (options?: { userInitiated?: boolean }) => {
     if (!ledgerId || !currentUserId) {
@@ -166,74 +167,82 @@ export default function BudgetsScreen() {
     >
       {ledgerError || detailsError ? <Text selectable style={styles.error}>{ledgerError || detailsError}</Text> : null}
 
+      <Text style={localStyles.ledgerSubtitle}>{ledger?.name || 'Current ledger'}</Text>
+
       <View style={localStyles.summary}>
-        <View>
-          <Text style={localStyles.summaryLabel}>Monthly category budget</Text>
-          <Text style={localStyles.summaryAmount}>{formatYen(totalBudget)}</Text>
-        </View>
-        <View style={localStyles.summaryBadge}>
-          <Ionicons color={colors.accent} name="wallet-outline" size={16} />
-          <Text style={localStyles.summaryBadgeText}>{templates.length} set</Text>
-        </View>
+        <Text style={localStyles.summaryLabel}>MONTHLY BUDGET</Text>
+        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>
+          {formatYen(liveTotalBudget)}
+        </Text>
+        <Text style={localStyles.summaryMeta}>
+          across {liveCategoryCount} of {PRIMARY_CATEGORIES.length} categories
+        </Text>
       </View>
 
       <View style={localStyles.list}>
-        {PRIMARY_CATEGORIES.map((category) => {
+        {PRIMARY_CATEGORIES.map((category, index) => {
           const template = templateByCategory.get(category.id);
           const draft = drafts[category.id] ?? '';
           const saving = savingCategoryId === category.id;
+          const accent = categoryColor(category.id);
           return (
-            <View key={category.id} style={localStyles.row}>
-              <View style={localStyles.rowHeader}>
-                <View style={[localStyles.iconBadge, { backgroundColor: `${categoryColor(category.id)}20` }]}>
-                  <Ionicons color={categoryColor(category.id)} name={categoryIconName(category.id)} size={20} />
+            <View key={category.id}>
+              {index > 0 ? <View style={localStyles.insetDivider} /> : null}
+              <View style={localStyles.row}>
+                <View style={localStyles.rowHeader}>
+                  <View style={[localStyles.categorySwatch, { backgroundColor: accent }]} />
+                  <View style={localStyles.rowTitleGroup}>
+                    <Text numberOfLines={1} style={localStyles.rowTitle}>{category.label}</Text>
+                    <Text style={localStyles.rowSubtitle}>{template ? 'Monthly budget set' : 'No budget set'}</Text>
+                  </View>
                 </View>
-                <View style={localStyles.rowTitleGroup}>
-                  <Text numberOfLines={1} style={localStyles.rowTitle}>{category.label}</Text>
-                  <Text style={localStyles.rowSubtitle}>{template ? 'Monthly budget set' : 'No budget set'}</Text>
-                </View>
-              </View>
 
-              <View style={localStyles.editorRow}>
-                <TextInput
-                  accessibilityLabel={`${category.label} monthly budget`}
-                  editable={!saving}
-                  inputMode="numeric"
-                  keyboardType="number-pad"
-                  onChangeText={(value) => updateDraft(category.id, value)}
-                  placeholder="No budget"
-                  placeholderTextColor={colors.subtle}
-                  style={localStyles.input}
-                  value={draft}
-                />
-                <Pressable
-                  disabled={saving || draft === ''}
-                  onPress={() => {
-                    void saveCategory(category.id);
-                  }}
-                  style={({ pressed }) => [
-                    localStyles.iconButton,
-                    localStyles.saveButton,
-                    (saving || draft === '') && localStyles.disabled,
-                    pressed && !saving && draft !== '' && localStyles.pressed
-                  ]}
-                >
-                  {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons color="#FFFFFF" name="checkmark" size={18} />}
-                </Pressable>
-                <Pressable
-                  disabled={saving || (!template && draft === '')}
-                  onPress={() => {
-                    void clearCategory(category.id);
-                  }}
-                  style={({ pressed }) => [
-                    localStyles.iconButton,
-                    localStyles.clearButton,
-                    (saving || (!template && draft === '')) && localStyles.disabled,
-                    pressed && !saving && localStyles.pressed
-                  ]}
-                >
-                  <Ionicons color={colors.danger} name="trash-outline" size={17} />
-                </Pressable>
+                <View style={localStyles.editorRow}>
+                  <View style={localStyles.amountField}>
+                    <Text style={localStyles.yenPrefix}>¥</Text>
+                    <TextInput
+                      accessibilityLabel={`${category.label} monthly budget`}
+                      editable={!saving}
+                      inputMode="numeric"
+                      keyboardType="number-pad"
+                      onChangeText={(value) => updateDraft(category.id, value)}
+                      placeholder="0"
+                      placeholderTextColor={colors.subtle}
+                      style={localStyles.input}
+                      value={draft}
+                    />
+                  </View>
+                  <Pressable
+                    accessibilityLabel={`Save ${category.label} budget`}
+                    disabled={saving || draft === ''}
+                    onPress={() => {
+                      void saveCategory(category.id);
+                    }}
+                    style={({ pressed }) => [
+                      localStyles.iconButton,
+                      localStyles.saveButton,
+                      (saving || draft === '') && localStyles.disabled,
+                      pressed && !saving && draft !== '' && localStyles.pressed
+                    ]}
+                  >
+                    {saving ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Ionicons color="#FFFFFF" name="checkmark" size={18} />}
+                  </Pressable>
+                  <Pressable
+                    accessibilityLabel={`Clear ${category.label} budget`}
+                    disabled={saving || (!template && draft === '')}
+                    onPress={() => {
+                      void clearCategory(category.id);
+                    }}
+                    style={({ pressed }) => [
+                      localStyles.iconButton,
+                      localStyles.clearButton,
+                      (saving || (!template && draft === '')) && localStyles.disabled,
+                      pressed && !saving && localStyles.pressed
+                    ]}
+                  >
+                    <Ionicons color={colors.danger} name="trash-outline" size={17} />
+                  </Pressable>
+                </View>
               </View>
             </View>
           );
@@ -252,13 +261,32 @@ function upsertTemplate(templates: BudgetTemplate[], nextTemplate: BudgetTemplat
 }
 
 const localStyles = StyleSheet.create({
+  amountField: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.04)',
+    borderColor: colors.line,
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    minHeight: 42,
+    minWidth: 0,
+    paddingHorizontal: 10
+  },
+  categorySwatch: {
+    borderRadius: 6,
+    height: 34,
+    width: 8
+  },
   clearButton: {
     backgroundColor: 'rgba(192,57,43,0.10)'
   },
   content: {
+    alignSelf: 'center',
     gap: 14,
-    padding: 20,
-    paddingTop: 12
+    maxWidth: 720,
+    padding: 18,
+    width: '100%'
   },
   disabled: {
     opacity: 0.45
@@ -266,43 +294,57 @@ const localStyles = StyleSheet.create({
   editorRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 8
+    gap: 8,
+    minWidth: 0
   },
-  iconBadge: {
+  iconButton: {
     alignItems: 'center',
     borderRadius: 12,
     height: 42,
     justifyContent: 'center',
     width: 42
   },
-  iconButton: {
-    alignItems: 'center',
-    borderRadius: 14,
-    height: 46,
-    justifyContent: 'center',
-    width: 46
-  },
   input: {
-    ...styles.input,
+    color: colors.ink,
     flex: 1,
-    fontFamily: fontFamilies.mono,
-    fontSize: 17,
-    minHeight: 46
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 15,
+    fontWeight: '800',
+    minWidth: 0,
+    padding: 0
+  },
+  insetDivider: {
+    backgroundColor: 'rgba(42,39,34,0.08)',
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 58
+  },
+  ledgerSubtitle: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 1,
+    lineHeight: 15,
+    paddingHorizontal: 4,
+    textTransform: 'uppercase'
   },
   list: {
-    gap: 10
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+    shadowColor: '#2A2722',
+    shadowOffset: { height: 12, width: 0 },
+    shadowOpacity: 0.06,
+    shadowRadius: 22
   },
   pressed: {
     opacity: 0.72
   },
   row: {
-    backgroundColor: colors.surface,
-    borderColor: colors.glassBorder,
-    borderRadius: theme.radii.surface,
-    borderWidth: 1,
     gap: 12,
-    padding: 14,
-    ...theme.glassShadow
+    padding: 14
   },
   rowHeader: {
     alignItems: 'center',
@@ -312,62 +354,56 @@ const localStyles = StyleSheet.create({
   rowSubtitle: {
     color: colors.muted,
     fontFamily: fontFamilies.regular,
-    fontSize: 13,
-    lineHeight: 18
+    fontSize: 12,
+    lineHeight: 17
   },
   rowTitle: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
-    lineHeight: 23
+    lineHeight: 20
   },
   rowTitleGroup: {
     flex: 1,
     minWidth: 0
   },
   saveButton: {
-    backgroundColor: colors.primaryDark
+    backgroundColor: colors.primary
   },
   summary: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.glassBorder,
-    borderRadius: theme.radii.surface,
-    borderWidth: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 18,
-    ...theme.glassShadow
+    backgroundColor: colors.primary,
+    borderRadius: 20,
+    gap: 4,
+    padding: 18
   },
   summaryAmount: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 28,
-    fontWeight: '700',
-    lineHeight: 34
-  },
-  summaryBadge: {
-    alignItems: 'center',
-    backgroundColor: colors.tint,
-    borderRadius: theme.radii.pill,
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 8
-  },
-  summaryBadgeText: {
-    color: colors.accent,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18
+    color: '#FFFDF7',
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 32,
+    fontWeight: '800',
+    lineHeight: 38
   },
   summaryLabel: {
+    color: 'rgba(255,253,247,0.58)',
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    lineHeight: 13
+  },
+  summaryMeta: {
+    color: 'rgba(255,253,247,0.58)',
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 17
+  },
+  yenPrefix: {
     color: colors.muted,
-    fontFamily: fontFamilies.semiBold,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 18,
+    marginRight: 4
   }
 });

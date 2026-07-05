@@ -19,36 +19,39 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontFamilies, styles, theme } from '@/src/components/styles';
-import { IconButton, ToggleSwitch } from '@/src/components/ui';
+import { IconButton } from '@/src/components/ui';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
 import { useSyncContext } from '@/src/context/SyncContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
-import { categoryColor, categoryIconName, categoryLabel } from '@/src/lib/categorySystem';
+import { categoryColor } from '@/src/lib/categorySystem';
 import { tintFromAccent } from '@/src/lib/color';
 import { DEFAULT_PARTNER_COLOR } from '@/src/lib/entityColors';
 import { displayName, formatYen } from '@/src/lib/format';
 import {
-  deleteRecurringGeneratedExpense,
-  generateRecurringExpenses,
   getBudgetTemplates,
   getErrorMessage,
+  getExpensesByMonth,
   getLedgerMembers,
   getRecurringExpenseRules,
-  saveRecurringExpenseRule,
   updateMyProfile,
   type LedgerMembership
 } from '@/src/lib/ledger';
+import {
+  currentMonthKey,
+  filterCurrentMonthSettledExpenses,
+  monthEndDateString,
+  monthStartDateString
+} from '@/src/lib/stats';
 import type { BudgetTemplate, LedgerMemberProfile, RecurringExpenseRule } from '@/src/types/database';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
-
 type ActionTone = 'primary' | 'accent' | 'warm' | 'danger' | 'neutral';
 
 type DashboardRowProps = {
   description: string;
   icon: IoniconName;
-  onPress: () => void;
+  onPress?: () => void;
   showDivider?: boolean;
   title: string;
   tone?: ActionTone;
@@ -79,15 +82,13 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const { session, signOut: signOutSession } = useAuth();
   const sync = useSyncContext();
-  const { activeLedger, ledgers, reloadLedgers, selectLedger } = useLedgerContext();
+  const { activeLedger, ledgers, reloadLedgers } = useLedgerContext();
   const { error, ledger, loading, reloadLedger } = useRequiredLedger();
   const ledgerId = ledger?.id;
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
   const [rules, setRules] = useState<RecurringExpenseRule[]>([]);
   const [budgetTemplates, setBudgetTemplates] = useState<BudgetTemplate[]>([]);
-  const [fixedExpensesExpanded, setFixedExpensesExpanded] = useState(false);
-  const [togglingRuleIds, setTogglingRuleIds] = useState<Set<string>>(() => new Set());
-  const [, setDetailsLoading] = useState(false);
+  const [monthSpent, setMonthSpent] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
 
@@ -95,30 +96,37 @@ export default function SettingsScreen() {
     if (!ledgerId) {
       setMembers([]);
       setRules([]);
+      setBudgetTemplates([]);
+      setMonthSpent(0);
       setDetailsError(null);
       return;
     }
 
-    setDetailsLoading(true);
     setDetailsError(null);
 
     try {
       const userId = session?.user.id || null;
-      const [nextMembers, nextRules, nextBudgetTemplates] = await Promise.all([
+      const monthKey = currentMonthKey();
+      const [nextMembers, nextRules, nextBudgetTemplates, nextExpenses] = await Promise.all([
         getLedgerMembers(ledgerId),
-        getRecurringExpenseRules(ledgerId),
-        userId ? getBudgetTemplates(ledgerId, userId, { refreshFirst: true }) : Promise.resolve([])
+        getRecurringExpenseRules(ledgerId, { refreshFirst: true }),
+        userId ? getBudgetTemplates(ledgerId, userId, { refreshFirst: true }) : Promise.resolve([]),
+        getExpensesByMonth(ledgerId, monthStartDateString(monthKey), monthEndDateString(monthKey), { refreshFirst: true })
       ]);
+      const settledExpenses = filterCurrentMonthSettledExpenses({
+        expenses: nextExpenses,
+        recurringRules: nextRules
+      });
       setMembers(nextMembers);
       setRules((currentRules) => preserveExistingRuleOrder(currentRules, nextRules));
       setBudgetTemplates(nextBudgetTemplates);
+      setMonthSpent(settledExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0));
     } catch (loadError) {
       setMembers([]);
       setRules([]);
       setBudgetTemplates([]);
+      setMonthSpent(0);
       setDetailsError(getErrorMessage(loadError));
-    } finally {
-      setDetailsLoading(false);
     }
   }, [ledgerId, session?.user.id]);
 
@@ -142,7 +150,7 @@ export default function SettingsScreen() {
   const activeRules = rules.filter((rule) => rule.is_active);
   const recurringTotal = activeRules.reduce((sum, rule) => sum + rule.amount_yen, 0);
   const budgetTotal = budgetTemplates.reduce((sum, template) => sum + template.amount_yen, 0);
-  const otherLedgers = ledgers.filter((membership) => membership.ledger.id !== activeLedger?.ledger.id).slice(0, 2);
+  const otherLedgers = ledgers.filter((membership) => membership.ledger.id !== activeLedger?.ledger.id);
 
   async function refresh() {
     setRefreshing(true);
@@ -168,16 +176,6 @@ export default function SettingsScreen() {
     }
   }
 
-  async function switchLedger(ledgerIdToSelect: string) {
-    try {
-      await selectLedger(ledgerIdToSelect);
-      await reloadLedger();
-      await loadDetails();
-    } catch (selectError) {
-      Alert.alert('Switch Failed', getErrorMessage(selectError));
-    }
-  }
-
   async function saveDisplayName(nextName: string) {
     if (!currentUserId || !currentMember) {
       Alert.alert('Save Failed', 'Please wait for your account details to load.');
@@ -197,59 +195,6 @@ export default function SettingsScreen() {
     } catch (saveError) {
       Alert.alert('Save Failed', getErrorMessage(saveError));
       return false;
-    }
-  }
-
-  async function toggleRecurringRule(rule: RecurringExpenseRule) {
-    if (!ledgerId || togglingRuleIds.has(rule.id)) {
-      return;
-    }
-
-    const nextIsActive = !rule.is_active;
-    const previousRules = rules;
-    setTogglingRuleIds((current) => new Set(current).add(rule.id));
-    setRules((current) => current.map((item) => (
-      item.id === rule.id ? { ...item, is_active: nextIsActive } : item
-    )));
-
-    try {
-      // Recurring rules are saved through the same full-replace path as the editor so offline sync
-      // queues one consistent mutation shape. Keep this payload in step with SaveRecurringExpenseRuleInput.
-      const ruleLedgerId = rule.ledger_id || ledgerId;
-      await saveRecurringExpenseRule({
-        id: rule.id,
-        ledgerId: ruleLedgerId,
-        name: rule.name,
-        categoryId: rule.category_id,
-        subcategory: rule.subcategory,
-        amountYen: rule.amount_yen,
-        paidBy: rule.paid_by,
-        ownership: rule.ownership || 'shared',
-        splitRatioA: rule.split_ratio_a,
-        splitRatioB: rule.split_ratio_b,
-        splitAmountA: rule.split_amount_a,
-        splitAmountB: rule.split_amount_b,
-        generateDay: rule.generate_day,
-        startMonth: rule.start_month,
-        endMonth: rule.end_month,
-        timezone: rule.timezone,
-        isActive: nextIsActive
-      });
-      if (nextIsActive) {
-        await generateRecurringExpenses(ruleLedgerId);
-      } else {
-        await deleteRecurringGeneratedExpense(ruleLedgerId, rule.id);
-      }
-      await loadDetails();
-    } catch (toggleError) {
-      setRules(previousRules);
-      Alert.alert('Update Failed', getErrorMessage(toggleError));
-    } finally {
-      setTogglingRuleIds((current) => {
-        const next = new Set(current);
-        next.delete(rule.id);
-        return next;
-      });
     }
   }
 
@@ -286,6 +231,10 @@ export default function SettingsScreen() {
     router.replace('/auth');
   }
 
+  function openLedgerHub(nextLedgerId: string) {
+    router.push({ pathname: '/settings/ledger/[ledgerId]', params: { ledgerId: nextLedgerId } });
+  }
+
   if (loading && !ledger) {
     return (
       <View style={styles.center}>
@@ -303,61 +252,57 @@ export default function SettingsScreen() {
     >
       <Text style={localStyles.title}>Settings</Text>
 
-      {error || detailsError ? <Text style={styles.error}>{error || detailsError}</Text> : null}
+      {error || detailsError ? <Text selectable style={styles.error}>{error || detailsError}</Text> : null}
 
-      <AccountCard
-        editableName={currentMember?.profile.display_name ?? ''}
-        email={accountEmail}
-        editingDisabled={!currentMember}
-        initials={initials}
-        name={accountName}
-        onSaveName={saveDisplayName}
-        onSignOut={signOut}
-      />
+      <View style={localStyles.panelGroup}>
+        <SectionHead title="Account" />
+        <AccountCard
+          editableName={currentMember?.profile.display_name ?? ''}
+          email={accountEmail}
+          editingDisabled={!currentMember}
+          initials={initials}
+          name={accountName}
+          onSaveName={saveDisplayName}
+          onSignOut={signOut}
+        />
+      </View>
 
       <LedgersPanel
         activeLedger={activeLedger}
+        budgetTotal={budgetTotal}
         inviteCode={ledger?.invite_code || null}
         memberCount={memberCount}
         members={members}
+        monthSpent={monthSpent}
         onManage={() => router.push('/settings/ledgers')}
+        onOpenBudget={() => router.push('/settings/budgets')}
+        onOpenFixed={() => router.push('/settings/recurring')}
+        onOpenLedger={openLedgerHub}
         onShare={shareInviteCode}
-        onSwitch={switchLedger}
         otherLedgers={otherLedgers}
-      />
-
-      <FixedExpensesPanel
-        activeCount={activeRules.length}
-        expanded={fixedExpensesExpanded}
-        members={members}
-        onOpen={() => router.push('/settings/recurring')}
-        onOpenRule={(rule) => router.push({ pathname: '/settings/recurring', params: { ruleId: rule.id } })}
-        onToggleExpanded={() => setFixedExpensesExpanded((current) => !current)}
-        onToggleRule={toggleRecurringRule}
         rules={rules}
-        togglingRuleIds={togglingRuleIds}
-        total={recurringTotal}
+        recurringTotal={recurringTotal}
       />
 
-      <Card>
-        <DashboardRow
-          description={`${budgetTemplates.length} categories · ${formatYen(budgetTotal)} monthly`}
-          icon="wallet-outline"
-          onPress={() => router.push('/settings/budgets')}
-          title="Budgets"
-          tone="accent"
-        />
-      </Card>
-
-      <Card>
-        <DashboardRow
-          description={`${sync.pending} pending · ${sync.failed} failed · ${sync.conflict} conflicts`}
-          icon="cloud-upload-outline"
-          onPress={() => router.push('/settings/sync')}
-          title="Sync Status"
-          tone={sync.failed || sync.conflict ? 'danger' : 'primary'}
-        />
-      </Card>
+      <View style={localStyles.panelGroup}>
+        <SectionHead title="App Preferences" />
+        <Card>
+          <DashboardRow
+            description="System"
+            icon="language-outline"
+            title="Language"
+            tone="neutral"
+          />
+          <DashboardRow
+            description={`${sync.pending} pending · ${sync.failed} failed · ${sync.conflict} conflicts`}
+            icon="cloud-upload-outline"
+            onPress={() => router.push('/settings/sync')}
+            showDivider
+            title="Sync Status"
+            tone={sync.failed || sync.conflict ? 'danger' : 'primary'}
+          />
+        </Card>
+      </View>
 
       <View style={localStyles.footer}>
         <Text style={localStyles.footerText}>My Ledger v1.0 · JPY</Text>
@@ -452,7 +397,7 @@ function AccountCard({
                 {!editingDisabled ? <Ionicons color={colors.subtle} name="pencil-outline" size={14} /> : null}
               </View>
             )}
-            <Text numberOfLines={1} style={localStyles.accountEmail}>{email}</Text>
+            <Text numberOfLines={1} selectable style={localStyles.accountEmail}>{email}</Text>
           </View>
         </Pressable>
 
@@ -480,9 +425,6 @@ function AccountCard({
           </View>
         ) : (
           <Pressable onPress={onSignOut} style={({ pressed }) => [localStyles.signOutButton, pressed && localStyles.pressed]}>
-            <View style={localStyles.signOutIcon}>
-              <Ionicons color={colors.danger} name="log-out-outline" size={14} />
-            </View>
             <Text style={localStyles.signOutText}>Sign out</Text>
           </Pressable>
         )}
@@ -493,280 +435,193 @@ function AccountCard({
 
 function LedgersPanel({
   activeLedger,
+  budgetTotal,
   inviteCode,
   memberCount,
   members,
+  monthSpent,
   onManage,
+  onOpenBudget,
+  onOpenFixed,
+  onOpenLedger,
   onShare,
-  onSwitch,
-  otherLedgers
+  otherLedgers,
+  recurringTotal,
+  rules
 }: {
   activeLedger: LedgerMembership | null;
+  budgetTotal: number;
   inviteCode: string | null;
   memberCount: number;
   members: LedgerMemberProfile[];
+  monthSpent: number;
   onManage: () => void;
+  onOpenBudget: () => void;
+  onOpenFixed: () => void;
+  onOpenLedger: (ledgerId: string) => void;
   onShare: () => void;
-  onSwitch: (ledgerId: string) => void;
   otherLedgers: LedgerMembership[];
+  recurringTotal: number;
+  rules: RecurringExpenseRule[];
 }) {
   const activeColor = colorForId(activeLedger?.ledger.id);
+  const activeRules = rules.filter((rule) => rule.is_active);
+  const budgetPercent = budgetTotal > 0 ? Math.min(999, Math.round((monthSpent / budgetTotal) * 100)) : 0;
 
   return (
     <View style={localStyles.panelGroup}>
-      <SectionHead title="Ledgers" />
+      <SectionHead
+        action={(
+          <Pressable onPress={onManage} style={({ pressed }) => [localStyles.manageLink, pressed && localStyles.pressed]}>
+            <Text style={localStyles.manageLinkText}>MANAGE</Text>
+            <Ionicons color={colors.secondary} name="chevron-forward" size={12} />
+          </Pressable>
+        )}
+        title="Ledgers"
+      />
       <Card>
         <View style={localStyles.activeLedger}>
-          <View style={localStyles.activeLedgerHeader}>
+          <Pressable
+            disabled={!activeLedger}
+            onPress={() => activeLedger ? onOpenLedger(activeLedger.ledger.id) : undefined}
+            style={({ pressed }) => [localStyles.activeLedgerHeader, pressed && localStyles.pressed]}
+          >
             <CircleIcon backgroundColor={activeColor} color="#FFFFFF" icon="journal" shadowColor={activeColor} size={46} />
             <View style={localStyles.activeLedgerText}>
               <View style={localStyles.activeLabelRow}>
-                <Ionicons color={colors.primaryDark} name="checkmark-circle" size={14} />
+                <Ionicons color={colors.secondary} name="checkmark-circle" size={13} />
                 <Text style={localStyles.activeLabel}>ACTIVE LEDGER</Text>
               </View>
-              <Text numberOfLines={1} style={localStyles.activeLedgerName}>
-                {activeLedger?.ledger.name || 'No ledger selected'}
-              </Text>
+              <View style={localStyles.activeNameLine}>
+                <Text numberOfLines={1} style={localStyles.activeLedgerName}>
+                  {activeLedger?.ledger.name || 'No ledger selected'}
+                </Text>
+                <View style={localStyles.activeInlineMembers}>
+                  {members.slice(0, 2).map((member, index) => (
+                    <MemberChip
+                      color={LEDGER_COLORS[index % LEDGER_COLORS.length]}
+                      key={member.user_id}
+                      label={displayName(member.profile.display_name).toUpperCase()}
+                    />
+                  ))}
+                  {memberCount === 0 ? <MemberChip color={colors.muted} label="NO MEMBERS" /> : null}
+                  {memberCount > 2 ? <MemberChip color={colors.muted} label={`+${memberCount - 2}`} /> : null}
+                </View>
+              </View>
             </View>
-          </View>
-
-          <View style={localStyles.memberChips}>
-            {members.slice(0, 3).map((member, index) => (
-              <MemberChip
-                color={LEDGER_COLORS[index % LEDGER_COLORS.length]}
-                key={member.user_id}
-                label={displayName(member.profile.display_name).toUpperCase()}
-              />
-            ))}
-            {memberCount === 0 ? <MemberChip color={colors.muted} label="NO MEMBERS" /> : null}
-            {memberCount > 3 ? <MemberChip color={colors.muted} label={`+${memberCount - 3}`} /> : null}
-          </View>
-
-          <View style={localStyles.inviteRow}>
-            <View style={localStyles.inviteCodeBox}>
-              <Ionicons color={colors.primaryDark} name="key-outline" size={16} />
-              <Text numberOfLines={1} style={localStyles.inviteCode}>
-                {inviteCode || 'NO INVITE CODE'}
-              </Text>
-            </View>
-            <PillButton disabled={!inviteCode} icon="share-social-outline" label="Share" onPress={onShare} />
-          </View>
+            <Ionicons color={colors.subtle} name="chevron-forward" size={18} />
+          </Pressable>
         </View>
 
-        {otherLedgers.length > 0 ? (
-          <View>
-            <View style={localStyles.fullDivider} />
-            <Text style={localStyles.switchLabel}>OTHER LEDGERS</Text>
-            {otherLedgers.map((membership, index) => (
-              <SwitchLedgerRow
-                key={membership.ledger.id}
-                last={index === otherLedgers.length - 1}
-                membership={membership}
-                onSwitch={() => onSwitch(membership.ledger.id)}
-              />
-            ))}
-          </View>
-        ) : null}
-
-        <View style={localStyles.fullDivider} />
-        <DashboardRow
-          description="Create, join, switch, or edit ledgers"
-          icon="albums-outline"
-          onPress={onManage}
-          title="Manage ledgers"
+        <ShortcutRow
+          amount={formatYen(budgetTotal)}
+          icon="wallet-outline"
+          iconColor={colors.secondary}
+          label="Budget"
+          onPress={onOpenBudget}
+          progress={budgetTotal > 0 ? Math.min(1, monthSpent / budgetTotal) : 0}
+          sublabel={budgetTotal > 0 ? `${budgetPercent}% used` : 'No budget set'}
         />
+        <ShortcutRow
+          amount={formatYen(recurringTotal)}
+          divider
+          dots={activeRules.map((rule) => categoryColor(rule.category_id))}
+          icon="repeat-outline"
+          iconColor={DEFAULT_PARTNER_COLOR}
+          label="Fixed Expenses"
+          onPress={onOpenFixed}
+          sublabel={`${activeRules.length} active`}
+        />
+
+        <InviteCodeLine inviteCode={inviteCode} onShare={onShare} />
+
+        <OtherLedgersSummary count={otherLedgers.length} onManage={onManage} />
       </Card>
     </View>
   );
 }
 
-function SwitchLedgerRow({
-  last,
-  membership,
-  onSwitch
+function ShortcutRow({
+  amount,
+  divider,
+  dots,
+  icon,
+  iconColor,
+  label,
+  onPress,
+  progress,
+  sublabel
 }: {
-  last: boolean;
-  membership: LedgerMembership;
-  onSwitch: () => void;
+  amount: string;
+  divider?: boolean;
+  dots?: string[];
+  icon: IoniconName;
+  iconColor: string;
+  label: string;
+  onPress: () => void;
+  progress?: number;
+  sublabel: string;
 }) {
-  const ledgerColor = colorForId(membership.ledger.id);
   return (
     <View>
-      <View style={localStyles.switchRow}>
-        <View style={localStyles.switchMain}>
-          <CircleIcon
-            backgroundColor={tintFromAccent(ledgerColor)}
-            color={ledgerColor}
-            icon="journal-outline"
-            size={38}
-          />
-          <View style={localStyles.switchText}>
-            <Text numberOfLines={1} style={localStyles.switchTitle}>{membership.ledger.name}</Text>
-            <Text style={localStyles.switchDescription}>{membership.isOwner ? 'Owner' : 'Member'} · available ledger</Text>
-          </View>
+      {divider ? <View style={localStyles.insetDivider} /> : null}
+      <Pressable onPress={onPress} style={({ pressed }) => [localStyles.shortcutRow, pressed && localStyles.pressed]}>
+        <CircleIcon backgroundColor={tintFromAccent(iconColor)} color={iconColor} icon={icon} size={38} />
+        <View style={localStyles.shortcutBody}>
+          <Text style={localStyles.shortcutTitle}>{label}</Text>
+          {typeof progress === 'number' ? (
+            <View style={localStyles.progressLine}>
+              <View style={localStyles.progressTrack}>
+                <View style={[localStyles.progressFill, { width: `${Math.min(1, Math.max(0, progress)) * 100}%` }]} />
+              </View>
+              <Text style={localStyles.shortcutSub}>{sublabel}</Text>
+            </View>
+          ) : (
+            <View style={localStyles.dotLine}>
+              {dots?.slice(0, 7).map((dotColor, index) => (
+                <View key={`${dotColor}-${index}`} style={[localStyles.categoryDot, { backgroundColor: dotColor }]} />
+              ))}
+              <Text style={localStyles.shortcutSub}>{sublabel}</Text>
+            </View>
+          )}
         </View>
-        <View style={localStyles.switchAction}>
-          <PillButton icon="swap-horizontal" label="Switch" onPress={onSwitch} />
+        <Text numberOfLines={1} style={localStyles.shortcutAmount}>{amount}</Text>
+        <Ionicons color={colors.subtle} name="chevron-forward" size={17} />
+      </Pressable>
+    </View>
+  );
+}
+
+function InviteCodeLine({ inviteCode, onShare }: { inviteCode: string | null; onShare: () => void }) {
+  return (
+    <View style={localStyles.inviteSlimRow}>
+      <Text style={localStyles.inviteCaption}>CODE</Text>
+      <Text numberOfLines={1} selectable style={localStyles.inviteCode}>{inviteCode || 'NO INVITE CODE'}</Text>
+      <Pressable
+        accessibilityLabel="Share invite code"
+        disabled={!inviteCode}
+        onPress={onShare}
+        style={({ pressed }) => [localStyles.copyButton, !inviteCode && localStyles.disabled, pressed && inviteCode && localStyles.pressed]}
+      >
+        <Ionicons color={colors.muted} name="copy-outline" size={14} />
+      </Pressable>
+    </View>
+  );
+}
+
+function OtherLedgersSummary({ count, onManage }: { count: number; onManage: () => void }) {
+  return (
+    <View style={localStyles.otherLedgersSection}>
+      <Pressable onPress={onManage} style={({ pressed }) => [localStyles.otherLedgersSummary, pressed && localStyles.pressed]}>
+        <CircleIcon backgroundColor="rgba(42,39,34,0.06)" color={colors.ink} icon="albums-outline" size={36} />
+        <View style={localStyles.otherLedgersText}>
+          <Text style={localStyles.otherLedgersTitle}>Other ledgers</Text>
+          <Text numberOfLines={1} style={localStyles.otherLedgersMeta}>
+            {count > 0 ? `${count} available in Manage Ledgers` : 'Create or join from Manage Ledgers'}
+          </Text>
         </View>
-      </View>
-      {!last ? <View style={localStyles.insetDivider} /> : null}
-    </View>
-  );
-}
-
-function FixedExpensesPanel({
-  activeCount,
-  expanded,
-  members,
-  onOpen,
-  onOpenRule,
-  onToggleExpanded,
-  onToggleRule,
-  rules,
-  togglingRuleIds,
-  total
-}: {
-  activeCount: number;
-  expanded: boolean;
-  members: LedgerMemberProfile[];
-  onOpen: () => void;
-  onOpenRule: (rule: RecurringExpenseRule) => void;
-  onToggleExpanded: () => void;
-  onToggleRule: (rule: RecurringExpenseRule) => void;
-  rules: RecurringExpenseRule[];
-  togglingRuleIds: Set<string>;
-  total: number;
-}) {
-  const inactiveCount = rules.length - activeCount;
-  const memberNameById = new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]));
-  const hasRules = rules.length > 0;
-
-  return (
-    <View style={localStyles.panelGroup}>
-      <SectionHead title="Fixed Expense" />
-      <Card>
-        <Pressable
-          onPress={hasRules ? onToggleExpanded : onOpen}
-          style={({ pressed }) => [
-            localStyles.fixedSummary,
-            expanded && hasRules ? localStyles.fixedSummaryExpanded : localStyles.fixedSummaryCollapsed,
-            pressed && localStyles.pressed
-          ]}
-        >
-          <View style={localStyles.fixedSummaryMain}>
-            <Text style={localStyles.totalLabel}>TOTAL / MONTH</Text>
-            <Text style={localStyles.totalValue}>{formatYen(total)}</Text>
-            <View style={localStyles.fixedPillRow}>
-              <InfoPill color={colors.primaryDark} label={`${activeCount} active`} />
-              <InfoPill color={inactiveCount > 0 ? colors.muted : colors.primaryDark} label={`${inactiveCount} paused`} />
-            </View>
-          </View>
-          <View style={localStyles.fixedSummaryActions}>
-            {hasRules ? (
-              <CircleIcon
-                backgroundColor="rgba(255,255,255,0.72)"
-                color={colors.ink}
-                icon={expanded ? 'chevron-up' : 'chevron-down'}
-                size={34}
-              />
-            ) : null}
-          </View>
-        </Pressable>
-        {expanded && hasRules ? (
-          <View>
-            <View style={localStyles.fullDivider} />
-            {rules.map((rule, index) => (
-              <FixedExpenseRuleRow
-                key={rule.id}
-                memberName={memberNameById.get(rule.paid_by) || 'Unknown payer'}
-                onPress={() => onOpenRule(rule)}
-                onToggle={() => onToggleRule(rule)}
-                rule={rule}
-                showDivider={index > 0}
-                toggling={togglingRuleIds.has(rule.id)}
-              />
-            ))}
-          </View>
-        ) : null}
-
-        <View style={localStyles.fullDivider} />
-        <DashboardRow
-          description="Create and manage monthly fixed expenses"
-          icon="add-circle-outline"
-          onPress={onOpen}
-          title="Add fixed expense"
-        />
-      </Card>
-    </View>
-  );
-}
-
-function FixedExpenseRuleRow({
-  memberName,
-  onPress,
-  onToggle,
-  rule,
-  showDivider,
-  toggling
-}: {
-  memberName: string;
-  onPress: () => void;
-  onToggle: () => void;
-  rule: RecurringExpenseRule;
-  showDivider: boolean;
-  toggling: boolean;
-}) {
-  const accent = categoryColor(rule.category_id);
-
-  return (
-    <View style={[localStyles.fixedRuleSegment, !rule.is_active && localStyles.fixedRuleSegmentPaused]}>
-      {showDivider ? <View style={localStyles.fixedRuleDivider} /> : null}
-      <View style={localStyles.fixedRuleRow}>
-        <Pressable onPress={onPress} style={({ pressed }) => [localStyles.fixedRuleMain, pressed && localStyles.pressed]}>
-          <CircleIcon
-            backgroundColor={tintFromAccent(accent)}
-            color={accent}
-            icon={categoryIconName(rule.category_id)}
-            size={42}
-          />
-          <View style={localStyles.fixedRuleBody}>
-            <View style={localStyles.fixedRuleTitleRow}>
-              <Text numberOfLines={1} style={localStyles.fixedRuleTitle}>{rule.name}</Text>
-              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.fixedRuleAmount}>{formatYen(rule.amount_yen)}</Text>
-            </View>
-            <View style={localStyles.fixedPillRow}>
-              <InfoPill color={accent} label={categoryLabel(rule.category_id)} />
-              <InfoPill color={colors.primaryDark} icon="calendar-outline" label={`Day ${rule.generate_day}`} />
-            </View>
-            <Text numberOfLines={1} style={localStyles.fixedRuleMeta}>
-              {rule.ownership === 'personal' ? 'Personal' : 'Shared'} · {memberName} pays{rule.ownership === 'shared' ? ` · ${rule.split_ratio_a}/${rule.split_ratio_b}` : ''}
-            </Text>
-          </View>
-        </Pressable>
-        <ToggleSwitch
-          accessibilityLabel={rule.is_active ? 'Turn fixed expense inactive' : 'Turn fixed expense active'}
-          active={rule.is_active}
-          disabled={toggling}
-          onPress={onToggle}
-        />
-      </View>
-    </View>
-  );
-}
-
-function InfoPill({
-  color,
-  icon,
-  label
-}: {
-  color: string;
-  icon?: IoniconName;
-  label: string;
-}) {
-  return (
-    <View style={[localStyles.infoPill, { backgroundColor: tintFromAccent(color) }]}>
-      {icon ? <Ionicons color={color} name={icon} size={12} /> : <View style={[localStyles.infoPillDot, { backgroundColor: color }]} />}
-      <Text numberOfLines={1} style={[localStyles.infoPillText, { color }]}>{label}</Text>
+        <Ionicons color={colors.subtle} name="chevron-forward" size={17} />
+      </Pressable>
     </View>
   );
 }
@@ -781,17 +636,25 @@ function DashboardRow({
   trailing
 }: DashboardRowProps) {
   const toneColor = colorForTone(tone);
+  const row = (
+    <View style={localStyles.dashboardRow}>
+      <CircleIcon backgroundColor={tintFromAccent(toneColor)} color={toneColor} icon={icon} size={40} />
+      <View style={localStyles.dashboardText}>
+        <Text style={[localStyles.dashboardTitle, tone === 'danger' && localStyles.dangerText]}>{title}</Text>
+        <Text numberOfLines={1} style={localStyles.dashboardDescription}>{description}</Text>
+      </View>
+      {trailing || (onPress ? <Ionicons color={colors.subtle} name="chevron-forward" size={18} /> : null)}
+    </View>
+  );
+
   return (
     <View>
-      <Pressable onPress={onPress} style={({ pressed }) => [localStyles.dashboardRow, pressed && localStyles.pressed]}>
-        <CircleIcon backgroundColor={tintFromAccent(toneColor)} color={toneColor} icon={icon} size={40} />
-        <View style={localStyles.dashboardText}>
-          <Text style={[localStyles.dashboardTitle, tone === 'danger' && localStyles.dangerText]}>{title}</Text>
-          <Text numberOfLines={1} style={localStyles.dashboardDescription}>{description}</Text>
-        </View>
-        {trailing || <Ionicons color={colors.subtle} name="chevron-forward" size={18} />}
-      </Pressable>
       {showDivider ? <View style={localStyles.insetDivider} /> : null}
+      {onPress ? (
+        <Pressable onPress={onPress} style={({ pressed }) => [pressed && localStyles.pressed]}>
+          {row}
+        </Pressable>
+      ) : row}
     </View>
   );
 }
@@ -802,37 +665,6 @@ function SectionHead({ action, title }: { action?: ReactNode; title: string }) {
       <Text style={localStyles.sectionTitle}>{title}</Text>
       {action}
     </View>
-  );
-}
-
-function PillButton({
-  disabled,
-  icon,
-  label,
-  onPress,
-  tone = 'primary'
-}: {
-  disabled?: boolean;
-  icon: IoniconName;
-  label: string;
-  onPress: () => void;
-  tone?: 'primary' | 'secondary';
-}) {
-  const secondary = tone === 'secondary';
-  return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        localStyles.pillButton,
-        secondary && localStyles.secondaryPill,
-        disabled && localStyles.disabled,
-        pressed && !disabled && localStyles.pressed
-      ]}
-    >
-      <Ionicons color={secondary ? colors.primaryDark : '#FFFFFF'} name={icon} size={15} />
-      <Text style={[localStyles.pillText, secondary && localStyles.secondaryPillText]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -934,6 +766,10 @@ const localStyles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18
   },
+  accountEditActions: {
+    flexDirection: 'row',
+    gap: 8
+  },
   accountName: {
     color: colors.ink,
     flexShrink: 1,
@@ -961,10 +797,6 @@ const localStyles = StyleSheet.create({
     gap: 6,
     minWidth: 0
   },
-  accountEditActions: {
-    flexDirection: 'row',
-    gap: 8
-  },
   accountPressable: {
     alignItems: 'center',
     flex: 1,
@@ -984,21 +816,19 @@ const localStyles = StyleSheet.create({
   },
   activeLabel: {
     color: colors.secondary,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 9,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 9.5,
     fontWeight: '800',
-    letterSpacing: 0.4,
+    letterSpacing: 1.2,
     lineHeight: 13
   },
   activeLabelRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 6,
-    marginBottom: 4
+    gap: 6
   },
   activeLedger: {
-    backgroundColor: colors.tint,
-    gap: 14,
+    backgroundColor: 'rgba(192,137,46,0.13)',
     padding: 16
   },
   activeLedgerHeader: {
@@ -1008,6 +838,7 @@ const localStyles = StyleSheet.create({
   },
   activeLedgerName: {
     color: colors.ink,
+    flexShrink: 1,
     fontFamily: fontFamilies.extraBold,
     fontSize: 18,
     fontWeight: '800',
@@ -1015,7 +846,20 @@ const localStyles = StyleSheet.create({
   },
   activeLedgerText: {
     flex: 1,
+    gap: 4,
     minWidth: 0
+  },
+  activeNameLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0
+  },
+  activeInlineMembers: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 6
   },
   avatar: {
     alignItems: 'center',
@@ -1039,14 +883,18 @@ const localStyles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
     borderColor: colors.line,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     overflow: 'hidden',
     shadowColor: '#2A2722',
-    shadowOffset: { height: 8, width: 0 },
+    shadowOffset: { height: 12, width: 0 },
     shadowOpacity: 0.06,
-    shadowRadius: 18,
-    elevation: 2
+    shadowRadius: 22
+  },
+  categoryDot: {
+    borderRadius: 2.5,
+    height: 5,
+    width: 5
   },
   circleIcon: {
     alignItems: 'center',
@@ -1054,11 +902,19 @@ const localStyles = StyleSheet.create({
   },
   content: {
     alignSelf: 'center',
-    gap: 24,
+    gap: 22,
     maxWidth: 720,
     padding: 18,
     paddingBottom: 128,
     width: '100%'
+  },
+  copyButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.05)',
+    borderRadius: 8,
+    height: 28,
+    justifyContent: 'center',
+    width: 28
   },
   dashboardDescription: {
     color: colors.muted,
@@ -1070,7 +926,7 @@ const localStyles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 12,
-    minHeight: 78,
+    minHeight: 72,
     paddingHorizontal: 16,
     paddingVertical: 12
   },
@@ -1092,243 +948,159 @@ const localStyles = StyleSheet.create({
   disabled: {
     opacity: 0.46
   },
-  fixedSummary: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    flexDirection: 'row',
-    gap: 14,
-    justifyContent: 'space-between',
-    minHeight: 96,
-    padding: 16
-  },
-  fixedSummaryActions: {
+  dotLine: {
     alignItems: 'center',
     flexDirection: 'row',
-    flexShrink: 0,
-    gap: 8
-  },
-  fixedSummaryCollapsed: {
-    borderRadius: 0
-  },
-  fixedSummaryExpanded: {
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0
-  },
-  fixedSummaryMain: {
-    flex: 1,
-    gap: 8,
-    minWidth: 0
-  },
-  fixedPillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 7
-  },
-  fixedRuleAmount: {
-    color: colors.ink,
-    flexShrink: 0,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20,
-    maxWidth: 132,
-    textAlign: 'right'
-  },
-  fixedRuleBody: {
-    flex: 1,
-    gap: 7,
-    minWidth: 0
-  },
-  fixedRuleDivider: {
-    backgroundColor: colors.line,
-    height: 1,
-    marginLeft: 74
-  },
-  fixedRuleMeta: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    lineHeight: 17
-  },
-  fixedRuleMain: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 14,
-    minHeight: 66,
-    minWidth: 0
-  },
-  fixedRuleRow: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    flexDirection: 'row',
-    gap: 12,
-    justifyContent: 'space-between',
-    minHeight: 92,
-    paddingHorizontal: 16,
-    paddingVertical: 13
-  },
-  fixedRuleSegment: {
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderColor: colors.line,
-    borderLeftWidth: 0,
-    borderRightWidth: 0,
-    overflow: 'hidden'
-  },
-  fixedRuleSegmentPaused: {
-    opacity: 0.62
-  },
-  fixedRuleTitle: {
-    color: colors.ink,
-    flex: 1,
-    fontFamily: fontFamilies.bold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20,
-    minWidth: 0
-  },
-  fixedRuleTitleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
+    gap: 4,
     minWidth: 0
   },
   footer: {
-    alignItems: 'center'
+    alignItems: 'center',
+    paddingTop: 2
   },
   footerText: {
     color: colors.subtle,
-    fontFamily: fontFamilies.mono,
-    fontSize: 12,
-    lineHeight: 16
-  },
-  fullDivider: {
-    backgroundColor: colors.line,
-    height: 1
-  },
-  insetDivider: {
-    backgroundColor: colors.line,
-    height: 1,
-    marginLeft: 68
-  },
-  infoPill: {
-    alignItems: 'center',
-    borderRadius: theme.radii.pill,
-    flexDirection: 'row',
-    gap: 5,
-    maxWidth: '100%',
-    minHeight: 24,
-    paddingHorizontal: 8,
-    paddingVertical: 4
-  },
-  infoPillDot: {
-    borderRadius: 3,
-    height: 6,
-    width: 6
-  },
-  infoPillText: {
     fontFamily: fontFamilies.monoBold,
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 13,
-    maxWidth: 150
+    lineHeight: 14
+  },
+  insetDivider: {
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(42,39,34,0.08)',
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 62
+  },
+  inviteCaption: {
+    color: '#B7AD9E',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    lineHeight: 14
   },
   inviteCode: {
-    color: colors.ink,
+    color: colors.subtle,
     flex: 1,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 1,
-    lineHeight: 18,
+    lineHeight: 16,
     minWidth: 0
   },
-  inviteCodeBox: {
+  inviteSlimRow: {
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.86)',
-    borderColor: colors.line,
-    borderRadius: 20,
-    borderWidth: 1,
-    flex: 1,
+    backgroundColor: 'rgba(42,39,34,0.035)',
+    borderTopColor: 'rgba(42,39,34,0.08)',
+    borderTopWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 8,
-    height: 40,
-    minWidth: 0,
-    paddingHorizontal: 12
+    marginTop: 2,
+    paddingBottom: 11,
+    paddingHorizontal: 16,
+    paddingTop: 11
   },
-  inviteRow: {
+  manageLink: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 10
+    gap: 2,
+    paddingHorizontal: 2,
+    paddingVertical: 3
+  },
+  manageLinkText: {
+    color: colors.secondary,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    lineHeight: 14
   },
   memberChip: {
     alignItems: 'center',
     borderRadius: theme.radii.pill,
     flexDirection: 'row',
-    gap: 6,
-    maxWidth: '100%',
-    paddingHorizontal: 9,
-    paddingVertical: 5
+    gap: 5,
+    maxWidth: 132,
+    paddingHorizontal: 8,
+    paddingVertical: 4
   },
   memberChipText: {
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    lineHeight: 14,
-    maxWidth: 130
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 9.5,
+    fontWeight: '800',
+    lineHeight: 13
   },
   memberChips: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8
+    gap: 7
   },
   memberDot: {
-    borderRadius: 4,
-    height: 8,
-    width: 8
+    borderRadius: 2.5,
+    height: 5,
+    width: 5
+  },
+  otherLedgersMeta: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16
+  },
+  otherLedgersSection: {
+    backgroundColor: 'rgba(42,39,34,0.055)',
+    borderTopColor: 'rgba(42,39,34,0.16)',
+    borderTopWidth: 1,
+    padding: 12
+  },
+  otherLedgersSummary: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: 'rgba(42,39,34,0.08)',
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 11,
+    minHeight: 58,
+    padding: 11
+  },
+  otherLedgersText: {
+    flex: 1,
+    minWidth: 0
+  },
+  otherLedgersTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 18
   },
   page: {
     backgroundColor: colors.bg,
     flex: 1
   },
   panelGroup: {
-    gap: 12
-  },
-  pillButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: theme.radii.pill,
-    flexDirection: 'row',
-    gap: 6,
-    height: 36,
-    justifyContent: 'center',
-    minWidth: 92,
-    paddingHorizontal: 13,
-    shadowColor: colors.primary,
-    shadowOffset: { height: 4, width: 0 },
-    shadowOpacity: 0.22,
-    shadowRadius: 10
-  },
-  pillText: {
-    color: '#FFFFFF',
-    fontFamily: fontFamilies.bold,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 14
+    gap: 8
   },
   pressed: {
-    opacity: 0.76
+    opacity: 0.7
   },
-  secondaryPill: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderColor: colors.line,
-    borderWidth: 1,
-    shadowOpacity: 0
+  progressFill: {
+    backgroundColor: colors.secondary,
+    borderRadius: 999,
+    height: '100%'
   },
-  secondaryPillText: {
-    color: colors.primaryDark
+  progressLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0
+  },
+  progressTrack: {
+    backgroundColor: 'rgba(42,39,34,0.08)',
+    borderRadius: 999,
+    height: 5,
+    overflow: 'hidden',
+    width: 76
   },
   sectionHead: {
     alignItems: 'center',
@@ -1337,104 +1109,71 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 4
   },
   sectionTitle: {
+    color: colors.muted,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    lineHeight: 16,
+    textTransform: 'uppercase'
+  },
+  shortcutAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    maxWidth: 96
+  },
+  shortcutBody: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0
+  },
+  shortcutRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 68,
+    paddingHorizontal: 16,
+    paddingVertical: 13
+  },
+  shortcutSub: {
+    color: colors.subtle,
+    flexShrink: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 11,
+    lineHeight: 15
+  },
+  shortcutTitle: {
     color: colors.ink,
     fontFamily: fontFamilies.bold,
-    fontSize: 17,
+    fontSize: 14,
     fontWeight: '700',
-    lineHeight: 22
+    lineHeight: 18
   },
   signOutButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(220,38,38,0.10)',
+    backgroundColor: 'rgba(192,57,43,0.10)',
     borderRadius: theme.radii.pill,
-    flexDirection: 'row',
-    gap: 7,
-    height: 36,
-    paddingLeft: 8,
-    paddingRight: 13
-  },
-  signOutIcon: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.72)',
-    borderRadius: 11,
-    height: 22,
-    justifyContent: 'center',
-    width: 22
+    paddingHorizontal: 13,
+    paddingVertical: 9
   },
   signOutText: {
     color: colors.danger,
-    fontFamily: fontFamilies.bold,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 14
-  },
-  switchAction: {
-    flexShrink: 0
-  },
-  switchDescription: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    lineHeight: 17
-  },
-  switchLabel: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 9,
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 10.5,
     fontWeight: '800',
-    letterSpacing: 0.4,
-    lineHeight: 13,
-    paddingBottom: 8,
-    paddingHorizontal: 16,
-    paddingTop: 12
-  },
-  switchMain: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: 12,
-    minWidth: 0
-  },
-  switchRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12
-  },
-  switchText: {
-    flex: 1,
-    minWidth: 0
-  },
-  switchTitle: {
-    color: colors.ink,
-    fontFamily: fontFamilies.bold,
-    fontSize: 15,
-    fontWeight: '700',
-    lineHeight: 20
+    letterSpacing: 0.3,
+    lineHeight: 14,
+    textTransform: 'uppercase'
   },
   title: {
     color: colors.ink,
     fontFamily: fontFamilies.extraBold,
     fontSize: 30,
     fontWeight: '800',
+    letterSpacing: 0,
     lineHeight: 36,
     paddingHorizontal: 4
-  },
-  totalLabel: {
-    color: colors.secondary,
-    fontFamily: fontFamilies.extraBold,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.4,
-    lineHeight: 13,
-    marginBottom: 8
-  },
-  totalValue: {
-    color: colors.ink,
-    fontFamily: fontFamilies.monoExtraBold,
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 26
   }
 });

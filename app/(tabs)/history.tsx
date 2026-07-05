@@ -32,6 +32,7 @@ import {
 } from '@/src/components/history/HistoryExpenseModals';
 import { useAuth } from '@/src/context/AuthContext';
 import { useLedgerContext } from '@/src/context/LedgerContext';
+import { SlidingValueText } from '@/src/components/SlidingValueText';
 import {
   categoryColor,
   categoryIconName,
@@ -57,6 +58,7 @@ import { subscribeToLedgerData } from '@/src/lib/localEvents';
 import { currentMonthStartDate } from '@/src/lib/recurring';
 import {
   addMonths,
+  amountForUser,
   buildMonthlyReceipts,
   currentMonthKey,
   filterCurrentMonthSettledExpenses,
@@ -76,6 +78,7 @@ type HistorySection = {
 };
 
 type LoadMode = 'background' | 'initial' | 'refresh';
+type HistoryScopeMode = 'personal' | 'together';
 type HistoryViewMode = 'ledger' | 'records';
 
 type LedgerYearGroup = {
@@ -146,6 +149,7 @@ export default function HistoryScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [historyScope, setHistoryScope] = useState<HistoryScopeMode>('personal');
   const [viewMode, setViewMode] = useState<HistoryViewMode>('ledger');
   const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(null);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
@@ -225,6 +229,7 @@ export default function HistoryScreen() {
     setRecurringRules(null);
     setProfiles({});
     setActiveMemberIds(new Set());
+    setHistoryScope('personal');
     setViewMode('ledger');
     setSelectedMonthKey(null);
     setCollapsedSections(new Set());
@@ -343,6 +348,11 @@ export default function HistoryScreen() {
   const otherUserId = useMemo(() => (
     sortedUserIds.find((userId) => userId !== currentUserId) || null
   ), [currentUserId, sortedUserIds]);
+  const currentUserColor = currentUserId ? userColorById.get(currentUserId) || DEFAULT_USER_COLOR : DEFAULT_USER_COLOR;
+  const otherUserColor = otherUserId ? userColorById.get(otherUserId) || colors.accent : colors.accent;
+  const canToggleHistoryScope = Boolean(currentUserId && otherUserId);
+  const effectiveHistoryScope: HistoryScopeMode = historyScope === 'together' && canToggleHistoryScope ? 'together' : 'personal';
+  const historyScopeViewerId = effectiveHistoryScope === 'personal' ? currentUserId : null;
 
   const activeMemberNames = useMemo(() => {
     const names = [...activeMemberIds]
@@ -360,13 +370,30 @@ export default function HistoryScreen() {
 
     return names.length > 0 ? names.join(' & ') : 'MEMBERS';
   }, [activeMemberIds, currentUserId, profileDisplayName]);
+  const personalScopeName = currentUserId
+    ? profileDisplayName(currentUserId).replace(/ \(left\)$/, '')
+    : 'ME';
+  const historyScopeLabel = effectiveHistoryScope === 'personal'
+    ? personalScopeName
+    : activeMemberNames;
+  const scopedHistoryItems = useMemo<FilteredExpense[]>(
+    () => buildScopedHistoryItems(settledExpenses, historyScopeViewerId),
+    [historyScopeViewerId, settledExpenses]
+  );
+  const scopedReceiptExpenses = useMemo(
+    () => scopedHistoryItems.map((item) => ({
+      ...item.expense,
+      amount_yen: item.displayAmountYen
+    })),
+    [scopedHistoryItems]
+  );
 
   const startMonthKey = useMemo(() => {
-    const firstExpense = settledExpenses
-      .map((expense) => expense.spent_on)
+    const firstExpense = scopedHistoryItems
+      .map((item) => item.expense.spent_on)
       .sort((a, b) => a.localeCompare(b))[0];
     return firstExpense ? monthKeyFromDateString(firstExpense) : null;
-  }, [settledExpenses]);
+  }, [scopedHistoryItems]);
 
   const monthlyReceipts = useMemo(() => {
     if (!startMonthKey) {
@@ -376,23 +403,14 @@ export default function HistoryScreen() {
     return buildMonthlyReceipts({
       currentUserId,
       endBeforeMonthKey: addMonths(currentMonthKey(), 1),
-      expenses: settledExpenses,
+      expenses: scopedReceiptExpenses,
       otherUserId,
       startMonthKey
     });
-  }, [currentUserId, otherUserId, settledExpenses, startMonthKey]);
+  }, [currentUserId, otherUserId, scopedReceiptExpenses, startMonthKey]);
 
   const trendPoints = useMemo(() => buildTrendPoints(monthlyReceipts), [monthlyReceipts]);
   const trendMax = useMemo(() => Math.max(0, ...trendPoints.map((point) => point.totalYen)), [trendPoints]);
-  const trendAverage = useMemo(() => {
-    const visibleReceipts = monthlyReceipts.slice(0, trendPoints.length);
-    if (visibleReceipts.length === 0) {
-      return 0;
-    }
-
-    return Math.round(visibleReceipts.reduce((sum, receipt) => sum + receipt.totalYen, 0) / visibleReceipts.length);
-  }, [monthlyReceipts, trendPoints.length]);
-
   const yearGroups = useMemo<LedgerYearGroup[]>(() => {
     const groups = new Map<string, MonthlyReceiptStat[]>();
     for (const receipt of monthlyReceipts) {
@@ -414,14 +432,13 @@ export default function HistoryScreen() {
       return [];
     }
 
-    return settledExpenses
-      .filter((expense) => monthKeyFromDateString(expense.spent_on) === selectedMonthKey)
-      .map((expense) => ({ displayAmountYen: expense.amount_yen, expense }))
+    return scopedHistoryItems
+      .filter((item) => monthKeyFromDateString(item.expense.spent_on) === selectedMonthKey)
       .sort((a, b) => (
         b.expense.spent_on.localeCompare(a.expense.spent_on) ||
         b.expense.created_at.localeCompare(a.expense.created_at)
       ));
-  }, [selectedMonthKey, settledExpenses]);
+  }, [scopedHistoryItems, selectedMonthKey]);
 
   const sections = useMemo<HistorySection[]>(() => {
     const sectionMap = new Map<string, FilteredExpense[]>();
@@ -546,6 +563,16 @@ export default function HistoryScreen() {
     router.setParams({ month: monthKey, date: undefined });
   }
 
+  function toggleHistoryScope() {
+    if (!canToggleHistoryScope) {
+      return;
+    }
+
+    setHistoryScope((current) => current === 'personal' ? 'together' : 'personal');
+    setCollapsedSections(new Set());
+    collapseDefaultsMonthRef.current = null;
+  }
+
   function closeMonth() {
     setViewMode('ledger');
     setSelectedMonthKey(null);
@@ -620,9 +647,7 @@ export default function HistoryScreen() {
           style={styles.page}
         >
           <LedgerHeader
-            activeMemberNames={activeMemberNames}
             error={error}
-            firstMonthKey={startMonthKey}
           />
 
           {loading ? <HistoryLedgerSkeleton /> : monthlyReceipts.length === 0 ? (
@@ -633,9 +658,14 @@ export default function HistoryScreen() {
           ) : (
             <>
               <TrendCard
-                averageYen={trendAverage}
+                canToggleScope={canToggleHistoryScope}
+                currentUserColor={currentUserColor}
+                historyScope={effectiveHistoryScope}
                 maxYen={trendMax}
+                onToggleScope={toggleHistoryScope}
+                otherUserColor={otherUserColor}
                 points={trendPoints}
+                scopeLabel={historyScopeLabel}
               />
               <LedgerTable
                 currentMonth={currentMonthKey()}
@@ -727,70 +757,113 @@ export default function HistoryScreen() {
 }
 
 function LedgerHeader({
-  activeMemberNames,
-  error,
-  firstMonthKey
+  error
 }: {
-  activeMemberNames: string;
   error: string | null;
-  firstMonthKey: string | null;
 }) {
   return (
     <View style={localStyles.ledgerHeader}>
       <Text style={localStyles.historyTitle}>History</Text>
-      <Text numberOfLines={1} style={localStyles.historySubtitle}>
-        EVERY MONTH SINCE {firstMonthKey ? formatMonthLabel(firstMonthKey).toUpperCase() : '--'} · {activeMemberNames.toUpperCase()}
-      </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
 }
 
 function TrendCard({
-  averageYen,
+  canToggleScope,
+  currentUserColor,
+  historyScope,
   maxYen,
-  points
+  onToggleScope,
+  otherUserColor,
+  points,
+  scopeLabel
 }: {
-  averageYen: number;
+  canToggleScope: boolean;
+  currentUserColor: string;
+  historyScope: HistoryScopeMode;
   maxYen: number;
+  onToggleScope: () => void;
+  otherUserColor: string;
   points: TrendPoint[];
+  scopeLabel: string;
 }) {
   const firstMonth = points[0]?.monthKey || null;
   const latestMonth = points[points.length - 1]?.monthKey || null;
 
   return (
-    <BentoCard style={localStyles.trendCard}>
-      <View style={localStyles.trendHead}>
-        <Text numberOfLines={1} style={localStyles.trendLabel}>MONTHLY TOTAL · {points.length} MONTHS</Text>
-        <Text numberOfLines={1} style={localStyles.trendAverage}>avg {formatYen(averageYen)}</Text>
+    <Pressable
+      accessibilityHint={canToggleScope ? 'Switches History between personal and together spending' : undefined}
+      accessibilityLabel={`History trend for ${scopeLabel}`}
+      accessibilityRole={canToggleScope ? 'button' : undefined}
+      disabled={!canToggleScope}
+      onPress={onToggleScope}
+      style={({ pressed }) => [pressed && canToggleScope && localStyles.trendCardPressed]}
+    >
+      <BentoCard style={localStyles.trendCard}>
+        <View style={localStyles.trendHead}>
+          <View style={localStyles.trendTitleGroup}>
+            <View style={localStyles.trendTitleTick} />
+            <Text numberOfLines={1} style={localStyles.trendLabel}>MONTHLY TOTAL</Text>
+          </View>
+          <ScopeIndicator
+            currentUserColor={currentUserColor}
+            historyScope={historyScope}
+            otherUserColor={otherUserColor}
+          />
+        </View>
+        <View style={localStyles.trendBars}>
+          {points.map((point) => {
+            const heightPercent = maxYen > 0 && point.totalYen > 0
+              ? Math.max(8, Math.round((point.totalYen / maxYen) * 100))
+              : 8;
+            return (
+              <View
+                key={point.monthKey}
+                style={[
+                  localStyles.trendBar,
+                  {
+                    backgroundColor: point.monthKey === latestMonth ? colors.accent : 'rgba(42,39,34,0.20)',
+                    opacity: point.totalYen > 0 ? 1 : 0.38,
+                    height: `${heightPercent}%`
+                  }
+                ]}
+              />
+            );
+          })}
+        </View>
+        <View style={localStyles.trendTicks}>
+          <Text style={localStyles.trendTick}>{firstMonth ? formatShortMonthWithYear(firstMonth) : '--'}</Text>
+          <Text style={[localStyles.trendTick, localStyles.trendTickCurrent]}>
+            {latestMonth ? formatShortMonthWithYear(latestMonth) : '--'}
+          </Text>
+        </View>
+      </BentoCard>
+    </Pressable>
+  );
+}
+
+function ScopeIndicator({
+  currentUserColor,
+  historyScope,
+  otherUserColor
+}: {
+  currentUserColor: string;
+  historyScope: HistoryScopeMode;
+  otherUserColor: string;
+}) {
+  return (
+    <View style={localStyles.scopeIndicator}>
+      <View style={localStyles.scopeDots}>
+        <View style={[localStyles.scopeDot, { backgroundColor: currentUserColor }]} />
+        {historyScope === 'together' ? (
+          <View style={[localStyles.scopeDot, localStyles.scopeDotOverlap, { backgroundColor: otherUserColor }]} />
+        ) : null}
       </View>
-      <View style={localStyles.trendBars}>
-        {points.map((point) => {
-          const heightPercent = maxYen > 0 && point.totalYen > 0
-            ? Math.max(8, Math.round((point.totalYen / maxYen) * 100))
-            : 8;
-          return (
-            <View
-              key={point.monthKey}
-              style={[
-                localStyles.trendBar,
-                {
-                  backgroundColor: point.monthKey === latestMonth ? colors.accent : 'rgba(42,39,34,0.20)',
-                  opacity: point.totalYen > 0 ? 1 : 0.38,
-                  height: `${heightPercent}%`
-                }
-              ]}
-            />
-          );
-        })}
-      </View>
-      <View style={localStyles.trendTicks}>
-        <Text style={localStyles.trendTick}>{firstMonth ? formatShortMonthWithYear(firstMonth) : '--'}</Text>
-        <Text style={[localStyles.trendTick, localStyles.trendTickCurrent]}>
-          {latestMonth ? formatShortMonthWithYear(latestMonth) : '--'}
-        </Text>
-      </View>
-    </BentoCard>
+      <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.scopeText}>
+        {historyScope === 'personal' ? 'ME' : 'TOGETHER'}
+      </Text>
+    </View>
   );
 }
 
@@ -853,7 +926,7 @@ function LedgerTable({
       <View style={localStyles.ledgerColumnHeader}>
         <Text style={[localStyles.ledgerColumnText, localStyles.monthColumn]}>MONTH</Text>
         <Text style={[localStyles.ledgerColumnText, localStyles.mixColumn]}>CATEGORY MIX</Text>
-        <Text style={[localStyles.ledgerColumnText, localStyles.amountColumn]}>TOTAL · Δ</Text>
+        <Text style={[localStyles.ledgerColumnText, localStyles.amountColumn]}>TOTAL</Text>
         <View style={localStyles.chevronColumn} />
       </View>
 
@@ -861,7 +934,15 @@ function LedgerTable({
         <View key={group.year}>
           <View style={localStyles.yearBand}>
             <Text style={localStyles.yearLabel}>{group.year}</Text>
-            <Text style={localStyles.yearSummary}>{group.months.length} months · {formatYen(group.totalYen)}</Text>
+            <View style={localStyles.yearSummaryGroup}>
+              <SlidingValueText
+                fitToWidth
+                formatValue={formatYen}
+                textStyle={localStyles.yearSummary}
+                value={group.totalYen}
+                wrapperStyle={localStyles.yearSummaryAmountSlot}
+              />
+            </View>
           </View>
           {group.months.map((receipt) => (
             <MonthLedgerRow
@@ -887,7 +968,6 @@ function MonthLedgerRow({
   receipt: MonthlyReceiptStat;
 }) {
   const capsules = categoryCapsules(receipt);
-  const delta = formatMonthDelta(receipt);
 
   return (
     <Pressable
@@ -910,8 +990,13 @@ function MonthLedgerRow({
         ))}
       </View>
       <View style={localStyles.monthAmountBlock}>
-        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.monthTotal}>{formatYen(receipt.totalYen)}</Text>
-        <Text numberOfLines={1} style={[localStyles.monthDelta, { color: delta.color }]}>{delta.label}</Text>
+        <SlidingValueText
+          fitToWidth
+          formatValue={formatYen}
+          textStyle={localStyles.monthTotal}
+          value={receipt.totalYen}
+          wrapperStyle={localStyles.monthTotalSlot}
+        />
       </View>
       <Ionicons color="#C7BDAE" name="chevron-forward" size={15} style={localStyles.monthChevron} />
     </Pressable>
@@ -972,7 +1057,13 @@ function SectionHeader({
         </Text>
       </View>
       <View style={localStyles.sectionTotalBlock}>
-        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.sectionTotal}>{formatYen(totalYen)}</Text>
+        <SlidingValueText
+          fitToWidth
+          formatValue={formatYen}
+          textStyle={localStyles.sectionTotal}
+          value={totalYen}
+          wrapperStyle={localStyles.sectionTotalSlot}
+        />
         <AnimatedChevron color={colors.ink} open={!collapsed} size={18} />
       </View>
     </Pressable>
@@ -1069,7 +1160,15 @@ function SectionDetailRow({
       <SwipeExpenseRow
         compact
         content={{
-          amount: formatYen(item.displayAmountYen),
+          amount: (
+            <SlidingValueText
+              fitToWidth
+              formatValue={formatYen}
+              textStyle={localStyles.rowAmount}
+              value={item.displayAmountYen}
+              wrapperStyle={localStyles.rowAmountSlot}
+            />
+          ),
           badges: expenseBadges(item.expense),
           category: displayCategory,
           dateLabel: formatHistoryDate(item.expense.spent_on),
@@ -1087,6 +1186,15 @@ function SectionDetailRow({
       />
     </View>
   );
+}
+
+function buildScopedHistoryItems(expenses: Expense[], viewerUserId: string | null): FilteredExpense[] {
+  return expenses
+    .map((expense) => ({
+      displayAmountYen: viewerUserId ? amountForUser(expense, viewerUserId) : expense.amount_yen,
+      expense
+    }))
+    .filter((item) => item.displayAmountYen > 0);
 }
 
 function buildTrendPoints(receipts: MonthlyReceiptStat[]): TrendPoint[] {
@@ -1182,22 +1290,6 @@ function categoryMixEntries(receipt: MonthlyReceiptStat): CapsuleEntry[] {
       label: categoryLabel('other')
     }] : [])
   ];
-}
-
-function formatMonthDelta(receipt: MonthlyReceiptStat) {
-  if (receipt.comparison.percentage === null) {
-    return { color: colors.subtle, label: '· —' };
-  }
-
-  const percentage = Math.round(Math.abs(receipt.comparison.percentage));
-  if (receipt.comparison.direction === 'over') {
-    return { color: colors.danger, label: `▲ ${percentage}%` };
-  }
-  if (receipt.comparison.direction === 'under') {
-    return { color: colors.success, label: `▼ ${percentage}%` };
-  }
-
-  return { color: colors.subtle, label: `· ${percentage}%` };
 }
 
 function rowTitle(expense: Expense) {
@@ -1325,13 +1417,6 @@ const localStyles = StyleSheet.create({
   emptyState: {
     gap: 12
   },
-  historySubtitle: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.mono,
-    fontSize: 11,
-    letterSpacing: 0.5,
-    lineHeight: 16
-  },
   historyTitle: {
     color: colors.ink,
     fontFamily: fontFamilies.extraBold,
@@ -1362,7 +1447,6 @@ const localStyles = StyleSheet.create({
     gap: 13
   },
   ledgerHeader: {
-    gap: 6,
     paddingHorizontal: 4,
     paddingVertical: 4
   },
@@ -1421,11 +1505,12 @@ const localStyles = StyleSheet.create({
   },
   mixColumn: {
     flex: 1,
-    minWidth: 0
+    minWidth: 0,
+    textAlign: 'center'
   },
   monthAmountBlock: {
     alignItems: 'flex-end',
-    gap: 2,
+    justifyContent: 'center',
     width: 76
   },
   monthChevron: {
@@ -1444,12 +1529,6 @@ const localStyles = StyleSheet.create({
   },
   monthColumn: {
     width: 42
-  },
-  monthDelta: {
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
-    fontWeight: '700',
-    lineHeight: 13
   },
   monthLedgerRow: {
     alignItems: 'center',
@@ -1471,6 +1550,11 @@ const localStyles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 17,
     textAlign: 'right'
+  },
+  monthTotalSlot: {
+    alignItems: 'flex-end',
+    height: 17,
+    width: 76
   },
   pressed: {
     opacity: 0.76
@@ -1508,6 +1592,49 @@ const localStyles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
     lineHeight: 31
+  },
+  rowAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 19,
+    fontWeight: '700',
+    letterSpacing: 0,
+    lineHeight: 24,
+    textAlign: 'right'
+  },
+  rowAmountSlot: {
+    alignItems: 'flex-end',
+    height: 24,
+    width: 118
+  },
+  scopeDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8
+  },
+  scopeDotOverlap: {
+    marginLeft: -3
+  },
+  scopeDots: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    minWidth: 13
+  },
+  scopeIndicator: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    maxWidth: 128,
+    marginLeft: 'auto',
+    minWidth: 0
+  },
+  scopeText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 1,
+    lineHeight: 12
   },
   sectionCard: {
     backgroundColor: colors.surface,
@@ -1559,7 +1686,6 @@ const localStyles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     lineHeight: 24,
-    maxWidth: 142,
     textAlign: 'right'
   },
   sectionTotalBlock: {
@@ -1567,19 +1693,17 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6
   },
+  sectionTotalSlot: {
+    alignItems: 'flex-end',
+    height: 24,
+    width: 142
+  },
   sectionWeekday: {
     color: colors.muted,
     fontFamily: fontFamilies.mono,
     fontSize: 10,
     letterSpacing: 0.5,
     lineHeight: 14
-  },
-  trendAverage: {
-    color: colors.muted,
-    fontFamily: fontFamilies.mono,
-    fontSize: 10.5,
-    lineHeight: 14,
-    textAlign: 'right'
   },
   trendBar: {
     borderTopLeftRadius: 2,
@@ -1591,29 +1715,45 @@ const localStyles = StyleSheet.create({
     alignItems: 'flex-end',
     flexDirection: 'row',
     gap: 3,
-    height: 50,
-    marginTop: 14
+    height: 46,
+    marginTop: 8
   },
   trendCard: {
     borderRadius: theme.radii.surface,
-    paddingHorizontal: 18,
-    paddingVertical: 17
+    paddingHorizontal: 16,
+    paddingVertical: 13
+  },
+  trendCardPressed: {
+    opacity: 0.78,
+    transform: [{ scale: 0.995 }]
   },
   trendHead: {
-    alignItems: 'baseline',
+    alignItems: 'center',
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
     justifyContent: 'space-between'
   },
   trendLabel: {
     color: colors.subtle,
-    flex: 1,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 9.5,
+    fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 1.5,
-    lineHeight: 13,
+    letterSpacing: 1.1,
+    lineHeight: 14,
     minWidth: 0
+  },
+  trendTitleGroup: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+    minWidth: 0
+  },
+  trendTitleTick: {
+    backgroundColor: colors.accent,
+    borderRadius: 999,
+    height: 15,
+    width: 5
   },
   trendTick: {
     color: colors.subtle,
@@ -1627,10 +1767,10 @@ const localStyles = StyleSheet.create({
   trendTicks: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8
+    marginTop: 6
   },
   yearBand: {
-    alignItems: 'baseline',
+    alignItems: 'center',
     backgroundColor: 'rgba(192,137,46,0.07)',
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1650,5 +1790,16 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.mono,
     fontSize: 11,
     lineHeight: 15
+  },
+  yearSummaryAmountSlot: {
+    alignItems: 'flex-end',
+    height: 15,
+    width: 96
+  },
+  yearSummaryGroup: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 4
   }
 });

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import type { ReactNode } from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { colors, fontFamilies, theme } from '@/src/components/styles';
@@ -11,7 +12,7 @@ export type ExpenseBadge = {
 };
 
 export type ExpenseRowCardContentData = {
-  amount: string;
+  amount: ReactNode;
   badges: ExpenseBadge[];
   category: string;
   dateLabel: string;
@@ -135,9 +136,7 @@ function StandardRowContent({
         <BadgeRow badges={badges} />
       </View>
       <View style={rowCardStyles.amountBlock}>
-        <Text ellipsizeMode="tail" numberOfLines={1} style={rowCardStyles.amount}>
-          {amount}
-        </Text>
+        <AmountContent amount={amount} />
       </View>
     </View>
   );
@@ -185,11 +184,25 @@ function CompactRowContent({
         ) : null}
       </View>
       <View style={[rowCardStyles.amountBlock, rowCardStyles.amountBlockCompact]}>
-        <Text ellipsizeMode="tail" numberOfLines={1} style={[rowCardStyles.amount, rowCardStyles.amountCompact]}>
-          {amount}
-        </Text>
+        <AmountContent amount={amount} compact />
         <BadgeRow badges={badges.slice(0, 2)} compact />
       </View>
+    </View>
+  );
+}
+
+function AmountContent({ amount, compact }: { amount: ReactNode; compact?: boolean }) {
+  if (typeof amount === 'string' || typeof amount === 'number') {
+    return (
+      <Text ellipsizeMode="tail" numberOfLines={1} style={[rowCardStyles.amount, compact && rowCardStyles.amountCompact]}>
+        {amount}
+      </Text>
+    );
+  }
+
+  return (
+    <View style={[rowCardStyles.amountNode, compact && rowCardStyles.amountNodeCompact]}>
+      {amount}
     </View>
   );
 }
@@ -241,6 +254,16 @@ const rowCardStyles = StyleSheet.create({
     lineHeight: 24,
     maxWidth: 118,
     minWidth: 92
+  },
+  amountNode: {
+    alignItems: 'flex-end',
+    height: 28,
+    justifyContent: 'center',
+    width: 132
+  },
+  amountNodeCompact: {
+    height: 24,
+    width: 118
   },
   badge: {
     backgroundColor: colors.tint,

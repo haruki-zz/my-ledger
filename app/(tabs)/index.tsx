@@ -12,8 +12,6 @@ import {
   View
 } from 'react-native';
 import Animated, {
-  Extrapolation,
-  interpolate,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -301,7 +299,7 @@ export default function DashboardScreen() {
             <Animated.View layout={heroResize}>
               <BentoCard variant="hero" style={localStyles.heroCard}>
                 <View style={localStyles.heroHeader}>
-                  <SectionLabel dark title={flipped ? 'Together' : 'Budget'} />
+                  <SectionLabel dark title={flipped ? 'Together Spend' : 'Budget'} />
                   <View style={localStyles.heroScopeDots}>
                     <View style={[localStyles.heroScopeDot, { backgroundColor: flipped ? currentUserColorOnDark : 'rgba(255,253,247,0.82)' }]} />
                     {flipped ? (
@@ -489,7 +487,7 @@ function BudgetRing({ budget }: { budget: BudgetSummary }) {
 
   return (
     <View style={localStyles.budgetRing}>
-      <Svg height={112} viewBox="0 0 100 100" width={112}>
+      <Svg height={104} viewBox="0 0 100 100" width={104}>
         <Circle
           cx={50}
           cy={50}
@@ -552,14 +550,12 @@ function HeroCombinedFace({
 }) {
   return (
     <View style={localStyles.heroCombinedFace}>
-      <Text style={localStyles.heroMetricLabel}>TOGETHER SPEND</Text>
       <SlidingValueText
         formatValue={formatYen}
         textStyle={localStyles.heroAmount}
         value={stats.totalYen}
         wrapperStyle={localStyles.heroAmountSlot}
       />
-      <Text style={localStyles.heroCombinedCaption}>Budgets are personal, so the household face focuses on split.</Text>
       <View style={localStyles.heroSecondary}>
         <View style={localStyles.memberSplitRow}>
           <MemberSplit
@@ -605,9 +601,10 @@ function HeroFlipZone({
   const hasMeasuredFaces = frontFaceHeight > 0 && backFaceHeight > 0;
   const rotorShellStyle = useAnimatedStyle(() => {
     const fallbackHeight = frontFaceHeight || backFaceHeight || 116;
+    const stableHeight = Math.max(frontFaceHeight, backFaceHeight);
     return {
       height: canFlip && hasMeasuredFaces
-        ? interpolate(progress.value, [0, 1], [frontFaceHeight, backFaceHeight], Extrapolation.CLAMP)
+        ? stableHeight
         : fallbackHeight
     };
   });
@@ -690,20 +687,28 @@ function DashboardNowCard({
       <View style={localStyles.nowMetric}>
         <View style={localStyles.nowMetricLine}>
           <Text style={localStyles.nowMetricLabel}>Today</Text>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.nowMetricAmount}>
-            {formatYen(today?.amountYen || 0)}
-          </Text>
+          <SlidingValueText
+            fitToWidth
+            formatValue={formatYen}
+            textStyle={localStyles.nowMetricAmount}
+            value={today?.amountYen || 0}
+            wrapperStyle={localStyles.nowMetricAmountSlot}
+          />
         </View>
-        <ActualMixBar segments={today?.categories || []} />
+        <ActualMixCapsules segments={today?.categories || []} />
       </View>
       <View style={localStyles.nowMetric}>
         <View style={localStyles.nowMetricLine}>
           <Text style={localStyles.nowMetricLabel}>Week</Text>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.nowMetricAmount}>
-            {formatYen(weekAmount)}
-          </Text>
+          <SlidingValueText
+            fitToWidth
+            formatValue={formatYen}
+            textStyle={localStyles.nowMetricAmount}
+            value={weekAmount}
+            wrapperStyle={localStyles.nowMetricAmountSlot}
+          />
         </View>
-        <ActualMixBar segments={weekMix} />
+        <ActualMixCapsules segments={weekMix} />
       </View>
       <Text numberOfLines={2} style={[localStyles.nowCaption, { color: ratioTone }]}>
         {todayRatio === null ? 'bars show actual category share' : `today is ${todayRatio.toFixed(1)}x daily allowance`}
@@ -740,9 +745,13 @@ function DashboardRecentCard({
                   {item.relativeTime}
                 </Text>
               </View>
-              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.recentAmount}>
-                {formatCompactYen(item.amountYen)}
-              </Text>
+              <SlidingValueText
+                fitToWidth
+                formatValue={formatCompactYen}
+                textStyle={localStyles.recentAmount}
+                value={item.amountYen}
+                wrapperStyle={localStyles.recentAmountSlot}
+              />
             </View>
           );
         }) : (
@@ -769,7 +778,7 @@ function DashboardHeatMapCard({
 
   return (
     <BentoCard style={localStyles.insightCard}>
-      <CardHeader right="MTD" title="HEAT MAP" />
+      <CardHeader title="HEAT MAP" />
       <View style={localStyles.heatWeekdayRow}>
         {['Sun', '', 'Tue', '', 'Thu', '', 'Sat'].map((label, index) => (
           <Text key={`${label}-${index}`} style={localStyles.heatWeekday}>{label}</Text>
@@ -793,13 +802,6 @@ function DashboardHeatMapCard({
             ))}
           </View>
         ))}
-      </View>
-      <View style={localStyles.heatLegend}>
-        <Text style={localStyles.heatLegendText}>less</Text>
-        {HEAT_COLORS.slice(1).map((color) => (
-          <View key={color} style={[localStyles.heatLegendDot, { backgroundColor: color }]} />
-        ))}
-        <Text style={[localStyles.heatLegendText, localStyles.heatLegendMore]}>more</Text>
       </View>
     </BentoCard>
   );
@@ -830,7 +832,7 @@ function DashboardBudgetWatchCard({
 
   return (
     <BentoCard style={localStyles.insightCard}>
-      <CardHeader right={flipped ? '' : overCount > 0 ? `${overCount} OVER` : 'OK'} title="BUDGET WATCH" />
+      <CardHeader right={flipped ? '' : overCount > 0 ? `${overCount} OVER` : 'ON TRACK'} title="TREND" />
       {flipped ? (
         <View style={localStyles.quietState}>
           <Ionicons color={colors.subtle} name="lock-closed-outline" size={17} />
@@ -844,9 +846,12 @@ function DashboardBudgetWatchCard({
                 <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.budgetWatchName}>
                   {category.category}
                 </Text>
-                <Text style={[localStyles.budgetWatchPercent, { color }]}>
-                  {Math.round(ratio * 100)}%
-                </Text>
+                <SlidingValueText
+                  formatValue={formatRoundedPercent}
+                  textStyle={[localStyles.budgetWatchPercent, { color }]}
+                  value={ratio * 100}
+                  wrapperStyle={localStyles.budgetWatchPercentSlot}
+                />
               </View>
               <BudgetOverflowBar color={color} ratio={ratio} />
             </View>
@@ -876,7 +881,7 @@ function DashboardSevenDayActivity({
   const average = days.length > 0
     ? days.reduce((sum, day) => sum + day.amountYen, 0) / days.length
     : 0;
-  const maxAmount = Math.max(1, ...days.map((day) => day.amountYen));
+  const activityScale = resolveActivityScale(days.map((day) => day.amountYen));
   const peakDay = days.reduce<SpendDay | null>((peak, day) => (
     !peak || day.amountYen > peak.amountYen ? day : peak
   ), null);
@@ -888,7 +893,7 @@ function DashboardSevenDayActivity({
       <View style={localStyles.activityBars}>
         {days.map((day) => {
           const selected = selectedDate === day.date;
-          const barHeight = Math.max(4, Math.round((day.amountYen / maxAmount) * 76));
+          const barHeight = resolveActivityBarHeight(day.amountYen, activityScale);
           const ratio = average > 0 ? day.amountYen / average : 0;
           const barColor = activityColorForRatio(ratio);
           return (
@@ -917,9 +922,13 @@ function DashboardSevenDayActivity({
               <Text style={[localStyles.activityDate, selected && localStyles.activityDateSelected]}>
                 {formatMonthDay(day.date)}
               </Text>
-              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.activityAmount}>
-                {formatCompactYen(day.amountYen).replace('¥', '')}
-              </Text>
+              <SlidingValueText
+                fitToWidth
+                formatValue={formatCompactYenWithoutCurrency}
+                textStyle={localStyles.activityAmount}
+                value={day.amountYen}
+                wrapperStyle={localStyles.activityAmountSlot}
+              />
             </Pressable>
           );
         })}
@@ -968,7 +977,7 @@ function CardHeader({
     <View style={localStyles.cardHeader}>
       <SectionLabel title={title} />
       {right ? (
-        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.cardHeaderRight}>
+        <Text numberOfLines={1} style={localStyles.cardHeaderRight}>
           {right}
         </Text>
       ) : null}
@@ -985,25 +994,25 @@ function SectionLabel({ dark = false, title }: { dark?: boolean; title: string }
   );
 }
 
-function ActualMixBar({ segments }: { segments: CategoryMixSegment[] }) {
+function ActualMixCapsules({ segments }: { segments: CategoryMixSegment[] }) {
   const total = segments.reduce((sum, segment) => sum + segment.amountYen, 0);
   const visibleSegments = total > 0 ? segments.filter((segment) => segment.amountYen > 0).slice(0, 5) : [];
+  const slots = buildMixCapsuleSlots(visibleSegments, 20);
 
   return (
-    <View style={localStyles.actualMixTrack}>
-      {visibleSegments.length > 0 ? visibleSegments.map((segment, index) => (
+    <View style={localStyles.actualMixCapsuleGrid}>
+      {slots.length > 0 ? slots.map((color, index) => (
         <View
-          key={`${segment.label}-${index}`}
+          key={`mix-cap-${index}-${color}`}
           style={[
-            localStyles.actualMixSegment,
-            {
-              backgroundColor: segment.color,
-              flexGrow: Math.max(1, segment.amountYen)
-            }
+            localStyles.actualMixCapsule,
+            { backgroundColor: color }
           ]}
         />
       )) : (
-        <View style={localStyles.actualMixEmpty} />
+        Array.from({ length: 20 }, (_, index) => (
+          <View key={`mix-empty-${index}`} style={[localStyles.actualMixCapsule, localStyles.actualMixEmpty]} />
+        ))
       )}
     </View>
   );
@@ -1355,6 +1364,90 @@ function mergeCategoryMix(categories: CategoryMixSegment[]) {
     }));
 }
 
+function buildMixCapsuleSlots(segments: CategoryMixSegment[], slots: number) {
+  if (segments.length === 0) {
+    return [];
+  }
+
+  const counts = largestRemainder(
+    segments.map((segment) => segment.amountYen),
+    slots
+  );
+  const colorsOut: string[] = [];
+  segments.forEach((segment, index) => {
+    for (let slot = 0; slot < counts[index]; slot += 1) {
+      colorsOut.push(segment.color);
+    }
+  });
+  return colorsOut.slice(0, slots);
+}
+
+function largestRemainder(weights: number[], slots: number) {
+  const total = weights.reduce((sum, value) => sum + value, 0);
+  if (total <= 0) {
+    return weights.map(() => 0);
+  }
+
+  const exact = weights.map((weight) => (weight / total) * slots);
+  const counts = exact.map(Math.floor);
+  let used = counts.reduce((sum, value) => sum + value, 0);
+  const order = exact
+    .map((value, index) => ({ index, remainder: value - counts[index] }))
+    .sort((a, b) => b.remainder - a.remainder);
+  let orderIndex = 0;
+
+  while (used < slots && order.length > 0) {
+    counts[order[orderIndex % order.length].index] += 1;
+    used += 1;
+    orderIndex += 1;
+  }
+
+  return counts;
+}
+
+function resolveActivityScale(amounts: number[]) {
+  const nonZeroAmounts = amounts.filter((amount) => amount > 0).sort((a, b) => a - b);
+  if (nonZeroAmounts.length === 0) {
+    return {
+      maxAmount: 1,
+      unit: 1
+    };
+  }
+
+  const maxAmount = nonZeroAmounts[nonZeroAmounts.length - 1];
+  const median = quantile(nonZeroAmounts, 0.5);
+  return {
+    maxAmount,
+    unit: Math.max(500, Math.min(median || maxAmount, maxAmount / 12))
+  };
+}
+
+function resolveActivityBarHeight(amount: number, scale: { maxAmount: number; unit: number }) {
+  if (amount <= 0) {
+    return 4;
+  }
+
+  const denominator = Math.log1p(scale.maxAmount / scale.unit);
+  const ratio = denominator > 0
+    ? Math.log1p(amount / scale.unit) / denominator
+    : 1;
+  return Math.max(8, Math.round(Math.min(1, ratio) * 76));
+}
+
+function quantile(sortedValues: number[], q: number) {
+  if (sortedValues.length === 0) {
+    return 0;
+  }
+
+  const position = (sortedValues.length - 1) * q;
+  const base = Math.floor(position);
+  const rest = position - base;
+  const next = sortedValues[base + 1];
+  return next === undefined
+    ? sortedValues[base]
+    : sortedValues[base] + rest * (next - sortedValues[base]);
+}
+
 function budgetColorForRatio(ratio: number) {
   if (ratio < 0.6) {
     return BUDGET_UNDER_COLOR;
@@ -1430,6 +1523,14 @@ function formatShortDate(dateString: string) {
   return new Intl.DateTimeFormat('en-US', { day: 'numeric', month: 'short' }).format(parseDateString(dateString));
 }
 
+function formatCompactYenWithoutCurrency(value: number) {
+  return formatCompactYen(value).replace('¥', '');
+}
+
+function formatRoundedPercent(value: number) {
+  return `${Math.round(value)}%`;
+}
+
 function formatFullDay(dateString: string) {
   return new Intl.DateTimeFormat('en-US', { day: '2-digit', month: 'short', weekday: 'short' }).format(parseDateString(dateString));
 }
@@ -1453,8 +1554,12 @@ const localStyles = StyleSheet.create({
     fontSize: 9.5,
     fontWeight: '700',
     lineHeight: 12,
-    maxWidth: 42,
     textAlign: 'center'
+  },
+  activityAmountSlot: {
+    alignItems: 'center',
+    height: 12,
+    width: 42
   },
   activityBar: {
     borderRadius: 8,
@@ -1505,19 +1610,22 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.monoBold,
     fontWeight: '700'
   },
-  actualMixEmpty: {
-    backgroundColor: 'rgba(42,39,34,0.05)',
-    flex: 1
-  },
-  actualMixSegment: {
-    height: '100%'
-  },
-  actualMixTrack: {
-    backgroundColor: 'rgba(42,39,34,0.08)',
+  actualMixCapsule: {
     borderRadius: 999,
+    height: 18,
+    width: 4
+  },
+  actualMixCapsuleGrid: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
     flexDirection: 'row',
-    height: 10,
-    overflow: 'hidden'
+    gap: 2.5,
+    height: 22,
+    justifyContent: 'space-between'
+  },
+  actualMixEmpty: {
+    borderRadius: 999,
+    backgroundColor: 'rgba(42,39,34,0.06)'
   },
   budgetOverflowBudgetZone: {
     backgroundColor: 'rgba(42,39,34,0.07)',
@@ -1548,9 +1656,9 @@ const localStyles = StyleSheet.create({
   },
   budgetRing: {
     alignItems: 'center',
-    height: 112,
+    height: 104,
     justifyContent: 'center',
-    width: 112
+    width: 104
   },
   budgetRingCaption: {
     color: 'rgba(255,253,247,0.54)',
@@ -1577,7 +1685,7 @@ const localStyles = StyleSheet.create({
     justifyContent: 'space-between'
   },
   budgetWatchList: {
-    gap: 10
+    gap: 8
   },
   budgetWatchName: {
     color: colors.ink,
@@ -1595,8 +1703,13 @@ const localStyles = StyleSheet.create({
     lineHeight: 15,
     textAlign: 'right'
   },
+  budgetWatchPercentSlot: {
+    alignItems: 'flex-end',
+    height: 15,
+    minWidth: 44
+  },
   budgetWatchRow: {
-    gap: 5
+    gap: 4
   },
   cardHeader: {
     alignItems: 'center',
@@ -1608,11 +1721,12 @@ const localStyles = StyleSheet.create({
   cardHeaderRight: {
     color: colors.muted,
     flexShrink: 0,
-    fontFamily: fontFamilies.monoSemiBold,
+    fontFamily: fontFamilies.monoBold,
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 1.1,
     lineHeight: 14,
-    maxWidth: 76,
+    maxWidth: 92,
     textAlign: 'right'
   },
   content: {
@@ -1695,36 +1809,18 @@ const localStyles = StyleSheet.create({
   },
   heatCell: {
     aspectRatio: 1,
-    borderRadius: 4,
-    borderWidth: 1.5,
+    borderRadius: 3.5,
+    borderWidth: 1.3,
     flex: 1
   },
   heatGrid: {
-    gap: 4
+    alignSelf: 'center',
+    gap: 2,
+    width: '88%'
   },
   heatGridRow: {
     flexDirection: 'row',
-    gap: 4
-  },
-  heatLegend: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 4
-  },
-  heatLegendDot: {
-    borderRadius: 999,
-    height: 7,
-    width: 12
-  },
-  heatLegendMore: {
-    marginLeft: 'auto',
-    textAlign: 'right'
-  },
-  heatLegendText: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.mono,
-    fontSize: 8.5,
-    lineHeight: 11
+    gap: 2
   },
   heatWeekday: {
     color: colors.subtle,
@@ -1736,8 +1832,10 @@ const localStyles = StyleSheet.create({
     textAlign: 'center'
   },
   heatWeekdayRow: {
+    alignSelf: 'center',
     flexDirection: 'row',
-    gap: 4
+    gap: 2,
+    width: '88%'
   },
   heroAmount: {
     color: '#FFFDF7',
@@ -1778,12 +1876,6 @@ const localStyles = StyleSheet.create({
     paddingBottom: 14,
     paddingHorizontal: 16,
     paddingTop: 14
-  },
-  heroCombinedCaption: {
-    color: 'rgba(255,253,247,0.58)',
-    fontFamily: fontFamilies.regular,
-    fontSize: 11.5,
-    lineHeight: 15
   },
   heroCombinedFace: {
     gap: 9
@@ -1862,12 +1954,13 @@ const localStyles = StyleSheet.create({
     transform: [{ scale: 0.96 }]
   },
   insightCard: {
+    aspectRatio: 1,
     borderRadius: 16,
     flex: 1,
-    gap: 10,
-    minHeight: 148,
+    gap: 8,
     minWidth: 0,
-    padding: 13
+    overflow: 'hidden',
+    padding: 12
   },
   insightGrid: {
     flexDirection: 'row',
@@ -2068,25 +2161,30 @@ const localStyles = StyleSheet.create({
   },
   nowCaption: {
     fontFamily: fontFamilies.regular,
-    fontSize: 11,
-    lineHeight: 14
+    fontSize: 10.5,
+    lineHeight: 13
   },
   nowMetric: {
-    gap: 5
+    gap: 4
   },
   nowMetricAmount: {
     color: colors.ink,
-    flex: 1,
     fontFamily: fontFamilies.monoBold,
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: '700',
     lineHeight: 17,
     textAlign: 'right'
   },
+  nowMetricAmountSlot: {
+    alignItems: 'flex-end',
+    flex: 1,
+    height: 17,
+    minWidth: 0
+  },
   nowMetricLabel: {
     color: colors.ink,
     fontFamily: fontFamilies.semiBold,
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: '600',
     lineHeight: 17
   },
@@ -2113,13 +2211,17 @@ const localStyles = StyleSheet.create({
   },
   recentAmount: {
     color: colors.ink,
-    flexShrink: 0,
     fontFamily: fontFamilies.monoBold,
     fontSize: 11,
     fontWeight: '700',
     lineHeight: 15,
-    maxWidth: 55,
     textAlign: 'right'
+  },
+  recentAmountSlot: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    height: 15,
+    width: 55
   },
   recentDot: {
     borderRadius: 4,

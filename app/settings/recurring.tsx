@@ -179,9 +179,10 @@ function draftFromRule(rule: RecurringExpenseRule): Draft {
 }
 
 export default function RecurringExpenseRulesScreen() {
-  const params = useLocalSearchParams<{ ruleId?: string | string[] }>();
+  const params = useLocalSearchParams<{ mode?: string | string[]; ruleId?: string | string[] }>();
   const { error: ledgerError, ledger, loading: ledgerLoading, reloadLedger } = useRequiredLedger();
   const [members, setMembers] = useState<LedgerMemberProfile[]>([]);
+  const [rules, setRules] = useState<RecurringExpenseRule[]>([]);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft([]));
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [nativeGenerateDatePickerOpen, setNativeGenerateDatePickerOpen] = useState(false);
@@ -189,13 +190,17 @@ export default function RecurringExpenseRulesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [togglingRuleIds, setTogglingRuleIds] = useState<Set<string>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const [generateDatePickerDragY] = useState(() => new Animated.Value(0));
   const initializedRuleIdRef = useRef<string | null>(null);
 
   const ledgerId = ledger?.id;
   const ruleIdParam = Array.isArray(params.ruleId) ? params.ruleId[0] : params.ruleId;
+  const modeParam = Array.isArray(params.mode) ? params.mode[0] : params.mode;
   const editingRuleId = ruleIdParam || null;
+  const addingRule = modeParam === 'add';
+  const showingList = !editingRuleId && !addingRule;
   const hasTwoMembers = members.length === 2;
   const orphanSharedRule = Boolean(editingRuleId && draft.id && draft.ownership === 'shared' && !hasTwoMembers);
   const formLocked = orphanSharedRule;
@@ -217,9 +222,10 @@ export default function RecurringExpenseRulesScreen() {
     try {
       const [nextMembers, nextRules] = await Promise.all([
         getLedgerMembers(currentLedger.id),
-        editingRuleId ? getRecurringExpenseRules(currentLedger.id) : Promise.resolve([])
+        getRecurringExpenseRules(currentLedger.id, { refreshFirst: mode !== 'background' })
       ]);
       setMembers(nextMembers);
+      setRules(nextRules);
       if (editingRuleId) {
         const selectedRule = nextRules.find((rule) => rule.id === editingRuleId);
         if (!selectedRule) {
@@ -235,7 +241,9 @@ export default function RecurringExpenseRulesScreen() {
       }
 
       initializedRuleIdRef.current = null;
-      setDraft((current) => (current.paidBy ? current : emptyDraft(nextMembers)));
+      if (addingRule) {
+        setDraft((current) => (current.paidBy ? current : emptyDraft(nextMembers)));
+      }
     } catch (loadError) {
       setError(getErrorMessage(loadError));
     } finally {
@@ -246,7 +254,7 @@ export default function RecurringExpenseRulesScreen() {
         setRefreshing(false);
       }
     }
-  }, [editingRuleId, ledger]);
+  }, [addingRule, editingRuleId, ledger]);
 
   useEffect(() => {
     setCategoryMenuOpen(false);
@@ -258,6 +266,10 @@ export default function RecurringExpenseRulesScreen() {
       return;
     }
 
+    if (!addingRule) {
+      return;
+    }
+
     const previousEditingRuleId = initializedRuleIdRef.current;
     initializedRuleIdRef.current = null;
     setDraft((current) => (
@@ -265,7 +277,7 @@ export default function RecurringExpenseRulesScreen() {
         ? emptyDraft(members)
         : current
     ));
-  }, [editingRuleId, members]);
+  }, [addingRule, editingRuleId, members]);
 
   useEffect(() => {
     void load(undefined, 'initial');
@@ -520,6 +532,56 @@ export default function RecurringExpenseRulesScreen() {
     }
   }
 
+  async function toggleExistingRule(rule: RecurringExpenseRule) {
+    if (!ledger || togglingRuleIds.has(rule.id)) {
+      return;
+    }
+
+    const nextIsActive = !rule.is_active;
+    const previousRules = rules;
+    setTogglingRuleIds((current) => new Set(current).add(rule.id));
+    setRules((current) => current.map((item) => (
+      item.id === rule.id ? { ...item, is_active: nextIsActive } : item
+    )));
+
+    try {
+      await saveRecurringExpenseRule({
+        id: rule.id,
+        ledgerId: rule.ledger_id || ledger.id,
+        name: rule.name,
+        categoryId: rule.category_id,
+        subcategory: rule.subcategory,
+        amountYen: rule.amount_yen,
+        paidBy: rule.paid_by,
+        ownership: rule.ownership || 'shared',
+        splitRatioA: rule.split_ratio_a,
+        splitRatioB: rule.split_ratio_b,
+        splitAmountA: rule.split_amount_a,
+        splitAmountB: rule.split_amount_b,
+        generateDay: rule.generate_day,
+        startMonth: rule.start_month,
+        endMonth: rule.end_month,
+        timezone: rule.timezone,
+        isActive: nextIsActive
+      });
+      if (nextIsActive) {
+        await generateRecurringExpenses(rule.ledger_id || ledger.id, currentMonthStartDate());
+      } else {
+        await deleteRecurringGeneratedExpense(rule.ledger_id || ledger.id, rule.id);
+      }
+      await load(ledger, 'background');
+    } catch (toggleError) {
+      setRules(previousRules);
+      Alert.alert('Update Failed', getErrorMessage(toggleError));
+    } finally {
+      setTogglingRuleIds((current) => {
+        const next = new Set(current);
+        next.delete(rule.id);
+        return next;
+      });
+    }
+  }
+
   if ((ledgerLoading || loading) && (!ledger || (editingRuleId && draft.id !== editingRuleId))) {
     return (
       <View style={styles.center}>
@@ -537,6 +599,67 @@ export default function RecurringExpenseRulesScreen() {
           <Text style={[styles.buttonText, styles.secondaryButtonText]}>Go back</Text>
         </Pressable>
       </View>
+    );
+  }
+
+  if (showingList) {
+    const activeRules = rules.filter((rule) => rule.is_active);
+    const pausedCount = rules.length - activeRules.length;
+    const activeTotal = activeRules.reduce((sum, rule) => sum + rule.amount_yen, 0);
+    const memberNameById = new Map(members.map((member) => [member.user_id, displayName(member.profile.display_name)]));
+
+    return (
+      <ScrollView
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        style={styles.page}
+        contentContainerStyle={localStyles.listContent}
+      >
+        {ledgerError || error ? <Text selectable style={styles.error}>{ledgerError || error}</Text> : null}
+        <Text style={localStyles.ledgerSubtitle}>{ledger?.name || 'Current ledger'}</Text>
+
+        <View style={localStyles.fixedSummaryCard}>
+          <View>
+            <Text style={localStyles.fixedSummaryLabel}>ACTIVE MONTHLY TOTAL</Text>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.fixedSummaryAmount}>{formatYen(activeTotal)}</Text>
+          </View>
+          <View style={localStyles.fixedSummaryPills}>
+            <CountPill color={colors.primaryDark} label={`${activeRules.length} active`} />
+            <CountPill color={pausedCount > 0 ? colors.muted : colors.primaryDark} label={`${pausedCount} paused`} />
+          </View>
+        </View>
+
+        <View style={localStyles.ruleListCard}>
+          {rules.length > 0 ? rules.map((rule, index) => (
+            <FixedExpenseListRow
+              key={rule.id}
+              memberName={memberNameById.get(rule.paid_by) || 'Unknown payer'}
+              onOpen={() => router.push({ pathname: '/settings/recurring', params: { ruleId: rule.id } })}
+              onToggle={() => {
+                void toggleExistingRule(rule);
+              }}
+              rule={rule}
+              showDivider={index > 0}
+              toggling={togglingRuleIds.has(rule.id)}
+            />
+          )) : (
+            <View style={localStyles.emptyRules}>
+              <Ionicons color={colors.muted} name="repeat-outline" size={24} />
+              <Text style={localStyles.emptyRulesTitle}>No fixed expenses</Text>
+              <Text style={localStyles.emptyRulesText}>Add rent, subscriptions, utilities, or other monthly rules.</Text>
+            </View>
+          )}
+        </View>
+
+        <Pressable
+          onPress={() => router.push({ pathname: '/settings/recurring', params: { mode: 'add' } })}
+          style={({ pressed }) => [localStyles.addRuleButton, pressed && localStyles.pressed]}
+        >
+          <Ionicons color="#FFFFFF" name="add" size={18} />
+          <Text style={localStyles.addRuleText}>Add fixed expense</Text>
+        </Pressable>
+
+        {loading ? <ActivityIndicator /> : null}
+      </ScrollView>
     );
   }
 
@@ -652,6 +775,7 @@ export default function RecurringExpenseRulesScreen() {
       contentContainerStyle={styles.content}
     >
       {ledgerError || error ? <Text style={styles.error}>{ledgerError || error}</Text> : null}
+      <Text style={localStyles.ledgerSubtitle}>{ledger?.name || 'Current ledger'}</Text>
       {orphanSharedRule ? (
         <Text selectable style={styles.error}>
           This shared fixed expense needs two ledger members to edit. You can turn it off or delete it.
@@ -978,6 +1102,66 @@ export default function RecurringExpenseRulesScreen() {
   );
 }
 
+function FixedExpenseListRow({
+  memberName,
+  onOpen,
+  onToggle,
+  rule,
+  showDivider,
+  toggling
+}: {
+  memberName: string;
+  onOpen: () => void;
+  onToggle: () => void;
+  rule: RecurringExpenseRule;
+  showDivider: boolean;
+  toggling: boolean;
+}) {
+  const accent = categoryColor(rule.category_id);
+  return (
+    <View style={!rule.is_active && localStyles.rulePaused}>
+      {showDivider ? <View style={localStyles.listInsetDivider} /> : null}
+      <View style={localStyles.ruleListRow}>
+        <Pressable onPress={onOpen} style={({ pressed }) => [localStyles.ruleListMain, pressed && localStyles.pressed]}>
+          <View style={[localStyles.ruleIcon, { backgroundColor: tintFromAccent(accent) }]}>
+            <Ionicons color={accent} name={categoryIconName(rule.category_id)} size={18} />
+          </View>
+          <View style={localStyles.ruleListBody}>
+            <View style={localStyles.ruleListTitleRow}>
+              <Text numberOfLines={1} style={localStyles.ruleListTitle}>{rule.name}</Text>
+              <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.ruleListAmount}>{formatYen(rule.amount_yen)}</Text>
+            </View>
+            <View style={localStyles.ruleMetaLine}>
+              <View style={[localStyles.ruleDot, { backgroundColor: accent }]} />
+              <Text numberOfLines={1} style={localStyles.ruleMetaText}>
+                {categoryLabel(rule.category_id)} / Day {rule.generate_day} / {memberName}
+              </Text>
+            </View>
+          </View>
+        </Pressable>
+        {toggling ? (
+          <ActivityIndicator size="small" />
+        ) : (
+          <ToggleSwitch
+            accessibilityLabel={rule.is_active ? 'Pause fixed expense' : 'Activate fixed expense'}
+            active={rule.is_active}
+            onPress={onToggle}
+          />
+        )}
+      </View>
+    </View>
+  );
+}
+
+function CountPill({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={localStyles.countPill}>
+      <View style={[localStyles.countPillDot, { backgroundColor: color }]} />
+      <Text style={localStyles.countPillText}>{label}</Text>
+    </View>
+  );
+}
+
 function GroupHead({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
   return (
     <View style={localStyles.groupHead}>
@@ -1072,6 +1256,22 @@ function initialFor(label: string) {
 }
 
 const localStyles = StyleSheet.create({
+  addRuleButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: theme.radii.pill,
+    flexDirection: 'row',
+    gap: 7,
+    justifyContent: 'center',
+    minHeight: 48
+  },
+  addRuleText: {
+    color: '#FFFFFF',
+    fontFamily: fontFamilies.extraBold,
+    fontSize: 13,
+    fontWeight: '800',
+    lineHeight: 18
+  },
   activeRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1109,6 +1309,29 @@ const localStyles = StyleSheet.create({
     minWidth: 170,
     paddingLeft: 12,
     paddingRight: 8
+  },
+  countPill: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,253,247,0.13)',
+    borderColor: 'rgba(255,253,247,0.18)',
+    borderWidth: 1,
+    borderRadius: theme.radii.pill,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5
+  },
+  countPillDot: {
+    borderRadius: 2.5,
+    height: 5,
+    width: 5
+  },
+  countPillText: {
+    color: '#FFFDF7',
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 10,
+    fontWeight: '800',
+    lineHeight: 13
   },
   balanceAmount: {
     color: colors.ink,
@@ -1267,6 +1490,26 @@ const localStyles = StyleSheet.create({
     backgroundColor: colors.line,
     height: 1
   },
+  emptyRules: {
+    alignItems: 'center',
+    gap: 7,
+    minHeight: 132,
+    padding: 20
+  },
+  emptyRulesText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.regular,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center'
+  },
+  emptyRulesTitle: {
+    color: colors.ink,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20
+  },
   fieldGroup: {
     gap: 10
   },
@@ -1277,6 +1520,32 @@ const localStyles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.4,
     lineHeight: 15
+  },
+  fixedSummaryAmount: {
+    color: '#FFFDF7',
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 30,
+    fontWeight: '800',
+    lineHeight: 36
+  },
+  fixedSummaryCard: {
+    backgroundColor: colors.primary,
+    borderRadius: 20,
+    gap: 12,
+    padding: 18
+  },
+  fixedSummaryLabel: {
+    color: 'rgba(255,253,247,0.58)',
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 9.5,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    lineHeight: 13
+  },
+  fixedSummaryPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8
   },
   groupCard: {
     gap: 14,
@@ -1307,6 +1576,29 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.regular,
     fontSize: 12,
     lineHeight: 17
+  },
+  ledgerSubtitle: {
+    color: colors.subtle,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10.5,
+    fontWeight: '700',
+    letterSpacing: 1,
+    lineHeight: 15,
+    paddingHorizontal: 4,
+    textTransform: 'uppercase'
+  },
+  listContent: {
+    alignSelf: 'center',
+    gap: 14,
+    maxWidth: 720,
+    padding: 18,
+    paddingBottom: 44,
+    width: '100%'
+  },
+  listInsetDivider: {
+    backgroundColor: 'rgba(42,39,34,0.08)',
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 66
   },
   memberAvatar: {
     alignItems: 'center',
@@ -1439,6 +1731,89 @@ const localStyles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.76
+  },
+  ruleDot: {
+    borderRadius: 2.5,
+    height: 5,
+    width: 5
+  },
+  ruleIcon: {
+    alignItems: 'center',
+    borderRadius: 14,
+    height: 42,
+    justifyContent: 'center',
+    width: 42
+  },
+  ruleListAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+    maxWidth: 100
+  },
+  ruleListBody: {
+    flex: 1,
+    gap: 4,
+    minWidth: 0
+  },
+  ruleListCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.line,
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+    shadowColor: '#2A2722',
+    shadowOffset: { height: 12, width: 0 },
+    shadowOpacity: 0.06,
+    shadowRadius: 22
+  },
+  ruleListMain: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minWidth: 0
+  },
+  ruleListRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 72,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  ruleListTitle: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.bold,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 20,
+    minWidth: 0
+  },
+  ruleListTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0
+  },
+  ruleMetaLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    minWidth: 0
+  },
+  ruleMetaText: {
+    color: colors.subtle,
+    flex: 1,
+    fontFamily: fontFamilies.regular,
+    fontSize: 12,
+    lineHeight: 16,
+    minWidth: 0
+  },
+  rulePaused: {
+    opacity: 0.48
   },
   saveButton: {
     alignItems: 'center',
