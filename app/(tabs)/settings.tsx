@@ -7,7 +7,6 @@ import {
   Pressable,
   RefreshControl,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -146,7 +145,6 @@ export default function SettingsScreen() {
   const accountName = displayName(currentMember?.profile.display_name || session?.user.email?.split('@')[0] || 'User');
   const accountEmail = session?.user.email || 'Current session';
   const initials = initialsFor(accountName, accountEmail);
-  const memberCount = members.length;
   const activeRules = rules.filter((rule) => rule.is_active);
   const recurringTotal = activeRules.reduce((sum, rule) => sum + rule.amount_yen, 0);
   const budgetTotal = budgetTemplates.reduce((sum, template) => sum + template.amount_yen, 0);
@@ -159,20 +157,6 @@ export default function SettingsScreen() {
       await loadDetails();
     } finally {
       setRefreshing(false);
-    }
-  }
-
-  async function shareInviteCode() {
-    if (!ledger) {
-      return;
-    }
-
-    try {
-      await Share.share({
-        message: `Join "${ledger.name}" with invite code: ${ledger.invite_code}`
-      });
-    } catch (shareError) {
-      Alert.alert('Share Failed', getErrorMessage(shareError));
     }
   }
 
@@ -270,15 +254,11 @@ export default function SettingsScreen() {
       <LedgersPanel
         activeLedger={activeLedger}
         budgetTotal={budgetTotal}
-        inviteCode={ledger?.invite_code || null}
-        memberCount={memberCount}
-        members={members}
         monthSpent={monthSpent}
         onManage={() => router.push('/settings/ledgers')}
         onOpenBudget={() => router.push('/settings/budgets')}
         onOpenFixed={() => router.push('/settings/recurring')}
         onOpenLedger={openLedgerHub}
-        onShare={shareInviteCode}
         otherLedgers={otherLedgers}
         rules={rules}
         recurringTotal={recurringTotal}
@@ -436,30 +416,22 @@ function AccountCard({
 function LedgersPanel({
   activeLedger,
   budgetTotal,
-  inviteCode,
-  memberCount,
-  members,
   monthSpent,
   onManage,
   onOpenBudget,
   onOpenFixed,
   onOpenLedger,
-  onShare,
   otherLedgers,
   recurringTotal,
   rules
 }: {
   activeLedger: LedgerMembership | null;
   budgetTotal: number;
-  inviteCode: string | null;
-  memberCount: number;
-  members: LedgerMemberProfile[];
   monthSpent: number;
   onManage: () => void;
   onOpenBudget: () => void;
   onOpenFixed: () => void;
   onOpenLedger: (ledgerId: string) => void;
-  onShare: () => void;
   otherLedgers: LedgerMembership[];
   recurringTotal: number;
   rules: RecurringExpenseRule[];
@@ -470,15 +442,7 @@ function LedgersPanel({
 
   return (
     <View style={localStyles.panelGroup}>
-      <SectionHead
-        action={(
-          <Pressable onPress={onManage} style={({ pressed }) => [localStyles.manageLink, pressed && localStyles.pressed]}>
-            <Text style={localStyles.manageLinkText}>MANAGE</Text>
-            <Ionicons color={colors.secondary} name="chevron-forward" size={12} />
-          </Pressable>
-        )}
-        title="Ledgers"
-      />
+      <SectionHead title="Ledgers" />
       <Card>
         <View style={localStyles.activeLedger}>
           <Pressable
@@ -496,17 +460,6 @@ function LedgersPanel({
                 <Text numberOfLines={1} style={localStyles.activeLedgerName}>
                   {activeLedger?.ledger.name || 'No ledger selected'}
                 </Text>
-                <View style={localStyles.activeInlineMembers}>
-                  {members.slice(0, 2).map((member, index) => (
-                    <MemberChip
-                      color={LEDGER_COLORS[index % LEDGER_COLORS.length]}
-                      key={member.user_id}
-                      label={displayName(member.profile.display_name).toUpperCase()}
-                    />
-                  ))}
-                  {memberCount === 0 ? <MemberChip color={colors.muted} label="NO MEMBERS" /> : null}
-                  {memberCount > 2 ? <MemberChip color={colors.muted} label={`+${memberCount - 2}`} /> : null}
-                </View>
               </View>
             </View>
             <Ionicons color={colors.subtle} name="chevron-forward" size={18} />
@@ -530,10 +483,8 @@ function LedgersPanel({
           iconColor={DEFAULT_PARTNER_COLOR}
           label="Fixed Expenses"
           onPress={onOpenFixed}
-          sublabel={`${activeRules.length} active`}
+          sublabel={null}
         />
-
-        <InviteCodeLine inviteCode={inviteCode} onShare={onShare} />
 
         <OtherLedgersSummary count={otherLedgers.length} onManage={onManage} />
       </Card>
@@ -560,7 +511,7 @@ function ShortcutRow({
   label: string;
   onPress: () => void;
   progress?: number;
-  sublabel: string;
+  sublabel: string | null;
 }) {
   return (
     <View>
@@ -574,36 +525,19 @@ function ShortcutRow({
               <View style={localStyles.progressTrack}>
                 <View style={[localStyles.progressFill, { width: `${Math.min(1, Math.max(0, progress)) * 100}%` }]} />
               </View>
-              <Text style={localStyles.shortcutSub}>{sublabel}</Text>
+              {sublabel ? <Text style={localStyles.shortcutSub}>{sublabel}</Text> : null}
             </View>
           ) : (
             <View style={localStyles.dotLine}>
-              {dots?.slice(0, 7).map((dotColor, index) => (
+              {dots?.map((dotColor, index) => (
                 <View key={`${dotColor}-${index}`} style={[localStyles.categoryDot, { backgroundColor: dotColor }]} />
               ))}
-              <Text style={localStyles.shortcutSub}>{sublabel}</Text>
+              {sublabel ? <Text style={localStyles.shortcutSub}>{sublabel}</Text> : null}
             </View>
           )}
         </View>
         <Text numberOfLines={1} style={localStyles.shortcutAmount}>{amount}</Text>
         <Ionicons color={colors.subtle} name="chevron-forward" size={17} />
-      </Pressable>
-    </View>
-  );
-}
-
-function InviteCodeLine({ inviteCode, onShare }: { inviteCode: string | null; onShare: () => void }) {
-  return (
-    <View style={localStyles.inviteSlimRow}>
-      <Text style={localStyles.inviteCaption}>CODE</Text>
-      <Text numberOfLines={1} selectable style={localStyles.inviteCode}>{inviteCode || 'NO INVITE CODE'}</Text>
-      <Pressable
-        accessibilityLabel="Share invite code"
-        disabled={!inviteCode}
-        onPress={onShare}
-        style={({ pressed }) => [localStyles.copyButton, !inviteCode && localStyles.disabled, pressed && inviteCode && localStyles.pressed]}
-      >
-        <Ionicons color={colors.muted} name="copy-outline" size={14} />
       </Pressable>
     </View>
   );
@@ -707,15 +641,6 @@ function CircleIcon({
       ]}
     >
       <Ionicons color={color} name={icon} size={Math.round(size * 0.46)} />
-    </View>
-  );
-}
-
-function MemberChip({ color, label }: { color: string; label: string }) {
-  return (
-    <View style={[localStyles.memberChip, { backgroundColor: tintFromAccent(color) }]}>
-      <View style={[localStyles.memberDot, { backgroundColor: color }]} />
-      <Text numberOfLines={1} style={[localStyles.memberChipText, { color }]}>{label}</Text>
     </View>
   );
 }
@@ -855,12 +780,6 @@ const localStyles = StyleSheet.create({
     gap: 8,
     minWidth: 0
   },
-  activeInlineMembers: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexShrink: 0,
-    gap: 6
-  },
   avatar: {
     alignItems: 'center',
     backgroundColor: colors.primary,
@@ -908,14 +827,6 @@ const localStyles = StyleSheet.create({
     paddingBottom: 128,
     width: '100%'
   },
-  copyButton: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(42,39,34,0.05)',
-    borderRadius: 8,
-    height: 28,
-    justifyContent: 'center',
-    width: 28
-  },
   dashboardDescription: {
     color: colors.muted,
     fontFamily: fontFamilies.regular,
@@ -951,6 +862,7 @@ const localStyles = StyleSheet.create({
   dotLine: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 4,
     minWidth: 0
   },
@@ -970,75 +882,6 @@ const localStyles = StyleSheet.create({
     backgroundColor: 'rgba(42,39,34,0.08)',
     height: StyleSheet.hairlineWidth,
     marginLeft: 62
-  },
-  inviteCaption: {
-    color: '#B7AD9E',
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    lineHeight: 14
-  },
-  inviteCode: {
-    color: colors.subtle,
-    flex: 1,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-    minWidth: 0
-  },
-  inviteSlimRow: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(42,39,34,0.035)',
-    borderTopColor: 'rgba(42,39,34,0.08)',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 2,
-    paddingBottom: 11,
-    paddingHorizontal: 16,
-    paddingTop: 11
-  },
-  manageLink: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 2,
-    paddingHorizontal: 2,
-    paddingVertical: 3
-  },
-  manageLinkText: {
-    color: colors.secondary,
-    fontFamily: fontFamilies.monoExtraBold,
-    fontSize: 10.5,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    lineHeight: 14
-  },
-  memberChip: {
-    alignItems: 'center',
-    borderRadius: theme.radii.pill,
-    flexDirection: 'row',
-    gap: 5,
-    maxWidth: 132,
-    paddingHorizontal: 8,
-    paddingVertical: 4
-  },
-  memberChipText: {
-    fontFamily: fontFamilies.monoExtraBold,
-    fontSize: 9.5,
-    fontWeight: '800',
-    lineHeight: 13
-  },
-  memberChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 7
-  },
-  memberDot: {
-    borderRadius: 2.5,
-    height: 5,
-    width: 5
   },
   otherLedgersMeta: {
     color: colors.subtle,

@@ -99,7 +99,7 @@ export default function RootLayout() {
               {/* Settings detail screens */}
               <Stack.Screen name="settings/ledgers" options={{ headerLeft: settingsHeaderLeft, title: 'Ledgers' }} />
               <Stack.Screen name="settings/ledger/[ledgerId]" options={{ headerLeft: settingsHeaderLeft, title: 'Ledger' }} />
-              <Stack.Screen name="settings/budgets" options={{ headerLeft: settingsHeaderLeft, title: 'Budgets' }} />
+              <Stack.Screen name="settings/budgets" options={{ headerLeft: settingsHeaderLeft, title: 'Budget' }} />
               <Stack.Screen
                 name="settings/recurring"
                 options={{

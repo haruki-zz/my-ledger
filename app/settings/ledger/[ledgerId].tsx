@@ -20,7 +20,7 @@ import { useLedgerContext } from '@/src/context/LedgerContext';
 import { categoryColor } from '@/src/lib/categorySystem';
 import { tintFromAccent } from '@/src/lib/color';
 import { DEFAULT_PARTNER_COLOR } from '@/src/lib/entityColors';
-import { formatYen } from '@/src/lib/format';
+import { displayName, formatYen } from '@/src/lib/format';
 import {
   getBudgetTemplates,
   getErrorMessage,
@@ -249,6 +249,17 @@ export default function LedgerHubScreen() {
             <Text numberOfLines={1} style={localStyles.headerTitle}>{ledger.name}</Text>
             {isActive ? <ActiveBadge /> : null}
           </View>
+          <View style={localStyles.headerMembers}>
+            {members.slice(0, 3).map((member, index) => (
+              <MemberChip
+                color={LEDGER_COLORS[index % LEDGER_COLORS.length]}
+                key={member.user_id}
+                label={displayName(member.profile.display_name).toUpperCase()}
+              />
+            ))}
+            {members.length === 0 ? <MemberChip color={colors.muted} label="NO MEMBERS" /> : null}
+            {members.length > 3 ? <MemberChip color={colors.muted} label={`+${members.length - 3}`} /> : null}
+          </View>
         </View>
       </View>
 
@@ -287,7 +298,7 @@ export default function LedgerHubScreen() {
           onPress={() => {
             void openScopedRoute('/settings/recurring');
           }}
-          sublabel={`${activeRules.length} active`}
+          sublabel={null}
         />
       </View>
 
@@ -306,7 +317,6 @@ export default function LedgerHubScreen() {
       </View>
 
       {loading ? <ActivityIndicator /> : null}
-      <Text style={localStyles.metaText}>{members.length} member{members.length === 1 ? '' : 's'}</Text>
     </ScrollView>
   );
 }
@@ -330,7 +340,7 @@ function SummaryRow({
   label: string;
   onPress: () => void;
   progress?: number;
-  sublabel: string;
+  sublabel: string | null;
 }) {
   return (
     <View>
@@ -344,14 +354,14 @@ function SummaryRow({
               <View style={localStyles.progressTrack}>
                 <View style={[localStyles.progressFill, { width: `${Math.min(1, Math.max(0, progress)) * 100}%` }]} />
               </View>
-              <Text style={localStyles.summarySub}>{sublabel}</Text>
+              {sublabel ? <Text style={localStyles.summarySub}>{sublabel}</Text> : null}
             </View>
           ) : (
             <View style={localStyles.dotLine}>
-              {dots?.slice(0, 7).map((dotColor, index) => (
+              {dots?.map((dotColor, index) => (
                 <View key={`${dotColor}-${index}`} style={[localStyles.categoryDot, { backgroundColor: dotColor }]} />
               ))}
-              <Text style={localStyles.summarySub}>{sublabel}</Text>
+              {sublabel ? <Text style={localStyles.summarySub}>{sublabel}</Text> : null}
             </View>
           )}
         </View>
@@ -382,6 +392,15 @@ function ActiveBadge() {
   return (
     <View style={localStyles.activeBadge}>
       <Text style={localStyles.activeBadgeText}>Active</Text>
+    </View>
+  );
+}
+
+function MemberChip({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={[localStyles.memberChip, { backgroundColor: tintFromAccent(color) }]}>
+      <View style={[localStyles.memberDot, { backgroundColor: color }]} />
+      <Text numberOfLines={1} style={[localStyles.memberChipText, { color }]}>{label}</Text>
     </View>
   );
 }
@@ -504,6 +523,7 @@ const localStyles = StyleSheet.create({
   dotLine: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 4,
     minWidth: 0
   },
@@ -519,6 +539,7 @@ const localStyles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
+    gap: 7,
     minWidth: 0
   },
   headerTitle: {
@@ -534,6 +555,11 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 9,
     minWidth: 0
+  },
+  headerMembers: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7
   },
   insetDivider: {
     backgroundColor: 'rgba(42,39,34,0.08)',
@@ -568,14 +594,25 @@ const localStyles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10
   },
-  metaText: {
-    alignSelf: 'center',
-    color: colors.subtle,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10,
-    fontWeight: '700',
-    lineHeight: 14,
-    textTransform: 'uppercase'
+  memberChip: {
+    alignItems: 'center',
+    borderRadius: theme.radii.pill,
+    flexDirection: 'row',
+    gap: 5,
+    maxWidth: 132,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  memberChipText: {
+    fontFamily: fontFamilies.monoExtraBold,
+    fontSize: 9.5,
+    fontWeight: '800',
+    lineHeight: 13
+  },
+  memberDot: {
+    borderRadius: 2.5,
+    height: 5,
+    width: 5
   },
   pressed: {
     opacity: 0.7

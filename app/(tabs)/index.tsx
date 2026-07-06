@@ -27,6 +27,8 @@ import { SlidingValueText } from '@/src/components/SlidingValueText';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { TransferSettleEntry } from '@/src/components/TransferSettleEntry';
 import { BentoCard } from '@/src/components/ui';
+import { ZenHome, type ZenHomeData } from '@/src/components/ZenHome';
+import { useTabChrome } from '@/src/context/TabChromeContext';
 import { useDashboardData } from '@/src/hooks/useDashboardData';
 import { useTransferChecklist } from '@/src/hooks/useTransferChecklist';
 import { categoryColor, categoryLabel } from '@/src/lib/categorySystem';
@@ -37,6 +39,7 @@ import {
   addMonths,
   amountForUser,
   buildDashboardHeatDays,
+  compareMonthKeys,
   currentMonthKey,
   expenseCategoryId,
   monthEndDateString,
@@ -102,6 +105,7 @@ type SpendDay = {
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const reduceMotion = useReduceMotion();
+  const { setChromeHidden } = useTabChrome();
   const currentDashboardMonthKey = currentMonthKey();
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
@@ -109,6 +113,7 @@ export default function DashboardScreen() {
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [jumpSheetOpen, setJumpSheetOpen] = useState(false);
+  const [zenHomeVisible, setZenHomeVisible] = useState(true);
   const heroFlipProgress = useSharedValue(0);
   const {
     ledger,
@@ -199,6 +204,15 @@ export default function DashboardScreen() {
     })
   ), [currentDashboardMonthKey]);
   const heroResize = motionCardResizeTransition(reduceMotion);
+  const zenHomeData = useMemo(() => (
+    buildZenHomeData({
+      budgetYen: budgetSummary.budgetYen,
+      monthKey: activeMonthKey,
+      spentMonthYen: personalStats.totalYen,
+      spentTodayYen: trailingDays.find((day) => day.date === ledgerTodayString)?.amountYen || 0,
+      todayString: ledgerTodayString
+    })
+  ), [activeMonthKey, budgetSummary.budgetYen, ledgerTodayString, personalStats.totalYen, trailingDays]);
 
   const closeCategoryDetail = useCallback(() => {
     setSelectedCategoryKey(null);
@@ -222,9 +236,21 @@ export default function DashboardScreen() {
     }
   }, [selectedCategoryDetail, selectedCategoryKey]);
 
-  useFocusEffect(useCallback(() => (
-    () => setSelectedCategoryKey(null)
-  ), []));
+  useFocusEffect(useCallback(() => {
+    setZenHomeVisible(true);
+
+    return () => {
+      setSelectedCategoryKey(null);
+    };
+  }, []));
+
+  useEffect(() => {
+    setChromeHidden(zenHomeVisible);
+
+    return () => {
+      setChromeHidden(false);
+    };
+  }, [setChromeHidden, zenHomeVisible]);
 
   const refreshDashboard = useCallback(async () => {
     setManualRefreshing(true);
@@ -270,6 +296,14 @@ export default function DashboardScreen() {
         date
       }
     });
+  }
+
+  function dismissZenHome() {
+    setZenHomeVisible(false);
+  }
+
+  function openZenAddEntry() {
+    router.push('/expenses/new');
   }
 
   return (
@@ -406,6 +440,13 @@ export default function DashboardScreen() {
         onToday={jumpToday}
         visible={jumpSheetOpen}
       />
+      {zenHomeVisible ? (
+        <ZenHome
+          data={zenHomeData}
+          onDismiss={dismissZenHome}
+          onOpenAddEntry={openZenAddEntry}
+        />
+      ) : null}
     </>
   );
 }
@@ -1545,6 +1586,32 @@ function formatDashboardMonthTitle(monthKey: string) {
 
 function formatJumpMonthLabel(monthKey: string) {
   return new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' }).format(parseDateString(monthStartDateString(monthKey)));
+}
+
+function buildZenHomeData(input: {
+  budgetYen: number;
+  monthKey: string;
+  spentMonthYen: number;
+  spentTodayYen: number;
+  todayString: string;
+}): ZenHomeData {
+  const monthDays = Number(monthEndDateString(input.monthKey).slice(8, 10));
+  const todayMonthKey = monthKeyFromDateString(input.todayString);
+  const monthPosition = compareMonthKeys(input.monthKey, todayMonthKey);
+  const todayDay = Number(input.todayString.slice(8, 10));
+  const daysRemaining = monthPosition < 0
+    ? 0
+    : monthPosition > 0
+      ? monthDays
+      : Math.max(1, monthDays - Math.min(todayDay, monthDays) + 1);
+
+  return {
+    budgetYen: input.budgetYen,
+    daysRemaining,
+    monthLabel: formatDashboardMonthTitle(input.monthKey).toUpperCase(),
+    spentMonthYen: input.spentMonthYen,
+    spentTodayYen: input.spentTodayYen
+  };
 }
 
 const localStyles = StyleSheet.create({

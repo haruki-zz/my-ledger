@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fontFamilies, styles } from '@/src/components/styles';
 import { useAuth } from '@/src/context/AuthContext';
 import { useRequiredLedger } from '@/src/hooks/useRequiredLedger';
-import { PRIMARY_CATEGORIES, categoryColor } from '@/src/lib/categorySystem';
+import { PRIMARY_CATEGORIES, categoryColor, categoryIconName } from '@/src/lib/categorySystem';
 import { formatYen } from '@/src/lib/format';
 import {
   deleteBudgetTemplate,
@@ -49,6 +49,7 @@ export default function BudgetsScreen() {
   ), [templates]);
   const liveTotalBudget = PRIMARY_CATEGORIES.reduce((sum, category) => sum + Number(drafts[category.id] || 0), 0);
   const liveCategoryCount = PRIMARY_CATEGORIES.filter((category) => Number(drafts[category.id] || 0) > 0).length;
+  const screenTitle = ledger?.name ? `Budget ${ledger.name}` : 'Budget';
 
   const loadBudgets = useCallback(async (options?: { userInitiated?: boolean }) => {
     if (!ledgerId || !currentUserId) {
@@ -152,52 +153,52 @@ export default function BudgetsScreen() {
 
   if ((ledgerLoading || loading) && !ledger) {
     return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-      </View>
+      <>
+        <Stack.Screen options={{ title: screenTitle }} />
+        <View style={styles.center}>
+          <ActivityIndicator />
+        </View>
+      </>
     );
   }
 
   return (
-    <ScrollView
-      contentContainerStyle={[localStyles.content, { paddingBottom: 36 + insets.bottom }]}
-      keyboardShouldPersistTaps="handled"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-      style={styles.page}
-    >
-      {ledgerError || detailsError ? <Text selectable style={styles.error}>{ledgerError || detailsError}</Text> : null}
+    <>
+      <Stack.Screen options={{ title: screenTitle }} />
+      <ScrollView
+        contentContainerStyle={[localStyles.content, { paddingBottom: 36 + insets.bottom }]}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        style={styles.page}
+      >
+        {ledgerError || detailsError ? <Text selectable style={styles.error}>{ledgerError || detailsError}</Text> : null}
 
-      <Text style={localStyles.ledgerSubtitle}>{ledger?.name || 'Current ledger'}</Text>
+        <View style={localStyles.summary}>
+          <Text style={localStyles.summaryLabel}>MONTHLY BUDGET</Text>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>
+            {formatYen(liveTotalBudget)}
+          </Text>
+          <Text style={localStyles.summaryMeta}>
+            across {liveCategoryCount} of {PRIMARY_CATEGORIES.length} categories
+          </Text>
+        </View>
 
-      <View style={localStyles.summary}>
-        <Text style={localStyles.summaryLabel}>MONTHLY BUDGET</Text>
-        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.summaryAmount}>
-          {formatYen(liveTotalBudget)}
-        </Text>
-        <Text style={localStyles.summaryMeta}>
-          across {liveCategoryCount} of {PRIMARY_CATEGORIES.length} categories
-        </Text>
-      </View>
-
-      <View style={localStyles.list}>
-        {PRIMARY_CATEGORIES.map((category, index) => {
-          const template = templateByCategory.get(category.id);
-          const draft = drafts[category.id] ?? '';
-          const saving = savingCategoryId === category.id;
-          const accent = categoryColor(category.id);
-          return (
-            <View key={category.id}>
-              {index > 0 ? <View style={localStyles.insetDivider} /> : null}
-              <View style={localStyles.row}>
-                <View style={localStyles.rowHeader}>
-                  <View style={[localStyles.categorySwatch, { backgroundColor: accent }]} />
-                  <View style={localStyles.rowTitleGroup}>
+        <View style={localStyles.list}>
+          {PRIMARY_CATEGORIES.map((category, index) => {
+            const template = templateByCategory.get(category.id);
+            const draft = drafts[category.id] ?? '';
+            const saving = savingCategoryId === category.id;
+            const accent = categoryColor(category.id);
+            return (
+              <View key={category.id}>
+                {index > 0 ? <View style={localStyles.insetDivider} /> : null}
+                <View style={localStyles.row}>
+                  <View style={localStyles.categoryIdentity}>
+                    <View style={[localStyles.categoryIcon, { backgroundColor: `${accent}20` }]}>
+                      <Ionicons color={accent} name={categoryIconName(category.id)} size={18} />
+                    </View>
                     <Text numberOfLines={1} style={localStyles.rowTitle}>{category.label}</Text>
-                    <Text style={localStyles.rowSubtitle}>{template ? 'Monthly budget set' : 'No budget set'}</Text>
                   </View>
-                </View>
-
-                <View style={localStyles.editorRow}>
                   <View style={localStyles.amountField}>
                     <Text style={localStyles.yenPrefix}>¥</Text>
                     <TextInput
@@ -244,11 +245,11 @@ export default function BudgetsScreen() {
                   </Pressable>
                 </View>
               </View>
-            </View>
-          );
-        })}
-      </View>
-    </ScrollView>
+            );
+          })}
+        </View>
+      </ScrollView>
+    </>
   );
 }
 
@@ -267,16 +268,25 @@ const localStyles = StyleSheet.create({
     borderColor: colors.line,
     borderRadius: 12,
     borderWidth: 1,
-    flex: 1,
     flexDirection: 'row',
     minHeight: 42,
-    minWidth: 0,
-    paddingHorizontal: 10
+    minWidth: 88,
+    paddingHorizontal: 10,
+    width: 108
   },
-  categorySwatch: {
-    borderRadius: 6,
-    height: 34,
-    width: 8
+  categoryIcon: {
+    alignItems: 'center',
+    borderRadius: 12,
+    height: 36,
+    justifyContent: 'center',
+    width: 36
+  },
+  categoryIdentity: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 10,
+    minWidth: 0
   },
   clearButton: {
     backgroundColor: 'rgba(192,57,43,0.10)'
@@ -290,12 +300,6 @@ const localStyles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.45
-  },
-  editorRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    minWidth: 0
   },
   iconButton: {
     alignItems: 'center',
@@ -316,17 +320,7 @@ const localStyles = StyleSheet.create({
   insetDivider: {
     backgroundColor: 'rgba(42,39,34,0.08)',
     height: StyleSheet.hairlineWidth,
-    marginLeft: 58
-  },
-  ledgerSubtitle: {
-    color: colors.subtle,
-    fontFamily: fontFamilies.monoBold,
-    fontSize: 10.5,
-    fontWeight: '700',
-    letterSpacing: 1,
-    lineHeight: 15,
-    paddingHorizontal: 4,
-    textTransform: 'uppercase'
+    marginLeft: 64
   },
   list: {
     backgroundColor: colors.surface,
@@ -343,29 +337,20 @@ const localStyles = StyleSheet.create({
     opacity: 0.72
   },
   row: {
-    gap: 12,
-    padding: 14
-  },
-  rowHeader: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 11
-  },
-  rowSubtitle: {
-    color: colors.muted,
-    fontFamily: fontFamilies.regular,
-    fontSize: 12,
-    lineHeight: 17
+    gap: 8,
+    minHeight: 62,
+    paddingHorizontal: 12,
+    paddingVertical: 10
   },
   rowTitle: {
     color: colors.ink,
+    flex: 1,
     fontFamily: fontFamilies.bold,
     fontSize: 15,
     fontWeight: '700',
-    lineHeight: 20
-  },
-  rowTitleGroup: {
-    flex: 1,
+    lineHeight: 20,
     minWidth: 0
   },
   saveButton: {

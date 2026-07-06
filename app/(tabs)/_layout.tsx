@@ -20,6 +20,7 @@ import {
   WIDE_LAYOUT_BREAKPOINT
 } from '@/src/components/layout';
 import { colors, fontFamilies, theme } from '@/src/components/styles';
+import { TabChromeProvider, useTabChrome } from '@/src/context/TabChromeContext';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 type TabBarProps = Parameters<NonNullable<ComponentProps<typeof Tabs>['tabBar']>>[0];
@@ -223,15 +224,24 @@ function DraggableAddExpenseButton() {
 }
 
 export default function TabsLayout() {
+  return (
+    <TabChromeProvider>
+      <TabsLayoutContent />
+    </TabChromeProvider>
+  );
+}
+
+function TabsLayoutContent() {
+  const { chromeHidden } = useTabChrome();
   const { width } = useWindowDimensions();
   const isWideLayout = width >= WIDE_LAYOUT_BREAKPOINT;
   const sceneStyle = useMemo(
     () => (
-      isWideLayout
+      isWideLayout && !chromeHidden
         ? { backgroundColor: colors.bg, paddingLeft: SIDEBAR_WIDTH }
         : { backgroundColor: colors.bg }
     ),
-    [isWideLayout]
+    [chromeHidden, isWideLayout]
   );
 
   return (
@@ -252,7 +262,7 @@ export default function TabsLayout() {
           },
           tabBarStyle: { display: 'none' }
         }}
-        tabBar={(props) => <ResponsiveTabBar isWideLayout={isWideLayout} {...props} />}
+        tabBar={(props) => chromeHidden ? null : <ResponsiveTabBar isWideLayout={isWideLayout} {...props} />}
       >
         <Tabs.Screen
           name="index"
@@ -283,7 +293,7 @@ export default function TabsLayout() {
           }}
         />
       </Tabs>
-      <DraggableAddExpenseButton />
+      {chromeHidden ? null : <DraggableAddExpenseButton />}
     </View>
   );
 }
