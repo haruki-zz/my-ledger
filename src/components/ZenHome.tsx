@@ -11,8 +11,8 @@ import {
   type PanResponderInstance
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
 
+import { SlideToAction } from '@/src/components/SlideToAction';
 import { fontFamilies } from '@/src/components/styles';
 
 export type ZenHomeData = {
@@ -26,19 +26,18 @@ export type ZenHomeData = {
 type Props = {
   data: ZenHomeData;
   interactionEnabled: boolean;
-  screenHeight: number;
   translateY: RNAnimated.Value;
-  onDragTransition: (translateY: number) => void;
+  onOpenDashboard: () => void;
   onOpenAddEntry: () => void;
-  onSettleTransition: (visible: boolean) => void;
 };
 
 const ZEN_COACH_STORAGE_KEY = 'my-ledger:zen-home-coach-seen:v1';
 const HOLD_DURATION_MS = 430;
 const HOLD_CANCEL_RADIUS = 30;
-const SWIPE_DISMISS_DISTANCE = 48;
-const SWIPE_SETTLE_RATIO = 0.22;
-const SWIPE_SETTLE_VELOCITY = 0.6;
+const DASHBOARD_SLIDE_WIDTH = 260;
+const DASHBOARD_SLIDE_HEIGHT = 52;
+const DASHBOARD_SLIDE_KNOB_SIZE = 44;
+const DASHBOARD_SLIDE_PADDING = 4;
 const USE_NATIVE_ANIMATION_DRIVER = Platform.OS !== 'web';
 
 const zenColors = {
@@ -97,16 +96,13 @@ function resolveZenBudget(data: ZenHomeData) {
 export function ZenHome({
   data,
   interactionEnabled,
-  screenHeight,
   translateY,
-  onDragTransition,
+  onOpenDashboard,
   onOpenAddEntry,
-  onSettleTransition
 }: Props) {
   const insets = useSafeAreaInsets();
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pressOriginRef = useRef({ x: 0, y: 0 });
-  const draggingRevealRef = useRef(false);
   const triggeredLongPressRef = useRef(false);
   const [coachHidden, setCoachHidden] = useState(true);
   const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
@@ -198,7 +194,6 @@ export function ZenHome({
 
   const cancelPress = useCallback(() => {
     clearPressTimer();
-    draggingRevealRef.current = false;
     triggeredLongPressRef.current = false;
     hideRipple();
   }, [clearPressTimer, hideRipple]);
@@ -260,7 +255,6 @@ export function ZenHome({
         const x = event.nativeEvent.locationX;
         const y = event.nativeEvent.locationY;
 
-        draggingRevealRef.current = false;
         triggeredLongPressRef.current = false;
         pressOriginRef.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
         startRipple(x, y);
@@ -270,44 +264,20 @@ export function ZenHome({
       onPanResponderMove: (event) => {
         const dx = event.nativeEvent.pageX - pressOriginRef.current.x;
         const dy = event.nativeEvent.pageY - pressOriginRef.current.y;
-        const verticalDrag = Math.abs(dy) > Math.abs(dx);
-
-        if (draggingRevealRef.current) {
-          onDragTransition(Math.max(-screenHeight, Math.min(0, dy)));
-          return;
-        }
 
         if (Math.hypot(dx, dy) > HOLD_CANCEL_RADIUS) {
           clearPressTimer();
           hideRipple();
         }
-
-        if (dy < -8 && verticalDrag) {
-          draggingRevealRef.current = true;
-          onDragTransition(Math.max(-screenHeight, dy));
-        }
       },
-      onPanResponderRelease: (_, gestureState) => {
+      onPanResponderRelease: () => {
         if (triggeredLongPressRef.current) {
           triggeredLongPressRef.current = false;
           return;
         }
 
-        const draggingReveal = draggingRevealRef.current;
-        draggingRevealRef.current = false;
         clearPressTimer();
         hideRipple();
-
-        if (draggingReveal) {
-          const shouldRevealDashboard = Math.abs(gestureState.dy) > screenHeight * SWIPE_SETTLE_RATIO || gestureState.vy < -SWIPE_SETTLE_VELOCITY;
-          onSettleTransition(!shouldRevealDashboard);
-          return;
-        }
-
-        const swipeUp = gestureState.dy < -SWIPE_DISMISS_DISTANCE && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
-        if (swipeUp) {
-          onSettleTransition(false);
-        }
       },
       onPanResponderTerminate: cancelPress,
       onPanResponderTerminationRequest: () => true,
@@ -315,7 +285,7 @@ export function ZenHome({
       onStartShouldSetPanResponder: () => true,
       onStartShouldSetPanResponderCapture: () => true
     }));
-  }, [cancelPress, clearPressTimer, hideRipple, onDragTransition, onSettleTransition, openAddEntry, screenHeight, startRipple]);
+  }, [cancelPress, clearPressTimer, hideRipple, openAddEntry, startRipple]);
 
   const cursorStyle = { opacity: cursorOpacity };
   const coachStyle = { opacity: coachOpacity };
@@ -342,65 +312,77 @@ export function ZenHome({
           transform: [{ translateY }]
         }
       ]}
-      {...(panResponder?.panHandlers || {})}
     >
-      <View style={[localStyles.monthHeader, { paddingTop: Math.max(50, insets.top) + 30 }]}>
-        <Text style={localStyles.monthText}>{data.monthLabel}</Text>
-        <View style={localStyles.monthRule} />
-      </View>
-
-      <View style={localStyles.heroBlock}>
-        <Text style={localStyles.heroLabel}>SPENT THIS MONTH</Text>
-        <View style={localStyles.amountRow}>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.amountText}>
-            {formatZenYen(data.spentMonthYen)}
-          </Text>
-          <RNAnimated.View style={[localStyles.cursor, cursorStyle]} />
+      <View style={localStyles.pressArea} {...(panResponder?.panHandlers || {})}>
+        <View style={[localStyles.monthHeader, { paddingTop: Math.max(50, insets.top) + 30 }]}>
+          <Text style={localStyles.monthText}>{data.monthLabel}</Text>
+          <View style={localStyles.monthRule} />
         </View>
 
-        <View style={localStyles.paceGrid}>
-          <View style={localStyles.paceCell}>
-            <Text style={localStyles.paceLabel}>TODAY</Text>
-            <Text style={localStyles.paceValue}>{formatZenYen(data.spentTodayYen)}</Text>
+        <View style={localStyles.heroBlock}>
+          <Text style={localStyles.heroLabel}>SPENT THIS MONTH</Text>
+          <View style={localStyles.amountRow}>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.amountText}>
+              {formatZenYen(data.spentMonthYen)}
+            </Text>
+            <RNAnimated.View style={[localStyles.cursor, cursorStyle]} />
           </View>
-          <View style={localStyles.paceDivider} />
-          <View style={localStyles.paceCell}>
-            <Text style={localStyles.paceLabel}>LEFT / DAY</Text>
-            <Text style={[localStyles.paceValue, { color: budget.leftPerDayTone }]}>
-              {formatZenYen(budget.leftPerDay)}
+
+          <View style={localStyles.paceGrid}>
+            <View style={localStyles.paceCell}>
+              <Text style={localStyles.paceLabel}>TODAY</Text>
+              <Text style={localStyles.paceValue}>{formatZenYen(data.spentTodayYen)}</Text>
+            </View>
+            <View style={localStyles.paceDivider} />
+            <View style={localStyles.paceCell}>
+              <Text style={localStyles.paceLabel}>LEFT / DAY</Text>
+              <Text style={[localStyles.paceValue, { color: budget.leftPerDayTone }]}>
+                {formatZenYen(budget.leftPerDay)}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={localStyles.budgetBlock}>
+          <View style={localStyles.budgetCaptionRow}>
+            <Text style={localStyles.budgetLabel}>BUDGET</Text>
+            <Text style={[localStyles.budgetPct, { color: budget.overBudget ? zenColors.danger : zenColors.inkSoft }]}>
+              {budget.budgetPct}%
             </Text>
           </View>
-        </View>
-      </View>
-
-      <View style={localStyles.budgetBlock}>
-        <View style={localStyles.budgetCaptionRow}>
-          <Text style={localStyles.budgetLabel}>BUDGET</Text>
-          <Text style={[localStyles.budgetPct, { color: budget.overBudget ? zenColors.danger : zenColors.inkSoft }]}>
-            {budget.budgetPct}%
+          <View style={localStyles.budgetTrack}>
+            <View
+              style={[
+                localStyles.budgetFill,
+                {
+                  backgroundColor: budget.budgetTone,
+                  width: budget.lineFillPct
+                }
+              ]}
+            />
+          </View>
+          <Text style={[localStyles.budgetFooter, { color: budget.overBudget ? zenColors.danger : zenColors.inkSoft }]}>
+            {budget.caption}
           </Text>
         </View>
-        <View style={localStyles.budgetTrack}>
-          <View
-            style={[
-              localStyles.budgetFill,
-              {
-                backgroundColor: budget.budgetTone,
-                width: budget.lineFillPct
-              }
-            ]}
-          />
-        </View>
-        <Text style={[localStyles.budgetFooter, { color: budget.overBudget ? zenColors.danger : zenColors.inkSoft }]}>
-          {budget.caption}
-        </Text>
       </View>
 
       <View style={[localStyles.footer, { height: 118 + insets.bottom, paddingBottom: insets.bottom }]}>
-        <Svg height={8} width={14} viewBox="0 0 14 8">
-          <Path d="M1 7l6-6 6 6" fill="none" stroke={zenColors.inkGhost} strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} />
-        </Svg>
-        <Text style={localStyles.swipeHint}>SWIPE UP</Text>
+        <SlideToAction
+          accessibilityLabel="Slide to open dashboard"
+          knobLabel="›"
+          knobSize={DASHBOARD_SLIDE_KNOB_SIZE}
+          knobStyle={localStyles.dashboardSlideKnob}
+          knobTextStyle={localStyles.dashboardSlideKnobText}
+          label="DASHBOARD"
+          onComplete={onOpenDashboard}
+          resetKey={interactionEnabled}
+          textStyle={localStyles.dashboardSlideText}
+          trackHeight={DASHBOARD_SLIDE_HEIGHT}
+          trackPadding={DASHBOARD_SLIDE_PADDING}
+          trackStyle={localStyles.dashboardSlideTrack}
+          trackWidth={DASHBOARD_SLIDE_WIDTH}
+        />
       </View>
 
       {ripple.visible ? (
@@ -420,7 +402,7 @@ export function ZenHome({
 
       {!coachHidden ? (
         <RNAnimated.View style={[localStyles.coach, coachStyle]}>
-          <Text style={localStyles.coachText}>HOLD ANYWHERE TO ADD</Text>
+          <Text style={localStyles.coachText}>HOLD TO ADD</Text>
         </RNAnimated.View>
       ) : null}
     </RNAnimated.View>
@@ -439,9 +421,11 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.monoSemiBold,
     fontSize: 52,
     fontWeight: '500',
+    includeFontPadding: false,
     letterSpacing: 0,
-    lineHeight: 58,
-    minWidth: 0
+    lineHeight: 52,
+    minWidth: 0,
+    textAlignVertical: 'center'
   },
   budgetBlock: {
     alignSelf: 'center',
@@ -506,16 +490,41 @@ const localStyles = StyleSheet.create({
     paddingVertical: 10
   },
   cursor: {
+    alignSelf: 'center',
     backgroundColor: zenColors.ochre,
     height: 38,
     marginLeft: 13,
     width: 12
   },
+  dashboardSlideKnob: {
+    backgroundColor: 'rgba(42,39,34,0.12)'
+  },
+  dashboardSlideKnobText: {
+    color: zenColors.inkSoft,
+    fontFamily: fontFamilies.monoSemiBold,
+    fontSize: 18,
+    fontWeight: '600',
+    lineHeight: 22
+  },
+  dashboardSlideText: {
+    color: zenColors.inkGhost,
+    fontFamily: fontFamilies.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    lineHeight: 12,
+    paddingLeft: DASHBOARD_SLIDE_KNOB_SIZE + 12,
+    textAlign: 'center'
+  },
+  dashboardSlideTrack: {
+    backgroundColor: 'rgba(42,39,34,0.04)',
+    borderColor: 'rgba(42,39,34,0.10)',
+    borderWidth: 1
+  },
   footer: {
     alignItems: 'center',
     flex: 0,
-    gap: 7,
-    justifyContent: 'center'
+    justifyContent: 'center',
+    paddingHorizontal: 24
   },
   heroBlock: {
     alignItems: 'center',
@@ -580,6 +589,10 @@ const localStyles = StyleSheet.create({
     letterSpacing: 0.5,
     lineHeight: 20
   },
+  pressArea: {
+    flex: 1,
+    width: '100%'
+  },
   rippleFill: {
     backgroundColor: 'rgba(42,39,34,0.82)',
     borderRadius: 999,
@@ -609,12 +622,5 @@ const localStyles = StyleSheet.create({
     right: 0,
     top: 0,
     zIndex: 50
-  },
-  swipeHint: {
-    color: zenColors.inkGhost,
-    fontFamily: fontFamilies.mono,
-    fontSize: 9,
-    letterSpacing: 2,
-    lineHeight: 12
   }
 });

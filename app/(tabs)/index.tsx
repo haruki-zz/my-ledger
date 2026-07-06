@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Animated as RNAnimated,
   Easing,
@@ -13,8 +13,7 @@ import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
-  type PanResponderInstance
+  useWindowDimensions
 } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -61,8 +60,6 @@ const BUDGET_UNDER_COLOR = '#5FB8B2';
 const BUDGET_WARNING_COLOR = '#C0892E';
 const BUDGET_OVER_COLOR = '#C14B34';
 const ZEN_TRANSITION_DURATION_MS = 300;
-const ZEN_TRANSITION_SETTLE_RATIO = 0.22;
-const ZEN_TRANSITION_SETTLE_VELOCITY = 0.6;
 const USE_NATIVE_ANIMATION_DRIVER = Platform.OS !== 'web';
 const HEAT_COLORS = [
   'rgba(42,39,34,0.05)',
@@ -118,15 +115,12 @@ export default function DashboardScreen() {
   const { setChromeHidden } = useTabChrome();
   const currentDashboardMonthKey = currentMonthKey();
   const screenHeight = Math.max(1, windowHeight);
-  const dashboardScrollYRef = useRef(0);
-  const dashboardReturnDragActiveRef = useRef(false);
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
   const [selectedActivityDate, setSelectedActivityDate] = useState<string | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [jumpSheetOpen, setJumpSheetOpen] = useState(false);
-  const [dashboardPanResponder, setDashboardPanResponder] = useState<PanResponderInstance | null>(null);
   const [zenHomeVisible, setZenHomeVisible] = useState(true);
   const [zenHomeTranslateY] = useState(() => new RNAnimated.Value(0));
   const heroFlipProgress = useSharedValue(0);
@@ -233,11 +227,6 @@ export default function DashboardScreen() {
     setSelectedCategoryKey(null);
   }, []);
 
-  const dragZenTransition = useCallback((translateY: number) => {
-    zenHomeTranslateY.stopAnimation();
-    zenHomeTranslateY.setValue(Math.max(-screenHeight, Math.min(0, translateY)));
-  }, [screenHeight, zenHomeTranslateY]);
-
   const settleZenTransition = useCallback((visible: boolean) => {
     if (visible) {
       setZenHomeVisible(true);
@@ -258,6 +247,14 @@ export default function DashboardScreen() {
       zenHomeTranslateY.setValue(visible ? 0 : -screenHeight);
     });
   }, [reduceMotion, screenHeight, zenHomeTranslateY]);
+
+  const openDashboardFromZen = useCallback(() => {
+    settleZenTransition(false);
+  }, [settleZenTransition]);
+
+  const openZenFromDashboard = useCallback(() => {
+    settleZenTransition(true);
+  }, [settleZenTransition]);
 
   const toggleHeroFlip = useCallback(() => {
     setFlipped((current) => !current);
@@ -294,47 +291,6 @@ export default function DashboardScreen() {
       setChromeHidden(false);
     };
   }, [setChromeHidden, zenHomeVisible]);
-
-  useEffect(() => {
-    setDashboardPanResponder(PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => (
-        !zenHomeVisible &&
-        dashboardScrollYRef.current <= 2 &&
-        gestureState.dy > 6 &&
-        Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
-      ),
-      onMoveShouldSetPanResponderCapture: (_, gestureState) => (
-        !zenHomeVisible &&
-        dashboardScrollYRef.current <= 2 &&
-        gestureState.dy > 6 &&
-        Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
-      ),
-      onPanResponderGrant: () => {
-        dashboardReturnDragActiveRef.current = true;
-        setZenHomeVisible(true);
-        zenHomeTranslateY.stopAnimation();
-        zenHomeTranslateY.setValue(-screenHeight);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (!dashboardReturnDragActiveRef.current) {
-          return;
-        }
-
-        zenHomeTranslateY.setValue(Math.max(-screenHeight, Math.min(0, -screenHeight + Math.max(0, gestureState.dy))));
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const shouldReturnZen = gestureState.dy > screenHeight * ZEN_TRANSITION_SETTLE_RATIO || gestureState.vy > ZEN_TRANSITION_SETTLE_VELOCITY;
-        dashboardReturnDragActiveRef.current = false;
-        settleZenTransition(shouldReturnZen);
-      },
-      onPanResponderTerminate: () => {
-        dashboardReturnDragActiveRef.current = false;
-        settleZenTransition(false);
-      },
-      onPanResponderTerminationRequest: () => false,
-      onShouldBlockNativeResponder: () => true
-    }));
-  }, [screenHeight, settleZenTransition, zenHomeTranslateY, zenHomeVisible]);
 
   const refreshDashboard = useCallback(async () => {
     setManualRefreshing(true);
@@ -388,19 +344,15 @@ export default function DashboardScreen() {
 
   return (
     <>
-      <View style={localStyles.dashboardShell} {...(dashboardPanResponder?.panHandlers || {})}>
+      <View style={localStyles.dashboardShell}>
         <ScrollView
           contentInsetAdjustmentBehavior="never"
-          onScroll={(event) => {
-            dashboardScrollYRef.current = event.nativeEvent.contentOffset.y;
-          }}
           refreshControl={
             <RefreshControl
               refreshing={manualRefreshing}
               onRefresh={refreshDashboard}
             />
           }
-          scrollEventThrottle={16}
           style={styles.page}
           contentContainerStyle={[styles.content, localStyles.content, { paddingTop: Math.max(0, insets.top) }]}
         >
@@ -411,6 +363,7 @@ export default function DashboardScreen() {
             active={periodOffset === 0}
             label={activeMonthLabel}
             onOpen={openJumpSheet}
+            onOpenZen={openZenFromDashboard}
             onReset={jumpToday}
           />
 
@@ -529,10 +482,8 @@ export default function DashboardScreen() {
       <ZenHome
         data={zenHomeData}
         interactionEnabled={zenHomeVisible}
-        onDragTransition={dragZenTransition}
+        onOpenDashboard={openDashboardFromZen}
         onOpenAddEntry={openZenAddEntry}
-        onSettleTransition={settleZenTransition}
-        screenHeight={screenHeight}
         translateY={zenHomeTranslateY}
       />
     </>
@@ -543,33 +494,45 @@ function DashboardMonthTitle({
   active,
   label,
   onOpen,
+  onOpenZen,
   onReset
 }: {
   active: boolean;
   label: string;
   onOpen: () => void;
+  onOpenZen: () => void;
   onReset: () => void;
 }) {
   return (
     <View style={localStyles.monthTitleRow}>
-      <Pressable
-        accessibilityHint="Opens the Jump to month sheet"
-        accessibilityLabel={`Jump from ${label}`}
-        accessibilityRole="button"
-        onPress={onOpen}
-        style={({ pressed }) => [localStyles.monthTitleButton, pressed && localStyles.monthTitleButtonPressed]}
-      >
-        <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.monthTitle}>{label}</Text>
-        <Ionicons color="rgba(42,39,34,0.38)" name="chevron-down" size={13} />
-      </Pressable>
-      {!active ? (
+      <View style={localStyles.monthTitleLeft}>
         <Pressable
-          accessibilityLabel="Return to current month"
+          accessibilityHint="Opens the Jump to month sheet"
+          accessibilityLabel={`Jump from ${label}`}
           accessibilityRole="button"
-          onPress={onReset}
-          style={({ pressed }) => [localStyles.monthResetDot, pressed && localStyles.monthResetDotPressed]}
-        />
-      ) : null}
+          onPress={onOpen}
+          style={({ pressed }) => [localStyles.monthTitleButton, pressed && localStyles.monthTitleButtonPressed]}
+        >
+          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.monthTitle}>{label}</Text>
+          <Ionicons color="rgba(42,39,34,0.38)" name="chevron-down" size={13} />
+        </Pressable>
+        {!active ? (
+          <Pressable
+            accessibilityLabel="Return to current month"
+            accessibilityRole="button"
+            onPress={onReset}
+            style={({ pressed }) => [localStyles.monthResetDot, pressed && localStyles.monthResetDotPressed]}
+          />
+        ) : null}
+      </View>
+      <Pressable
+        accessibilityLabel="Open zen mode"
+        accessibilityRole="button"
+        onPress={onOpenZen}
+        style={({ pressed }) => [localStyles.zenModeButton, pressed && localStyles.zenModeButtonPressed]}
+      >
+        <Text style={localStyles.zenModeButtonText}>ZEN</Text>
+      </Pressable>
     </View>
   );
 }
@@ -2311,10 +2274,18 @@ const localStyles = StyleSheet.create({
   monthTitleButtonPressed: {
     backgroundColor: 'rgba(42,39,34,0.05)'
   },
+  monthTitleLeft: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0
+  },
   monthTitleRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
+    justifyContent: 'space-between',
     minHeight: 48
   },
   nowCaption: {
@@ -2417,5 +2388,27 @@ const localStyles = StyleSheet.create({
     flexDirection: 'row',
     gap: 7,
     minWidth: 0
+  },
+  zenModeButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(42,39,34,0.06)',
+    borderColor: 'rgba(42,39,34,0.08)',
+    borderRadius: 11,
+    borderWidth: 1,
+    height: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 12
+  },
+  zenModeButtonPressed: {
+    opacity: 0.72,
+    transform: [{ scale: 0.97 }]
+  },
+  zenModeButtonText: {
+    color: colors.muted,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.6,
+    lineHeight: 13
   }
 });

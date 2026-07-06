@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
-  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
 } from 'react-native';
 import Svg, { Defs, Pattern, Polygon, Rect } from 'react-native-svg';
 
+import { SlideToAction } from '@/src/components/SlideToAction';
 import { colors, fontFamilies } from '@/src/components/styles';
 import {
   activeReceiptPrinterRun,
@@ -24,7 +24,6 @@ const RECEIPT_WIDTH = 290;
 const KNOB_SIZE = 52;
 const TRACK_WIDTH = 300;
 const TRACK_PADDING = 4;
-const KNOB_MAX = TRACK_WIDTH - KNOB_SIZE - TRACK_PADDING * 2;
 const PRINT_LEAD_IN_MS = 440;
 const AUTO_SAVE_DELAY_MS = 5000;
 
@@ -333,68 +332,26 @@ function ReadyControls({
   monthLabel: string;
   onStartPrint: () => void;
 }) {
-  const [knobX] = useState(() => new Animated.Value(0));
-  const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > 4,
-    onPanResponderGrant: () => {
-      knobX.stopAnimation();
-    },
-    onPanResponderMove: (_, gestureState) => {
-      const nextValue = Math.max(0, Math.min(KNOB_MAX, gestureState.dx));
-      knobX.setValue(nextValue);
-    },
-    onPanResponderRelease: (_, gestureState) => {
-      const finalValue = Math.max(0, Math.min(KNOB_MAX, gestureState.dx));
-      if (finalValue >= KNOB_MAX) {
-        Animated.timing(knobX, {
-          duration: 140,
-          toValue: KNOB_MAX,
-          useNativeDriver: true
-        }).start(() => onStartPrint());
-        return;
-      }
-
-      Animated.spring(knobX, {
-        damping: 18,
-        stiffness: 220,
-        toValue: 0,
-        useNativeDriver: true
-      }).start();
-    },
-    onPanResponderTerminationRequest: () => true,
-    onPanResponderTerminate: () => {
-      Animated.spring(knobX, {
-        damping: 18,
-        stiffness: 220,
-        toValue: 0,
-        useNativeDriver: true
-      }).start();
-    }
-  }), [knobX, onStartPrint]);
-
   return (
     <View style={localStyles.readyBar}>
       <View style={localStyles.readyCaption}>
         <Text style={localStyles.readySmall}>MONTH CLOSED · {monthLabel}</Text>
         <Text style={localStyles.readyBig}>Your {titleCaseMonth(monthLabel)} receipt is ready</Text>
       </View>
-      <View
+      <SlideToAction
         accessibilityLabel="Slide to print receipt"
-        accessibilityRole="button"
-        style={localStyles.slideTrack}
-        {...panResponder.panHandlers}
-      >
-        <Text style={localStyles.slideText}>SLIDE TO PRINT</Text>
-        <Animated.View
-          style={[
-            localStyles.slideKnob,
-            { transform: [{ translateX: knobX }] }
-          ]}
-        >
-          <Text style={localStyles.slideKnobText}>››</Text>
-        </Animated.View>
-      </View>
+        knobLabel="››"
+        knobSize={KNOB_SIZE}
+        knobStyle={localStyles.slideKnob}
+        knobTextStyle={localStyles.slideKnobText}
+        label="SLIDE TO PRINT"
+        onComplete={onStartPrint}
+        textStyle={localStyles.slideText}
+        trackHeight={60}
+        trackPadding={TRACK_PADDING}
+        trackStyle={localStyles.slideTrack}
+        trackWidth={TRACK_WIDTH}
+      />
     </View>
   );
 }
