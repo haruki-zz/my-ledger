@@ -1,15 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  Animated as RNAnimated,
+  Easing,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
+  useWindowDimensions,
+  type PanResponderInstance
 } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -55,6 +60,10 @@ const HERO_FLIP_DURATION_MS = 520;
 const BUDGET_UNDER_COLOR = '#5FB8B2';
 const BUDGET_WARNING_COLOR = '#C0892E';
 const BUDGET_OVER_COLOR = '#C14B34';
+const ZEN_TRANSITION_DURATION_MS = 300;
+const ZEN_TRANSITION_SETTLE_RATIO = 0.22;
+const ZEN_TRANSITION_SETTLE_VELOCITY = 0.6;
+const USE_NATIVE_ANIMATION_DRIVER = Platform.OS !== 'web';
 const HEAT_COLORS = [
   'rgba(42,39,34,0.05)',
   'rgba(192,137,46,0.20)',
@@ -105,15 +114,21 @@ type SpendDay = {
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const reduceMotion = useReduceMotion();
+  const { height: windowHeight } = useWindowDimensions();
   const { setChromeHidden } = useTabChrome();
   const currentDashboardMonthKey = currentMonthKey();
+  const screenHeight = Math.max(1, windowHeight);
+  const dashboardScrollYRef = useRef(0);
+  const dashboardReturnDragActiveRef = useRef(false);
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
   const [selectedActivityDate, setSelectedActivityDate] = useState<string | null>(null);
   const [manualRefreshing, setManualRefreshing] = useState(false);
   const [flipped, setFlipped] = useState(false);
   const [jumpSheetOpen, setJumpSheetOpen] = useState(false);
+  const [dashboardPanResponder, setDashboardPanResponder] = useState<PanResponderInstance | null>(null);
   const [zenHomeVisible, setZenHomeVisible] = useState(true);
+  const [zenHomeTranslateY] = useState(() => new RNAnimated.Value(0));
   const heroFlipProgress = useSharedValue(0);
   const {
     ledger,
@@ -218,6 +233,32 @@ export default function DashboardScreen() {
     setSelectedCategoryKey(null);
   }, []);
 
+  const dragZenTransition = useCallback((translateY: number) => {
+    zenHomeTranslateY.stopAnimation();
+    zenHomeTranslateY.setValue(Math.max(-screenHeight, Math.min(0, translateY)));
+  }, [screenHeight, zenHomeTranslateY]);
+
+  const settleZenTransition = useCallback((visible: boolean) => {
+    if (visible) {
+      setZenHomeVisible(true);
+    }
+
+    zenHomeTranslateY.stopAnimation();
+    RNAnimated.timing(zenHomeTranslateY, {
+      duration: motionDuration(ZEN_TRANSITION_DURATION_MS, reduceMotion),
+      easing: Easing.out(Easing.cubic),
+      toValue: visible ? 0 : -screenHeight,
+      useNativeDriver: USE_NATIVE_ANIMATION_DRIVER
+    }).start(({ finished }) => {
+      if (!finished) {
+        return;
+      }
+
+      setZenHomeVisible(visible);
+      zenHomeTranslateY.setValue(visible ? 0 : -screenHeight);
+    });
+  }, [reduceMotion, screenHeight, zenHomeTranslateY]);
+
   const toggleHeroFlip = useCallback(() => {
     setFlipped((current) => !current);
     setSelectedCategoryKey(null);
@@ -238,11 +279,13 @@ export default function DashboardScreen() {
 
   useFocusEffect(useCallback(() => {
     setZenHomeVisible(true);
+    zenHomeTranslateY.stopAnimation();
+    zenHomeTranslateY.setValue(0);
 
     return () => {
       setSelectedCategoryKey(null);
     };
-  }, []));
+  }, [zenHomeTranslateY]));
 
   useEffect(() => {
     setChromeHidden(zenHomeVisible);
@@ -251,6 +294,47 @@ export default function DashboardScreen() {
       setChromeHidden(false);
     };
   }, [setChromeHidden, zenHomeVisible]);
+
+  useEffect(() => {
+    setDashboardPanResponder(PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => (
+        !zenHomeVisible &&
+        dashboardScrollYRef.current <= 2 &&
+        gestureState.dy > 6 &&
+        Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+      ),
+      onMoveShouldSetPanResponderCapture: (_, gestureState) => (
+        !zenHomeVisible &&
+        dashboardScrollYRef.current <= 2 &&
+        gestureState.dy > 6 &&
+        Math.abs(gestureState.dy) > Math.abs(gestureState.dx)
+      ),
+      onPanResponderGrant: () => {
+        dashboardReturnDragActiveRef.current = true;
+        setZenHomeVisible(true);
+        zenHomeTranslateY.stopAnimation();
+        zenHomeTranslateY.setValue(-screenHeight);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (!dashboardReturnDragActiveRef.current) {
+          return;
+        }
+
+        zenHomeTranslateY.setValue(Math.max(-screenHeight, Math.min(0, -screenHeight + Math.max(0, gestureState.dy))));
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const shouldReturnZen = gestureState.dy > screenHeight * ZEN_TRANSITION_SETTLE_RATIO || gestureState.vy > ZEN_TRANSITION_SETTLE_VELOCITY;
+        dashboardReturnDragActiveRef.current = false;
+        settleZenTransition(shouldReturnZen);
+      },
+      onPanResponderTerminate: () => {
+        dashboardReturnDragActiveRef.current = false;
+        settleZenTransition(false);
+      },
+      onPanResponderTerminationRequest: () => false,
+      onShouldBlockNativeResponder: () => true
+    }));
+  }, [screenHeight, settleZenTransition, zenHomeTranslateY, zenHomeVisible]);
 
   const refreshDashboard = useCallback(async () => {
     setManualRefreshing(true);
@@ -298,28 +382,29 @@ export default function DashboardScreen() {
     });
   }
 
-  function dismissZenHome() {
-    setZenHomeVisible(false);
-  }
-
   function openZenAddEntry() {
     router.push('/expenses/new');
   }
 
   return (
     <>
-      <ScrollView
-        contentInsetAdjustmentBehavior="never"
-        refreshControl={
-          <RefreshControl
-            refreshing={manualRefreshing}
-            onRefresh={refreshDashboard}
-          />
-        }
-        style={styles.page}
-        contentContainerStyle={[styles.content, localStyles.content, { paddingTop: Math.max(0, insets.top) }]}
-      >
-        <View style={localStyles.dashboardContent}>
+      <View style={localStyles.dashboardShell} {...(dashboardPanResponder?.panHandlers || {})}>
+        <ScrollView
+          contentInsetAdjustmentBehavior="never"
+          onScroll={(event) => {
+            dashboardScrollYRef.current = event.nativeEvent.contentOffset.y;
+          }}
+          refreshControl={
+            <RefreshControl
+              refreshing={manualRefreshing}
+              onRefresh={refreshDashboard}
+            />
+          }
+          scrollEventThrottle={16}
+          style={styles.page}
+          contentContainerStyle={[styles.content, localStyles.content, { paddingTop: Math.max(0, insets.top) }]}
+        >
+          <View style={localStyles.dashboardContent}>
           {error ? <Text selectable style={styles.error}>{error}</Text> : null}
 
           <DashboardMonthTitle
@@ -424,8 +509,9 @@ export default function DashboardScreen() {
             totalYen={stats.totalYen}
           />
 
-        </View>
-      </ScrollView>
+          </View>
+        </ScrollView>
+      </View>
 
       <CategoryDetailSheet
         detail={selectedCategoryDetail}
@@ -440,13 +526,15 @@ export default function DashboardScreen() {
         onToday={jumpToday}
         visible={jumpSheetOpen}
       />
-      {zenHomeVisible ? (
-        <ZenHome
-          data={zenHomeData}
-          onDismiss={dismissZenHome}
-          onOpenAddEntry={openZenAddEntry}
-        />
-      ) : null}
+      <ZenHome
+        data={zenHomeData}
+        interactionEnabled={zenHomeVisible}
+        onDragTransition={dragZenTransition}
+        onOpenAddEntry={openZenAddEntry}
+        onSettleTransition={settleZenTransition}
+        screenHeight={screenHeight}
+        translateY={zenHomeTranslateY}
+      />
     </>
   );
 }
@@ -1801,6 +1889,9 @@ const localStyles = StyleSheet.create({
   },
   dashboardContent: {
     gap: 12
+  },
+  dashboardShell: {
+    flex: 1
   },
   dayBreakdown: {
     backgroundColor: 'rgba(42,39,34,0.04)',

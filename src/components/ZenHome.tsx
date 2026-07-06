@@ -25,14 +25,20 @@ export type ZenHomeData = {
 
 type Props = {
   data: ZenHomeData;
-  onDismiss: () => void;
+  interactionEnabled: boolean;
+  screenHeight: number;
+  translateY: RNAnimated.Value;
+  onDragTransition: (translateY: number) => void;
   onOpenAddEntry: () => void;
+  onSettleTransition: (visible: boolean) => void;
 };
 
 const ZEN_COACH_STORAGE_KEY = 'my-ledger:zen-home-coach-seen:v1';
 const HOLD_DURATION_MS = 430;
 const HOLD_CANCEL_RADIUS = 30;
 const SWIPE_DISMISS_DISTANCE = 48;
+const SWIPE_SETTLE_RATIO = 0.22;
+const SWIPE_SETTLE_VELOCITY = 0.6;
 const USE_NATIVE_ANIMATION_DRIVER = Platform.OS !== 'web';
 
 const zenColors = {
@@ -88,10 +94,19 @@ function resolveZenBudget(data: ZenHomeData) {
   };
 }
 
-export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
+export function ZenHome({
+  data,
+  interactionEnabled,
+  screenHeight,
+  translateY,
+  onDragTransition,
+  onOpenAddEntry,
+  onSettleTransition
+}: Props) {
   const insets = useSafeAreaInsets();
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pressOriginRef = useRef({ x: 0, y: 0 });
+  const draggingRevealRef = useRef(false);
   const triggeredLongPressRef = useRef(false);
   const [coachHidden, setCoachHidden] = useState(true);
   const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
@@ -183,6 +198,7 @@ export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
 
   const cancelPress = useCallback(() => {
     clearPressTimer();
+    draggingRevealRef.current = false;
     triggeredLongPressRef.current = false;
     hideRipple();
   }, [clearPressTimer, hideRipple]);
@@ -244,6 +260,7 @@ export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
         const x = event.nativeEvent.locationX;
         const y = event.nativeEvent.locationY;
 
+        draggingRevealRef.current = false;
         triggeredLongPressRef.current = false;
         pressOriginRef.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
         startRipple(x, y);
@@ -251,15 +268,23 @@ export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
         pressTimerRef.current = setTimeout(openAddEntry, HOLD_DURATION_MS);
       },
       onPanResponderMove: (event) => {
-        if (!pressTimerRef.current) {
+        const dx = event.nativeEvent.pageX - pressOriginRef.current.x;
+        const dy = event.nativeEvent.pageY - pressOriginRef.current.y;
+        const verticalDrag = Math.abs(dy) > Math.abs(dx);
+
+        if (draggingRevealRef.current) {
+          onDragTransition(Math.max(-screenHeight, Math.min(0, dy)));
           return;
         }
 
-        const dx = event.nativeEvent.pageX - pressOriginRef.current.x;
-        const dy = event.nativeEvent.pageY - pressOriginRef.current.y;
         if (Math.hypot(dx, dy) > HOLD_CANCEL_RADIUS) {
           clearPressTimer();
           hideRipple();
+        }
+
+        if (dy < -8 && verticalDrag) {
+          draggingRevealRef.current = true;
+          onDragTransition(Math.max(-screenHeight, dy));
         }
       },
       onPanResponderRelease: (_, gestureState) => {
@@ -268,11 +293,20 @@ export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
           return;
         }
 
-        const swipeUp = gestureState.dy < -SWIPE_DISMISS_DISTANCE && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+        const draggingReveal = draggingRevealRef.current;
+        draggingRevealRef.current = false;
         clearPressTimer();
         hideRipple();
+
+        if (draggingReveal) {
+          const shouldRevealDashboard = Math.abs(gestureState.dy) > screenHeight * SWIPE_SETTLE_RATIO || gestureState.vy < -SWIPE_SETTLE_VELOCITY;
+          onSettleTransition(!shouldRevealDashboard);
+          return;
+        }
+
+        const swipeUp = gestureState.dy < -SWIPE_DISMISS_DISTANCE && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
         if (swipeUp) {
-          onDismiss();
+          onSettleTransition(false);
         }
       },
       onPanResponderTerminate: cancelPress,
@@ -281,7 +315,7 @@ export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
       onStartShouldSetPanResponder: () => true,
       onStartShouldSetPanResponderCapture: () => true
     }));
-  }, [cancelPress, clearPressTimer, hideRipple, onDismiss, openAddEntry, startRipple]);
+  }, [cancelPress, clearPressTimer, hideRipple, onDragTransition, onSettleTransition, openAddEntry, screenHeight, startRipple]);
 
   const cursorStyle = { opacity: cursorOpacity };
   const coachStyle = { opacity: coachOpacity };
@@ -299,9 +333,15 @@ export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
   };
 
   return (
-    <View
+    <RNAnimated.View
       accessibilityLabel="Zen home"
-      style={localStyles.root}
+      style={[
+        localStyles.root,
+        {
+          pointerEvents: interactionEnabled ? 'auto' : 'none',
+          transform: [{ translateY }]
+        }
+      ]}
       {...(panResponder?.panHandlers || {})}
     >
       <View style={[localStyles.monthHeader, { paddingTop: Math.max(50, insets.top) + 30 }]}>
@@ -383,7 +423,7 @@ export function ZenHome({ data, onDismiss, onOpenAddEntry }: Props) {
           <Text style={localStyles.coachText}>HOLD ANYWHERE TO ADD</Text>
         </RNAnimated.View>
       ) : null}
-    </View>
+    </RNAnimated.View>
   );
 }
 
