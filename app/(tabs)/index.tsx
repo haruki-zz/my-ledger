@@ -1260,28 +1260,21 @@ function buildBudgetSummary(input: {
 }): BudgetSummary {
   const budgetedCategories = input.stats.categories.filter((category) => category.hasBudget && (category.budgetYen || 0) > 0);
   const budgetYen = budgetedCategories.reduce((sum, category) => sum + (category.budgetYen || 0), 0);
-  const spentYen = budgetedCategories.reduce((sum, category) => sum + category.amountYen, 0);
+  const spentYen = input.stats.totalYen;
   const usedRatio = budgetYen > 0 ? spentYen / budgetYen : 0;
   const remainingYen = budgetYen - spentYen;
   const monthDays = Number(monthEndDateString(input.monthKey).slice(8, 10));
-  const selectedMonthIsCurrent = input.monthKey === monthKeyFromDateString(input.todayString);
-  const elapsedDays = selectedMonthIsCurrent
-    ? Math.min(Number(input.todayString.slice(8, 10)), monthDays)
-    : monthDays;
-  const remainingDays = selectedMonthIsCurrent
-    ? Math.max(0, monthDays - elapsedDays)
-    : 0;
-  const dailyAllowanceYen = remainingYen > 0 && remainingDays > 0
-    ? Math.round(remainingYen / remainingDays)
+  const daysRemaining = daysRemainingIncludingToday(input.monthKey, input.todayString);
+  const elapsedDays = Math.max(0, monthDays - daysRemaining);
+  const dailyAllowanceYen = budgetYen > 0
+    ? remainingYen > 0 && daysRemaining > 0
+      ? Math.floor(remainingYen / daysRemaining)
+      : 0
     : null;
   const color = budgetColorForRatio(usedRatio);
   const line = budgetYen <= 0
     ? 'Set category budgets to unlock pace'
-    : remainingYen < 0
-      ? `over budget by ${formatYen(Math.abs(remainingYen))}`
-      : dailyAllowanceYen !== null
-        ? `${formatYen(dailyAllowanceYen)}/day left`
-        : `${formatYen(remainingYen)} unspent`;
+    : `${formatYen(dailyAllowanceYen || 0)} left / day`;
 
   return {
     budgetYen,
@@ -1646,23 +1639,30 @@ function buildZenHomeData(input: {
   spentTodayYen: number;
   todayString: string;
 }): ZenHomeData {
-  const monthDays = Number(monthEndDateString(input.monthKey).slice(8, 10));
-  const todayMonthKey = monthKeyFromDateString(input.todayString);
-  const monthPosition = compareMonthKeys(input.monthKey, todayMonthKey);
-  const todayDay = Number(input.todayString.slice(8, 10));
-  const daysRemaining = monthPosition < 0
-    ? 0
-    : monthPosition > 0
-      ? monthDays
-      : Math.max(1, monthDays - Math.min(todayDay, monthDays) + 1);
-
   return {
     budgetYen: input.budgetYen,
-    daysRemaining,
+    daysRemaining: daysRemainingIncludingToday(input.monthKey, input.todayString),
     monthLabel: formatDashboardMonthTitle(input.monthKey).toUpperCase(),
     spentMonthYen: input.spentMonthYen,
     spentTodayYen: input.spentTodayYen
   };
+}
+
+function daysRemainingIncludingToday(monthKey: string, todayString: string) {
+  const monthDays = Number(monthEndDateString(monthKey).slice(8, 10));
+  const todayMonthKey = monthKeyFromDateString(todayString);
+  const monthPosition = compareMonthKeys(monthKey, todayMonthKey);
+  const todayDay = Number(todayString.slice(8, 10));
+
+  if (monthPosition < 0) {
+    return 0;
+  }
+
+  if (monthPosition > 0) {
+    return monthDays;
+  }
+
+  return Math.max(1, monthDays - Math.min(todayDay, monthDays) + 1);
 }
 
 const localStyles = StyleSheet.create({

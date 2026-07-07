@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { SlideToAction } from '@/src/components/SlideToAction';
 import { fontFamilies } from '@/src/components/styles';
 
 export type ZenHomeData = {
@@ -34,10 +33,11 @@ type Props = {
 const ZEN_COACH_STORAGE_KEY = 'my-ledger:zen-home-coach-seen:v1';
 const HOLD_DURATION_MS = 430;
 const HOLD_CANCEL_RADIUS = 30;
-const DASHBOARD_SLIDE_WIDTH = 260;
-const DASHBOARD_SLIDE_HEIGHT = 52;
-const DASHBOARD_SLIDE_KNOB_SIZE = 44;
-const DASHBOARD_SLIDE_PADDING = 4;
+const DASHBOARD_SWEEP_TEXT = 'sweep to dashboard';
+const DASHBOARD_SWEEP_COMMIT_DISTANCE = 86;
+const DASHBOARD_SWEEP_COMMIT_VELOCITY = 0.52;
+const DASHBOARD_SWEEP_DIRECTION_RATIO = 1.5;
+const DASHBOARD_SWEEP_CHARS = Array.from(DASHBOARD_SWEEP_TEXT);
 const USE_NATIVE_ANIMATION_DRIVER = Platform.OS !== 'web';
 
 const zenColors = {
@@ -368,21 +368,7 @@ export function ZenHome({
       </View>
 
       <View style={[localStyles.footer, { height: 118 + insets.bottom, paddingBottom: insets.bottom }]}>
-        <SlideToAction
-          accessibilityLabel="Slide to open dashboard"
-          knobLabel="›"
-          knobSize={DASHBOARD_SLIDE_KNOB_SIZE}
-          knobStyle={localStyles.dashboardSlideKnob}
-          knobTextStyle={localStyles.dashboardSlideKnobText}
-          label="DASHBOARD"
-          onComplete={onOpenDashboard}
-          resetKey={interactionEnabled}
-          textStyle={localStyles.dashboardSlideText}
-          trackHeight={DASHBOARD_SLIDE_HEIGHT}
-          trackPadding={DASHBOARD_SLIDE_PADDING}
-          trackStyle={localStyles.dashboardSlideTrack}
-          trackWidth={DASHBOARD_SLIDE_WIDTH}
-        />
+        <SweepToDashboard onComplete={onOpenDashboard} />
       </View>
 
       {ripple.visible ? (
@@ -409,12 +395,108 @@ export function ZenHome({
   );
 }
 
+function SweepToDashboard({ onComplete }: { onComplete: () => void }) {
+  const committedRef = useRef(false);
+  const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
+  const [shimmerProgress] = useState(() => new RNAnimated.Value(-1));
+
+  useEffect(() => {
+    setPanResponder(PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gestureState) => (
+        gestureState.dx > 8 &&
+        gestureState.dx > Math.abs(gestureState.dy) * DASHBOARD_SWEEP_DIRECTION_RATIO
+      ),
+      onPanResponderGrant: () => {
+        committedRef.current = false;
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const horizontalEnough = gestureState.dx >= DASHBOARD_SWEEP_COMMIT_DISTANCE;
+        const quickSweep = gestureState.dx > 28 && gestureState.vx >= DASHBOARD_SWEEP_COMMIT_VELOCITY;
+
+        if (!horizontalEnough && !quickSweep) {
+          committedRef.current = false;
+          return;
+        }
+
+        if (!committedRef.current) {
+          committedRef.current = true;
+          onComplete();
+        }
+      },
+      onPanResponderTerminate: () => {
+        committedRef.current = false;
+      },
+      onPanResponderTerminationRequest: () => true
+    }));
+  }, [onComplete]);
+
+  useEffect(() => {
+    shimmerProgress.setValue(-1);
+    const shimmerLoop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(shimmerProgress, {
+          duration: DASHBOARD_SWEEP_CHARS.length * 120,
+          easing: Easing.linear,
+          toValue: DASHBOARD_SWEEP_CHARS.length,
+          useNativeDriver: USE_NATIVE_ANIMATION_DRIVER
+        }),
+        RNAnimated.timing(shimmerProgress, {
+          duration: 780,
+          easing: Easing.linear,
+          toValue: DASHBOARD_SWEEP_CHARS.length + 2,
+          useNativeDriver: USE_NATIVE_ANIMATION_DRIVER
+        })
+      ])
+    );
+
+    shimmerLoop.start();
+
+    return () => {
+      shimmerLoop.stop();
+    };
+  }, [shimmerProgress]);
+
+  return (
+    <View
+      accessibilityHint="Sweep right over the text to open the dashboard"
+      accessibilityLabel="sweep to dashboard"
+      accessibilityRole="button"
+      onAccessibilityTap={onComplete}
+      style={localStyles.dashboardSweepHitArea}
+      {...(panResponder?.panHandlers || {})}
+    >
+      <View style={localStyles.dashboardSweepTextRow}>
+        {DASHBOARD_SWEEP_CHARS.map((char, index) => {
+          const opacity = shimmerProgress.interpolate({
+            extrapolate: 'clamp',
+            inputRange: [index - 1, index, index + 1],
+            outputRange: [0.26, 0.96, 0.26]
+          });
+
+          return (
+            <RNAnimated.Text
+              key={`${char}-${index}`}
+              style={[
+                localStyles.dashboardSweepChar,
+                { opacity }
+              ]}
+            >
+              {char === ' ' ? '\u00A0' : char}
+            </RNAnimated.Text>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 const localStyles = StyleSheet.create({
   amountRow: {
     alignItems: 'center',
     flexDirection: 'row',
     marginTop: 16,
-    maxWidth: '92%'
+    maxWidth: '92%',
+    minHeight: 60
   },
   amountText: {
     color: zenColors.ink,
@@ -423,7 +505,7 @@ const localStyles = StyleSheet.create({
     fontWeight: '500',
     includeFontPadding: false,
     letterSpacing: 0,
-    lineHeight: 52,
+    lineHeight: 60,
     minWidth: 0,
     textAlignVertical: 'center'
   },
@@ -494,31 +576,27 @@ const localStyles = StyleSheet.create({
     backgroundColor: zenColors.ochre,
     height: 38,
     marginLeft: 13,
+    transform: [{ translateY: -3 }],
     width: 12
   },
-  dashboardSlideKnob: {
-    backgroundColor: 'rgba(42,39,34,0.12)'
-  },
-  dashboardSlideKnobText: {
-    color: zenColors.inkSoft,
-    fontFamily: fontFamilies.monoSemiBold,
-    fontSize: 18,
-    fontWeight: '600',
-    lineHeight: 22
-  },
-  dashboardSlideText: {
-    color: zenColors.inkGhost,
+  dashboardSweepChar: {
+    color: zenColors.inkFaint,
     fontFamily: fontFamilies.mono,
-    fontSize: 9,
+    fontSize: 12,
     letterSpacing: 2,
-    lineHeight: 12,
-    paddingLeft: DASHBOARD_SLIDE_KNOB_SIZE + 12,
-    textAlign: 'center'
+    lineHeight: 13
   },
-  dashboardSlideTrack: {
-    backgroundColor: 'rgba(42,39,34,0.04)',
-    borderColor: 'rgba(42,39,34,0.10)',
-    borderWidth: 1
+  dashboardSweepHitArea: {
+    alignItems: 'center',
+    height: 52,
+    justifyContent: 'center',
+    minWidth: 190,
+    paddingHorizontal: 20
+  },
+  dashboardSweepTextRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center'
   },
   footer: {
     alignItems: 'center',
