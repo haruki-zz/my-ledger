@@ -15,11 +15,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fontFamilies } from '@/src/components/styles';
 
 export type ZenHomeData = {
+  budgetedMonthYen: number;
+  budgetedTodayYen: number;
+  budgetRemainingYen: number;
+  budgetUsedPercent: number;
   budgetYen: number;
   daysRemaining: number;
+  hasBudget: boolean;
+  leftPerDayYen: number;
   monthLabel: string;
-  spentMonthYen: number;
-  spentTodayYen: number;
+  unbudgetedVariableYen: number;
 };
 
 type Props = {
@@ -62,19 +67,12 @@ function formatZenYen(value: number) {
 }
 
 function resolveZenBudget(data: ZenHomeData) {
-  const spentMonth = Math.max(0, Math.round(data.spentMonthYen));
-  const budget = Math.max(0, Math.round(data.budgetYen));
+  const spentMonth = Math.max(0, Math.round(data.budgetedMonthYen));
   const daysRemaining = Math.max(0, Math.round(data.daysRemaining));
-  const budgetRemaining = budget - spentMonth;
+  const budgetRemaining = Math.round(data.budgetRemainingYen);
   const overBudget = budgetRemaining < 0;
-  const leftPerDay = budgetRemaining > 0 && daysRemaining > 0
-    ? Math.floor(budgetRemaining / daysRemaining)
-    : 0;
-  const budgetPct = budget > 0
-    ? Math.round((spentMonth / budget) * 100)
-    : spentMonth > 0
-      ? 100
-      : 0;
+  const leftPerDay = Math.max(0, Math.round(data.leftPerDayYen));
+  const budgetPct = data.hasBudget ? Math.round(data.budgetUsedPercent) : 0;
   const captionAmount = overBudget
     ? `${formatZenYen(Math.abs(budgetRemaining))} over`
     : `${formatZenYen(budgetRemaining)} left`;
@@ -320,10 +318,10 @@ export function ZenHome({
         </View>
 
         <View style={localStyles.heroBlock}>
-          <Text style={localStyles.heroLabel}>SPENT THIS MONTH</Text>
+          <Text style={localStyles.heroLabel}>BUDGETED THIS MONTH</Text>
           <View style={localStyles.amountRow}>
             <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.amountText}>
-              {formatZenYen(data.spentMonthYen)}
+              {formatZenYen(data.budgetedMonthYen)}
             </Text>
             <RNAnimated.View style={[localStyles.cursor, cursorStyle]} />
           </View>
@@ -331,7 +329,7 @@ export function ZenHome({
           <View style={localStyles.paceGrid}>
             <View style={localStyles.paceCell}>
               <Text style={localStyles.paceLabel}>TODAY</Text>
-              <Text style={localStyles.paceValue}>{formatZenYen(data.spentTodayYen)}</Text>
+              <Text style={localStyles.paceValue}>{formatZenYen(data.budgetedTodayYen)}</Text>
             </View>
             <View style={localStyles.paceDivider} />
             <View style={localStyles.paceCell}>

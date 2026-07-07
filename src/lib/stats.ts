@@ -17,6 +17,7 @@ export type DashboardPeriod = 'today' | 'week' | 'month';
 export type CategoryStat = {
   category: string;
   amountYen: number;
+  budgetedSpendYen?: number;
   budgetStatus?: BudgetStatus;
   budgetUsedPercent?: number;
   budgetYen?: number;
@@ -26,6 +27,7 @@ export type CategoryStat = {
   hasBudget?: boolean;
   remainingBudgetYen?: number;
   sourceCategories?: string[];
+  unbudgetedSpendYen?: number;
 };
 
 export type BudgetStatus = 'under' | 'near' | 'over';
@@ -218,12 +220,34 @@ type DashboardStats = {
 };
 
 export type DashboardPeriodStats = DashboardStats & {
+  budgetedCategoryIds: string[];
+  budgetedVariableTotalYen: number;
   categoryDetails: CategoryDetailStat[];
   dailyUserSeries: DailyUserStat[];
   comparison: ComparisonStat;
   dateRange: DashboardDateRange;
+  fixedCategories: CategoryStat[];
+  fixedTotalYen: number;
   getCategoryDetail: (detailKey: string | null | undefined) => CategoryDetailStat | null;
   memberTotals: MemberPeriodStat[];
+  unbudgetedVariableTotalYen: number;
+  variableTotalYen: number;
+};
+
+export type DashboardBudgetSummary = {
+  budgetYen: number;
+  budgetedSpendYen: number;
+  dailyAllowanceYen: number | null;
+  daysRemaining: number;
+  fixedYen: number;
+  hasBudget: boolean;
+  monthDays: number;
+  paceRatio: number;
+  remainingYen: number;
+  unbudgetedVariableYen: number;
+  usedPercent: number;
+  usedRatio: number;
+  variableYen: number;
 };
 
 const DASHBOARD_CATEGORY_LIMIT = 6;
@@ -421,6 +445,64 @@ export function resolveDashboardPeriodNavigation(input: {
   };
 }
 
+export function daysRemainingIncludingToday(monthKey: string, todayString: string) {
+  const monthDays = daysInMonth(monthKey);
+  const todayMonthKey = monthKeyFromDateString(todayString);
+  const monthPosition = compareMonthKeys(monthKey, todayMonthKey);
+  if (monthPosition < 0) {
+    return 0;
+  }
+  if (monthPosition > 0) {
+    return monthDays;
+  }
+
+  const todayDay = Number(todayString.slice(8, 10));
+  if (!Number.isFinite(todayDay) || todayDay <= 0) {
+    return monthDays;
+  }
+  return Math.max(1, monthDays - Math.min(todayDay, monthDays) + 1);
+}
+
+export function buildDashboardBudgetSummary(input: {
+  monthKey: string;
+  stats: Pick<
+    DashboardPeriodStats,
+    'budgetedVariableTotalYen' | 'categories' | 'fixedTotalYen' | 'unbudgetedVariableTotalYen' | 'variableTotalYen'
+  >;
+  todayString: string;
+}): DashboardBudgetSummary {
+  const budgetYen = input.stats.categories.reduce((sum, category) => (
+    category.hasBudget ? sum + (category.budgetYen || 0) : sum
+  ), 0);
+  const budgetedSpendYen = input.stats.budgetedVariableTotalYen;
+  const remainingYen = budgetYen - budgetedSpendYen;
+  const monthDays = daysInMonth(input.monthKey);
+  const daysRemaining = daysRemainingIncludingToday(input.monthKey, input.todayString);
+  const dailyAllowanceYen = budgetYen > 0
+    ? remainingYen > 0 && daysRemaining > 0
+      ? Math.floor(remainingYen / daysRemaining)
+      : 0
+    : null;
+  const usedRatio = budgetYen > 0 ? budgetedSpendYen / budgetYen : 0;
+  const elapsedDays = Math.max(0, monthDays - daysRemaining);
+
+  return {
+    budgetYen,
+    budgetedSpendYen,
+    dailyAllowanceYen,
+    daysRemaining,
+    fixedYen: input.stats.fixedTotalYen,
+    hasBudget: budgetYen > 0,
+    monthDays,
+    paceRatio: monthDays > 0 ? elapsedDays / monthDays : 0,
+    remainingYen,
+    unbudgetedVariableYen: input.stats.unbudgetedVariableTotalYen,
+    usedPercent: usedRatio * 100,
+    usedRatio,
+    variableYen: input.stats.variableTotalYen
+  };
+}
+
 export function buildDashboardPeriodStats(input: {
   expenses: Expense[];
   monthKey: string;
@@ -451,44 +533,62 @@ export function buildDashboardPeriodStats(input: {
       color: userColorById.get(userId) || DEFAULT_USER_COLOR
     };
   });
-  const dailyUserSeries = buildDashboardDailyUserSeries({
-    expenses: periodExpenses,
-    startDateString: dateRange.startDateString,
-    endDateString: dateRange.endDateString,
-    userIds
-  });
-
   const viewerUserId = input.viewerUserId ?? null;
   const viewerPeriodExpenses = scopeExpensesToViewer(periodExpenses, viewerUserId);
   const viewerComparisonExpenses = scopeExpensesToViewer(comparisonExpenses, viewerUserId);
   const totalYen = viewerPeriodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
-  const previousTotalYen = viewerComparisonExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
+  const fixedPeriodExpenses = viewerPeriodExpenses.filter(isFixedExpense);
+  const variablePeriodExpenses = viewerPeriodExpenses.filter(isVariableExpense);
+  const variableComparisonExpenses = viewerComparisonExpenses.filter(isVariableExpense);
+  const variableDailyUserExpenses = periodExpenses.filter(isVariableExpense);
+  const fixedTotalYen = fixedPeriodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
+  const variableTotalYen = variablePeriodExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
+  const previousVariableTotalYen = variableComparisonExpenses.reduce((sum, expense) => sum + expense.amount_yen, 0);
+  const budgetsByCategory = buildBudgetMap(input.budgets);
+  const budgetedCategoryIds = [...budgetsByCategory.keys()];
+  const budgetedVariableTotalYen = totalForBudgetedCategories(variablePeriodExpenses, budgetsByCategory);
+  const unbudgetedVariableTotalYen = Math.max(0, variableTotalYen - budgetedVariableTotalYen);
   const categories = buildDashboardCategoryStats({
-    budgets: input.budgets,
-    expenses: viewerPeriodExpenses,
-    totalYen
+    budgetsByCategory,
+    expenses: variablePeriodExpenses,
+    totalYen: variableTotalYen
+  });
+  const fixedCategories = buildDashboardCategoryStats({
+    expenses: fixedPeriodExpenses,
+    totalYen: fixedTotalYen
   });
   const categoryDetailInput = {
     categories,
-    comparisonExpenses: viewerComparisonExpenses,
+    comparisonExpenses: variableComparisonExpenses,
     currentUserId: input.currentUserId,
     dateRange,
     otherUserId: input.otherUserId,
-    periodExpenses: viewerPeriodExpenses,
+    periodExpenses: variablePeriodExpenses,
     today: input.today,
-    totalYen,
+    totalYen: variableTotalYen,
     viewerUserId
   };
   const stats = {
     totalYen,
     count: viewerPeriodExpenses.length,
+    budgetedCategoryIds,
+    budgetedVariableTotalYen,
     categories,
-    dailySeries: buildDailySeries(dateRange.effectiveMonthKey, dateRange.endDateString, amountsByDate(viewerPeriodExpenses)),
-    dailyUserSeries,
-    comparison: buildComparisonStat(totalYen, previousTotalYen, dateRange.comparisonLabel),
+    dailySeries: buildDailySeries(dateRange.effectiveMonthKey, dateRange.endDateString, amountsByDate(variablePeriodExpenses)),
+    dailyUserSeries: buildDashboardDailyUserSeries({
+      expenses: variableDailyUserExpenses,
+      startDateString: dateRange.startDateString,
+      endDateString: dateRange.endDateString,
+      userIds
+    }),
+    comparison: buildComparisonStat(variableTotalYen, previousVariableTotalYen, dateRange.comparisonLabel),
     dateRange,
+    fixedCategories,
+    fixedTotalYen,
     getCategoryDetail: (detailKey: string | null | undefined) => buildDashboardCategoryDetail(categoryDetailInput, detailKey),
-    memberTotals
+    memberTotals,
+    unbudgetedVariableTotalYen,
+    variableTotalYen
   };
 
   return Object.defineProperty(stats, 'categoryDetails', {
@@ -513,6 +613,20 @@ function scopeExpensesToViewer(expenses: Expense[], viewerUserId: string | null)
     .filter((expense) => expense.amount_yen > 0);
 }
 
+export function isFixedExpense(expense: Pick<Expense, 'recurring_rule_id'>) {
+  return Boolean(expense.recurring_rule_id);
+}
+
+export function isVariableExpense(expense: Pick<Expense, 'recurring_rule_id'>) {
+  return !isFixedExpense(expense);
+}
+
+function totalForBudgetedCategories(expenses: Expense[], budgetsByCategory: Map<string, number>) {
+  return expenses.reduce((sum, expense) => (
+    budgetsByCategory.has(expenseCategoryId(expense)) ? sum + expense.amount_yen : sum
+  ), 0);
+}
+
 export function buildDashboardHeatDays(input: {
   expenses: Expense[];
   monthKey: string;
@@ -533,7 +647,7 @@ export function buildDashboardHeatDays(input: {
   const userIds = input.members.map((member) => member.user_id);
   const userColorById = buildUserColorMap(userIds, input.currentUserId);
   const viewerUserId = input.viewerUserId ?? null;
-  const viewerExpenses = scopeExpensesToViewer(input.expenses, viewerUserId);
+  const viewerExpenses = scopeExpensesToViewer(input.expenses, viewerUserId).filter(isVariableExpense);
   const categoryAmountsByDate = new Map<string, Map<string, number>>();
   const memberAmountsByDate = new Map<string, Map<string, number>>();
   const totalsByDate = new Map<string, number>();
@@ -803,7 +917,7 @@ export function buildMonthlyReceipts(input: {
 }
 
 function buildDashboardCategoryStats(input: {
-  budgets?: DashboardCategoryBudget[] | null;
+  budgetsByCategory?: Map<string, number>;
   expenses: Expense[];
   totalYen: number;
 }): CategoryStat[] {
@@ -813,7 +927,7 @@ function buildDashboardCategoryStats(input: {
     amountsByCategory.set(categoryId, (amountsByCategory.get(categoryId) || 0) + expense.amount_yen);
   }
 
-  const budgetsByCategory = buildBudgetMap(input.budgets);
+  const budgetsByCategory = input.budgetsByCategory || new Map<string, number>();
   for (const categoryId of budgetsByCategory.keys()) {
     if (!amountsByCategory.has(categoryId)) {
       amountsByCategory.set(categoryId, 0);
@@ -847,17 +961,25 @@ function buildDashboardCategoryStats(input: {
     const sourceCategories = shouldAggregateOther && index === DASHBOARD_CATEGORY_LIMIT - 1
       ? aggregateSources.map(([sourceCategory]) => sourceCategory)
       : [categoryId];
-    const budgetSummary = budgetSummaryForCategories(budgetsByCategory, sourceCategories, amountYen);
+    const budgetedSpendYen = sourceCategories.reduce((sum, sourceCategory) => (
+      budgetsByCategory.has(sourceCategory)
+        ? sum + (amountsByCategory.get(sourceCategory) || 0)
+        : sum
+    ), 0);
+    const unbudgetedSpendYen = Math.max(0, amountYen - budgetedSpendYen);
+    const budgetSummary = budgetSummaryForCategories(budgetsByCategory, sourceCategories, budgetedSpendYen);
     return {
       category: categoryLabel(categoryId),
       amountYen,
+      budgetedSpendYen,
       ...budgetSummary,
       percentage: input.totalYen > 0 ? (amountYen / input.totalYen) * 100 : 0,
       color: index === DASHBOARD_CATEGORY_LIMIT - 1 && shouldAggregateOther
         ? DASHBOARD_OTHER_CATEGORY_COLOR
         : categoryColor(categoryId),
       detailKey: detailKeyForSourceCategories(sourceCategories),
-      sourceCategories
+      sourceCategories,
+      unbudgetedSpendYen
     };
   });
 }

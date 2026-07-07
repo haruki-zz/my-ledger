@@ -42,10 +42,12 @@ import { motionDuration, motionEasings, useReduceMotion } from '@/src/lib/motion
 import {
   addMonths,
   amountForUser,
+  buildDashboardBudgetSummary,
   buildDashboardHeatDays,
-  compareMonthKeys,
   currentMonthKey,
   expenseCategoryId,
+  isFixedExpense,
+  isVariableExpense,
   monthEndDateString,
   monthKeyFromDateString,
   monthStartDateString,
@@ -71,15 +73,20 @@ const HEAT_COLORS = [
 
 type BudgetSummary = {
   budgetYen: number;
+  budgetedSpendYen: number;
   color: string;
   dailyAllowanceYen: number | null;
+  daysRemaining: number;
+  fixedYen: number;
   hasBudget: boolean;
   line: string;
+  metaLine: string | null;
   paceRatio: number;
   remainingYen: number;
-  spentYen: number;
+  unbudgetedVariableYen: number;
   usedPercent: number;
   usedRatio: number;
+  variableYen: number;
 };
 
 type RecentExpenseItem = {
@@ -104,6 +111,7 @@ type CategoryMixSegment = {
 
 type SpendDay = {
   amountYen: number;
+  budgetedAmountYen: number;
   categories: CategoryMixSegment[];
   date: string;
 };
@@ -183,12 +191,13 @@ export default function DashboardScreen() {
   ), [activeMonthKey, currentUserId, flipped, ledgerTodayString, members, settledExpenses]);
   const trailingDays = useMemo(() => (
     buildTrailingSpendDays({
+      budgetedCategoryIds: flipped ? [] : personalStats.budgetedCategoryIds,
       days: 7,
       endDateString: activityEndDateString,
       expenses: settledExpenses,
       viewerUserId: flipped ? null : currentUserId
     })
-  ), [activityEndDateString, currentUserId, flipped, settledExpenses]);
+  ), [activityEndDateString, currentUserId, flipped, personalStats.budgetedCategoryIds, settledExpenses]);
   const selectedCategoryDetail = useMemo(() => (
     selectedCategoryKey
       ? stats.getCategoryDetail(selectedCategoryKey)
@@ -215,13 +224,11 @@ export default function DashboardScreen() {
   const heroResize = motionCardResizeTransition(reduceMotion);
   const zenHomeData = useMemo(() => (
     buildZenHomeData({
-      budgetYen: budgetSummary.budgetYen,
+      budget: budgetSummary,
       monthKey: activeMonthKey,
-      spentMonthYen: personalStats.totalYen,
-      spentTodayYen: trailingDays.find((day) => day.date === ledgerTodayString)?.amountYen || 0,
-      todayString: ledgerTodayString
+      budgetedTodayYen: trailingDays.find((day) => day.date === ledgerTodayString)?.budgetedAmountYen || 0
     })
-  ), [activeMonthKey, budgetSummary.budgetYen, ledgerTodayString, personalStats.totalYen, trailingDays]);
+  ), [activeMonthKey, budgetSummary, ledgerTodayString, trailingDays]);
 
   const closeCategoryDetail = useCallback(() => {
     setSelectedCategoryKey(null);
@@ -397,7 +404,6 @@ export default function DashboardScreen() {
                   frontFace={(
                     <HeroBudgetFace
                       budget={budgetSummary}
-                      stats={personalStats}
                     />
                   )}
                   flipped={flipped}
@@ -446,6 +452,11 @@ export default function DashboardScreen() {
             />
           </View>
 
+          <DashboardFixedExpensesCard
+            categories={stats.fixedCategories}
+            totalYen={stats.fixedTotalYen}
+          />
+
           <DashboardSevenDayActivity
             days={trailingDays}
             onOpenHistory={viewHistoryDate}
@@ -459,7 +470,7 @@ export default function DashboardScreen() {
             onCategoryPress={openCategoryDetail}
             selectedCategoryKey={selectedCategoryKey}
             showBudgets={!flipped}
-            totalYen={stats.totalYen}
+            totalYen={stats.variableTotalYen}
           />
 
           </View>
@@ -538,21 +549,19 @@ function DashboardMonthTitle({
 }
 
 function HeroBudgetFace({
-  budget,
-  stats
+  budget
 }: {
   budget: BudgetSummary;
-  stats: DashboardPeriodStats;
 }) {
   return (
     <View style={localStyles.heroBudgetFace}>
       <BudgetRing budget={budget} />
       <View style={localStyles.heroBudgetCopy}>
-        <Text style={localStyles.heroMetricLabel}>MONTH SPEND</Text>
+        <Text style={localStyles.heroMetricLabel}>BUDGETED SPEND</Text>
         <SlidingValueText
           formatValue={formatYen}
           textStyle={localStyles.heroAmount}
-          value={stats.totalYen}
+          value={budget.budgetedSpendYen}
           wrapperStyle={localStyles.heroAmountSlot}
         />
         <Text
@@ -562,6 +571,11 @@ function HeroBudgetFace({
         >
           {budget.line}
         </Text>
+        {budget.metaLine ? (
+          <Text adjustsFontSizeToFit numberOfLines={1} style={localStyles.heroBudgetMeta}>
+            {budget.metaLine}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -763,7 +777,7 @@ function DashboardNowCard({
   const weekAmount = trailingDays.reduce((sum, day) => sum + day.amountYen, 0);
   const weekMix = mergeCategoryMix(trailingDays.flatMap((day) => day.categories));
   const todayRatio = !flipped && budget.dailyAllowanceYen && budget.dailyAllowanceYen > 0
-    ? today?.amountYen ? today.amountYen / budget.dailyAllowanceYen : 0
+    ? today?.budgetedAmountYen ? today.budgetedAmountYen / budget.dailyAllowanceYen : 0
     : null;
   const ratioTone = todayRatio === null
     ? colors.subtle
@@ -803,7 +817,7 @@ function DashboardNowCard({
         <ActualMixCapsules segments={weekMix} />
       </View>
       <Text numberOfLines={2} style={[localStyles.nowCaption, { color: ratioTone }]}>
-        {todayRatio === null ? 'bars show actual category share' : `today is ${todayRatio.toFixed(1)}x daily allowance`}
+        {todayRatio === null ? 'bars show daily category share' : `budgeted today is ${todayRatio.toFixed(1)}x daily allowance`}
       </Text>
     </BentoCard>
   );
@@ -955,6 +969,48 @@ function DashboardBudgetWatchCard({
           <Text style={localStyles.quietStateText}>No category budgets</Text>
         </View>
       )}
+    </BentoCard>
+  );
+}
+
+function DashboardFixedExpensesCard({
+  categories,
+  totalYen
+}: {
+  categories: CategoryStat[];
+  totalYen: number;
+}) {
+  const visibleCategories = categories
+    .filter((category) => category.amountYen > 0)
+    .slice(0, 3);
+
+  if (totalYen <= 0) {
+    return null;
+  }
+
+  return (
+    <BentoCard style={localStyles.fixedSpendCard}>
+      <View style={localStyles.fixedSpendHeader}>
+        <CardHeader right="SEPARATE" title="FIXED" />
+        <SlidingValueText
+          fitToWidth
+          formatValue={formatYen}
+          textStyle={localStyles.fixedSpendTotal}
+          value={totalYen}
+          wrapperStyle={localStyles.fixedSpendTotalSlot}
+        />
+      </View>
+      <View style={localStyles.fixedSpendRows}>
+        {visibleCategories.map((category) => (
+          <View key={category.detailKey} style={localStyles.fixedSpendRow}>
+            <View style={[localStyles.fixedSpendDot, { backgroundColor: category.color }]} />
+            <Text ellipsizeMode="tail" numberOfLines={1} style={localStyles.fixedSpendName}>
+              {category.category}
+            </Text>
+            <Text style={localStyles.fixedSpendAmount}>{formatYen(category.amountYen)}</Text>
+          </View>
+        ))}
+      </View>
     </BentoCard>
   );
 }
@@ -1258,35 +1314,33 @@ function buildBudgetSummary(input: {
   stats: DashboardPeriodStats;
   todayString: string;
 }): BudgetSummary {
-  const budgetedCategories = input.stats.categories.filter((category) => category.hasBudget && (category.budgetYen || 0) > 0);
-  const budgetYen = budgetedCategories.reduce((sum, category) => sum + (category.budgetYen || 0), 0);
-  const spentYen = input.stats.totalYen;
-  const usedRatio = budgetYen > 0 ? spentYen / budgetYen : 0;
-  const remainingYen = budgetYen - spentYen;
-  const monthDays = Number(monthEndDateString(input.monthKey).slice(8, 10));
-  const daysRemaining = daysRemainingIncludingToday(input.monthKey, input.todayString);
-  const elapsedDays = Math.max(0, monthDays - daysRemaining);
-  const dailyAllowanceYen = budgetYen > 0
-    ? remainingYen > 0 && daysRemaining > 0
-      ? Math.floor(remainingYen / daysRemaining)
-      : 0
-    : null;
-  const color = budgetColorForRatio(usedRatio);
-  const line = budgetYen <= 0
+  const summary = buildDashboardBudgetSummary(input);
+  const color = budgetColorForRatio(summary.usedRatio);
+  const line = summary.budgetYen <= 0
     ? 'Set category budgets to unlock pace'
-    : `${formatYen(dailyAllowanceYen || 0)} left / day`;
+    : summary.remainingYen < 0
+      ? `${formatYen(Math.abs(summary.remainingYen))} over budget`
+      : `${formatYen(summary.dailyAllowanceYen || 0)} left / day`;
+  const metaLine = summary.unbudgetedVariableYen > 0
+    ? `${formatYen(summary.unbudgetedVariableYen)} unbudgeted daily spend`
+    : null;
 
   return {
-    budgetYen,
+    budgetYen: summary.budgetYen,
+    budgetedSpendYen: summary.budgetedSpendYen,
     color,
-    dailyAllowanceYen,
-    hasBudget: budgetYen > 0,
+    dailyAllowanceYen: summary.dailyAllowanceYen,
+    daysRemaining: summary.daysRemaining,
+    fixedYen: summary.fixedYen,
+    hasBudget: summary.hasBudget,
     line,
-    paceRatio: monthDays > 0 ? elapsedDays / monthDays : 0,
-    remainingYen,
-    spentYen,
-    usedPercent: usedRatio * 100,
-    usedRatio
+    metaLine,
+    paceRatio: summary.paceRatio,
+    remainingYen: summary.remainingYen,
+    unbudgetedVariableYen: summary.unbudgetedVariableYen,
+    usedPercent: summary.usedPercent,
+    usedRatio: summary.usedRatio,
+    variableYen: summary.variableYen
   };
 }
 
@@ -1297,6 +1351,10 @@ function buildRecentExpenses(input: {
 }): RecentExpenseItem[] {
   const items: RecentExpenseItemWithSort[] = [];
   for (const expense of input.expenses) {
+    if (isFixedExpense(expense)) {
+      continue;
+    }
+
     const amountYen = input.viewerUserId ? amountForUser(expense, input.viewerUserId) : expense.amount_yen;
     if (amountYen <= 0) {
       continue;
@@ -1321,6 +1379,7 @@ function buildRecentExpenses(input: {
 }
 
 function buildTrailingSpendDays(input: {
+  budgetedCategoryIds?: string[];
   days: number;
   endDateString: string;
   expenses: Expense[];
@@ -1330,15 +1389,22 @@ function buildTrailingSpendDays(input: {
     addDaysToDateString(input.endDateString, index - input.days + 1)
   ));
   const dateSet = new Set(dateStrings);
+  const budgetedCategoryIds = new Set(input.budgetedCategoryIds || []);
   const amountByDate = new Map<string, number>();
+  const budgetedAmountByDate = new Map<string, number>();
   const categoryAmountsByDate = new Map<string, Map<string, { amountYen: number; color: string; label: string }>>();
 
   for (const date of dateStrings) {
     amountByDate.set(date, 0);
+    budgetedAmountByDate.set(date, 0);
     categoryAmountsByDate.set(date, new Map());
   }
 
   for (const expense of input.expenses) {
+    if (!isVariableExpense(expense)) {
+      continue;
+    }
+
     if (!dateSet.has(expense.spent_on)) {
       continue;
     }
@@ -1361,6 +1427,9 @@ function buildTrailingSpendDays(input: {
     current.amountYen += amountYen;
     categoryMap.set(categoryId, current);
     amountByDate.set(expense.spent_on, (amountByDate.get(expense.spent_on) || 0) + amountYen);
+    if (budgetedCategoryIds.has(categoryId)) {
+      budgetedAmountByDate.set(expense.spent_on, (budgetedAmountByDate.get(expense.spent_on) || 0) + amountYen);
+    }
   }
 
   return dateStrings.map((date) => {
@@ -1372,6 +1441,7 @@ function buildTrailingSpendDays(input: {
       }));
     return {
       amountYen: amountByDate.get(date) || 0,
+      budgetedAmountYen: budgetedAmountByDate.get(date) || 0,
       categories,
       date
     };
@@ -1633,36 +1703,22 @@ function formatJumpMonthLabel(monthKey: string) {
 }
 
 function buildZenHomeData(input: {
-  budgetYen: number;
+  budget: BudgetSummary;
+  budgetedTodayYen: number;
   monthKey: string;
-  spentMonthYen: number;
-  spentTodayYen: number;
-  todayString: string;
 }): ZenHomeData {
   return {
-    budgetYen: input.budgetYen,
-    daysRemaining: daysRemainingIncludingToday(input.monthKey, input.todayString),
+    budgetedMonthYen: input.budget.budgetedSpendYen,
+    budgetedTodayYen: input.budgetedTodayYen,
+    budgetRemainingYen: input.budget.remainingYen,
+    budgetUsedPercent: input.budget.usedPercent,
+    budgetYen: input.budget.budgetYen,
+    daysRemaining: input.budget.daysRemaining,
+    hasBudget: input.budget.hasBudget,
+    leftPerDayYen: input.budget.dailyAllowanceYen || 0,
     monthLabel: formatDashboardMonthTitle(input.monthKey).toUpperCase(),
-    spentMonthYen: input.spentMonthYen,
-    spentTodayYen: input.spentTodayYen
+    unbudgetedVariableYen: input.budget.unbudgetedVariableYen
   };
-}
-
-function daysRemainingIncludingToday(monthKey: string, todayString: string) {
-  const monthDays = Number(monthEndDateString(monthKey).slice(8, 10));
-  const todayMonthKey = monthKeyFromDateString(todayString);
-  const monthPosition = compareMonthKeys(monthKey, todayMonthKey);
-  const todayDay = Number(todayString.slice(8, 10));
-
-  if (monthPosition < 0) {
-    return 0;
-  }
-
-  if (monthPosition > 0) {
-    return monthDays;
-  }
-
-  return Math.max(1, monthDays - Math.min(todayDay, monthDays) + 1);
 }
 
 const localStyles = StyleSheet.create({
@@ -1928,6 +1984,58 @@ const localStyles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 16
   },
+  fixedSpendAmount: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16
+  },
+  fixedSpendCard: {
+    borderRadius: 16,
+    gap: 10,
+    padding: 12
+  },
+  fixedSpendDot: {
+    borderRadius: 999,
+    height: 8,
+    width: 8
+  },
+  fixedSpendHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between'
+  },
+  fixedSpendName: {
+    color: colors.ink,
+    flex: 1,
+    fontFamily: fontFamilies.semiBold,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 16,
+    minWidth: 0
+  },
+  fixedSpendRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8
+  },
+  fixedSpendRows: {
+    gap: 7
+  },
+  fixedSpendTotal: {
+    color: colors.ink,
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 24
+  },
+  fixedSpendTotalSlot: {
+    alignItems: 'flex-end',
+    maxWidth: 132,
+    minWidth: 88
+  },
   heatCell: {
     aspectRatio: 1,
     borderRadius: 3.5,
@@ -1985,6 +2093,13 @@ const localStyles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     lineHeight: 16
+  },
+  heroBudgetMeta: {
+    color: 'rgba(255,253,247,0.58)',
+    fontFamily: fontFamilies.monoBold,
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 13
   },
   heroCard: {
     backgroundColor: colors.primary,

@@ -181,6 +181,9 @@ export default function BudgetsScreen() {
           <Text style={localStyles.summaryMeta}>
             across {liveCategoryCount} of {PRIMARY_CATEGORIES.length} categories
           </Text>
+          <Text style={localStyles.summaryNote}>
+            Budgets track controllable daily spending. Fixed expenses are shown separately and do not use budget.
+          </Text>
         </View>
 
         <View style={localStyles.list}>
@@ -382,6 +385,13 @@ const localStyles = StyleSheet.create({
     fontFamily: fontFamilies.regular,
     fontSize: 12,
     lineHeight: 17
+  },
+  summaryNote: {
+    color: 'rgba(255,253,247,0.72)',
+    fontFamily: fontFamilies.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4
   },
   yenPrefix: {
     color: colors.muted,

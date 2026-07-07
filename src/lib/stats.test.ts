@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildAmountComparison,
+  buildDashboardBudgetSummary,
   buildDashboardHeatDays,
   buildDashboardDailyUserSeriesForCategories,
   buildDashboardPeriodStats,
@@ -520,6 +521,82 @@ describe('buildDashboardPeriodStats', () => {
     });
   });
 
+  it('keeps fixed and unbudgeted variable spend out of budget health', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({
+          amountYen: 100000,
+          category: 'Housing',
+          ownership: 'personal',
+          paidBy: CURRENT_USER_ID,
+          recurringRuleId: 'rent-rule',
+          recurringMonth: '2026-06-01',
+          spentOn: '2026-06-01',
+          subcategory: 'Rent'
+        }),
+        expense({
+          amountYen: 12000,
+          category: 'Housing',
+          ownership: 'personal',
+          paidBy: CURRENT_USER_ID,
+          spentOn: '2026-06-02',
+          subcategory: 'Repairs'
+        }),
+        expense({
+          amountYen: 5000,
+          category: 'Food & Dining',
+          ownership: 'personal',
+          paidBy: CURRENT_USER_ID,
+          spentOn: '2026-06-02'
+        })
+      ],
+      budgets: [{ amountYen: 20000, categoryId: 'housing' }],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: null,
+      today: '2026-06-03',
+      viewerUserId: CURRENT_USER_ID
+    });
+    const housing = stats.categories.find((category) => category.detailKey === 'housing');
+    const housingDetail = stats.getCategoryDetail('housing');
+    const fixedHousing = stats.fixedCategories.find((category) => category.detailKey === 'housing');
+    const budgetSummary = buildDashboardBudgetSummary({
+      monthKey: '2026-06',
+      stats,
+      todayString: '2026-06-03'
+    });
+
+    expect(stats.totalYen).toBe(117000);
+    expect(stats.fixedTotalYen).toBe(100000);
+    expect(stats.variableTotalYen).toBe(17000);
+    expect(stats.budgetedVariableTotalYen).toBe(12000);
+    expect(stats.unbudgetedVariableTotalYen).toBe(5000);
+    expect(housing).toMatchObject({
+      amountYen: 12000,
+      budgetedSpendYen: 12000,
+      budgetStatus: 'under',
+      budgetUsedPercent: 60,
+      budgetYen: 20000,
+      remainingBudgetYen: 8000,
+      unbudgetedSpendYen: 0
+    });
+    expect(housingDetail).toMatchObject({
+      amountYen: 12000,
+      transactions: 1
+    });
+    expect(housingDetail?.daily.slice(0, 3).map((day) => day.amountYen)).toEqual([0, 12000, 0]);
+    expect(fixedHousing).toMatchObject({ amountYen: 100000 });
+    expect(budgetSummary).toMatchObject({
+      budgetYen: 20000,
+      budgetedSpendYen: 12000,
+      fixedYen: 100000,
+      remainingYen: 8000,
+      unbudgetedVariableYen: 5000,
+      variableYen: 17000
+    });
+  });
+
   it('keeps unset budgets distinct from zero-yen budgets', () => {
     const stats = buildDashboardPeriodStats({
       expenses: [
@@ -575,6 +652,37 @@ describe('buildDashboardPeriodStats', () => {
       hasBudget: true,
       remainingBudgetYen: 450,
       sourceCategories: ['travel', 'healthcare']
+    });
+  });
+
+  it('uses only budgeted source spend for an aggregated Other budget bar', () => {
+    const stats = buildDashboardPeriodStats({
+      expenses: [
+        expense({ amountYen: 700, category: 'Housing', spentOn: '2026-06-01' }),
+        expense({ amountYen: 600, category: 'Food & Dining', spentOn: '2026-06-01' }),
+        expense({ amountYen: 500, category: 'Transport', spentOn: '2026-06-01' }),
+        expense({ amountYen: 400, category: 'Utilities', spentOn: '2026-06-01' }),
+        expense({ amountYen: 300, category: 'Shopping', spentOn: '2026-06-01' }),
+        expense({ amountYen: 200, category: 'Travel', spentOn: '2026-06-02' }),
+        expense({ amountYen: 100, category: 'Healthcare', spentOn: '2026-06-03' })
+      ],
+      budgets: [{ amountYen: 500, categoryId: 'travel' }],
+      monthKey: '2026-06',
+      period: 'month',
+      currentUserId: CURRENT_USER_ID,
+      otherUserId: OTHER_USER_ID,
+      today: '2026-06-03'
+    });
+    const other = stats.categories.find((category) => category.category === 'Other');
+
+    expect(other).toMatchObject({
+      amountYen: 300,
+      budgetedSpendYen: 200,
+      budgetUsedPercent: 40,
+      budgetYen: 500,
+      remainingBudgetYen: 300,
+      sourceCategories: ['travel', 'healthcare'],
+      unbudgetedSpendYen: 100
     });
   });
 
@@ -817,6 +925,22 @@ describe('buildDashboardHeatDays', () => {
 
     expect(days[2]).toMatchObject({ amount: 650, count: 1, date: '2026-06-03' });
     expect(days[2].byMember).toEqual([]);
+  });
+
+  it('excludes fixed expenses from daily activity heat amounts', () => {
+    const days = buildHeatDays([
+      expense({ amountYen: 90000, category: 'Housing', recurringRuleId: 'rent-rule', recurringMonth: '2026-06-01', spentOn: '2026-06-01' }),
+      expense({ amountYen: 3000, category: 'Food & Dining', spentOn: '2026-06-01' })
+    ], { today: '2026-06-03' });
+
+    expect(days[0]).toMatchObject({
+      amount: 3000,
+      count: 1,
+      date: '2026-06-01'
+    });
+    expect(days[0].byCategory).toEqual([
+      expect.objectContaining({ amount: 3000, id: 'food_dining' })
+    ]);
   });
 });
 
